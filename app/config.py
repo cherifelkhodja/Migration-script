@@ -4,6 +4,17 @@ Configuration et constantes pour l'application Meta Ads Analyzer
 import os
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Base de données PostgreSQL
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres:postgres@localhost:5432/meta_ads"
+)
+
+# Seuils pour la sauvegarde en BDD
+MIN_ADS_SUIVI = 10     # Minimum ads pour table suivi_page
+MIN_ADS_LISTE = 20     # Minimum ads pour table liste_ads_recherche
+
+# ─────────────────────────────────────────────────────────────────────────────
 # API Meta
 BASE_URL = "https://graph.facebook.com/v24.0"
 ADS_ARCHIVE = f"{BASE_URL}/ads_archive"

@@ -26,7 +26,8 @@ import plotly.graph_objects as go
 from app.config import (
     AVAILABLE_COUNTRIES, AVAILABLE_LANGUAGES,
     MIN_ADS_INITIAL, MIN_ADS_FOR_EXPORT, MIN_ADS_FOR_ADS_CSV,
-    DEFAULT_COUNTRIES, DEFAULT_LANGUAGES
+    DEFAULT_COUNTRIES, DEFAULT_LANGUAGES,
+    DATABASE_URL, MIN_ADS_SUIVI, MIN_ADS_LISTE
 )
 from app.meta_api import MetaAdsClient, extract_website_from_ads, extract_currency_from_ads
 from app.shopify_detector import detect_cms_from_url
@@ -34,6 +35,10 @@ from app.web_analyzer import analyze_website_complete
 from app.utils import (
     load_blacklist, is_blacklisted, create_dataframe_pages,
     export_pages_csv, export_ads_csv
+)
+from app.database import (
+    DatabaseManager, save_pages_recherche, save_suivi_page,
+    save_ads_recherche, get_suivi_stats, search_pages, get_suivi_history
 )
 
 
@@ -51,6 +56,20 @@ def init_session_state():
         st.session_state.search_running = False
     if 'stats' not in st.session_state:
         st.session_state.stats = {}
+    if 'db' not in st.session_state:
+        st.session_state.db = None
+
+
+def get_database() -> DatabaseManager:
+    """Récupère ou initialise la connexion à la base de données"""
+    if st.session_state.db is None:
+        try:
+            st.session_state.db = DatabaseManager(DATABASE_URL)
+            st.session_state.db.create_tables()
+        except Exception as e:
+            st.warning(f"Base de données non disponible: {e}")
+            return None
+    return st.session_state.db
 
 
 def render_header():
@@ -451,6 +470,40 @@ def run_search(config: dict):
         'cms_counts': dict(final_cms_counts)
     }
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PHASE 7: SAUVEGARDE EN BASE DE DONNÉES
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.header("💾 Phase 7: Sauvegarde en base de données")
+
+    db = get_database()
+    if db:
+        try:
+            with st.spinner("Sauvegarde des pages..."):
+                pages_saved = save_pages_recherche(
+                    db, pages_final, web_results, countries, languages
+                )
+
+            with st.spinner("Sauvegarde du suivi..."):
+                suivi_saved = save_suivi_page(
+                    db, pages_final, web_results, MIN_ADS_SUIVI
+                )
+
+            with st.spinner("Sauvegarde des annonces..."):
+                ads_saved = save_ads_recherche(
+                    db, pages_final, dict(page_ads), countries, MIN_ADS_LISTE
+                )
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Pages sauvées", pages_saved)
+            col2.metric("Entrées suivi", suivi_saved)
+            col3.metric("Annonces sauvées", ads_saved)
+
+            st.success("Données sauvegardées en base !")
+        except Exception as e:
+            st.error(f"Erreur lors de la sauvegarde: {e}")
+    else:
+        st.warning("Base de données non disponible - données non sauvegardées")
+
     st.success("Analyse terminée !")
 
 
@@ -581,6 +634,162 @@ def render_results():
     )
 
 
+def render_history():
+    """Affiche l'historique des données en base"""
+    db = get_database()
+
+    if not db:
+        st.warning("Base de données non disponible")
+        return
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # STATISTIQUES GLOBALES
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.header("📈 Statistiques globales")
+
+    try:
+        stats = get_suivi_stats(db)
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Pages en base", stats.get("total_pages", 0))
+
+        # Répartition par état
+        etats = stats.get("etats", {})
+        actives = sum(v for k, v in etats.items() if k != "inactif")
+        col2.metric("Pages actives", actives)
+        col3.metric("Pages inactives", etats.get("inactif", 0))
+
+        # Graphiques
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if etats:
+                # Ordre des états
+                ordre_etats = ["XXL", "XL", "L", "M", "S", "XS", "inactif"]
+                etats_ordonne = {k: etats.get(k, 0) for k in ordre_etats if etats.get(k, 0) > 0}
+                if etats_ordonne:
+                    fig = px.bar(
+                        x=list(etats_ordonne.keys()),
+                        y=list(etats_ordonne.values()),
+                        title="Répartition par état",
+                        labels={"x": "État", "y": "Nombre de pages"}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            cms_stats = stats.get("cms", {})
+            if cms_stats:
+                fig = px.pie(
+                    values=list(cms_stats.values()),
+                    names=list(cms_stats.keys()),
+                    title="Répartition par CMS"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Erreur lors de la récupération des stats: {e}")
+
+    st.divider()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # RECHERCHE ET FILTRES
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.header("🔍 Recherche dans la base")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        search_term = st.text_input("Rechercher (nom ou site)", "")
+
+    with col2:
+        cms_filter = st.selectbox(
+            "Filtrer par CMS",
+            ["Tous", "Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Unknown"]
+        )
+
+    with col3:
+        etat_filter = st.selectbox(
+            "Filtrer par état",
+            ["Tous", "XXL", "XL", "L", "M", "S", "XS", "inactif"]
+        )
+
+    if st.button("🔍 Rechercher", width="stretch"):
+        try:
+            results = search_pages(
+                db,
+                cms=cms_filter if cms_filter != "Tous" else None,
+                etat=etat_filter if etat_filter != "Tous" else None,
+                search_term=search_term if search_term else None,
+                limit=200
+            )
+
+            if results:
+                df = pd.DataFrame(results)
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    height=400,
+                    column_config={
+                        "lien_site": st.column_config.LinkColumn("Site"),
+                        "lien_fb_ad_library": st.column_config.LinkColumn("FB Ads"),
+                    }
+                )
+                st.info(f"{len(results)} résultats trouvés")
+            else:
+                st.info("Aucun résultat trouvé")
+        except Exception as e:
+            st.error(f"Erreur lors de la recherche: {e}")
+
+    st.divider()
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # HISTORIQUE DE SUIVI
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.header("📊 Historique de suivi")
+
+    page_id_filter = st.text_input("Page ID (optionnel)", "")
+
+    if st.button("📊 Voir l'historique", width="stretch"):
+        try:
+            history = get_suivi_history(
+                db,
+                page_id=page_id_filter if page_id_filter else None,
+                limit=100
+            )
+
+            if history:
+                df = pd.DataFrame(history)
+
+                # Si on filtre par page_id, afficher un graphique d'évolution
+                if page_id_filter and len(history) > 1:
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=[h["date_scan"] for h in history],
+                        y=[h["nombre_ads_active"] for h in history],
+                        mode='lines+markers',
+                        name='Ads actives'
+                    ))
+                    fig.add_trace(go.Scatter(
+                        x=[h["date_scan"] for h in history],
+                        y=[h["nombre_produits"] for h in history],
+                        mode='lines+markers',
+                        name='Produits'
+                    ))
+                    fig.update_layout(
+                        title=f"Évolution de la page {page_id_filter}",
+                        xaxis_title="Date",
+                        yaxis_title="Nombre"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                st.dataframe(df, use_container_width=True, height=300)
+                st.info(f"{len(history)} entrées d'historique")
+            else:
+                st.info("Aucun historique trouvé")
+        except Exception as e:
+            st.error(f"Erreur lors de la récupération de l'historique: {e}")
+
+
 def main():
     """Point d'entrée principal du dashboard"""
     init_session_state()
@@ -588,7 +797,7 @@ def main():
     config = render_sidebar()
 
     # Tabs principales
-    tab1, tab2 = st.tabs(["🔍 Recherche", "📊 Résultats"])
+    tab1, tab2, tab3 = st.tabs(["🔍 Recherche", "📊 Résultats", "📚 Historique"])
 
     with tab1:
         st.header("Lancer une recherche")
@@ -602,6 +811,9 @@ def main():
 
     with tab2:
         render_results()
+
+    with tab3:
+        render_history()
 
 
 if __name__ == "__main__":
