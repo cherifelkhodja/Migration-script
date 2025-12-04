@@ -2,24 +2,29 @@
 Dashboard Streamlit pour Meta Ads Shopify Analyzer
 """
 import os
+import sys
 import time
 from collections import defaultdict, Counter
 from datetime import datetime
+from pathlib import Path
+
+# Ajouter le dossier parent au path pour les imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-from .config import (
+from app.config import (
     AVAILABLE_COUNTRIES, AVAILABLE_LANGUAGES,
     MIN_ADS_INITIAL, MIN_ADS_FOR_EXPORT, MIN_ADS_FOR_ADS_CSV,
     DEFAULT_COUNTRIES, DEFAULT_LANGUAGES
 )
-from .meta_api import MetaAdsClient, extract_website_from_ads, extract_currency_from_ads
-from .shopify_detector import check_shopify_http
-from .web_analyzer import analyze_website_complete
-from .utils import (
+from app.meta_api import MetaAdsClient, extract_website_from_ads, extract_currency_from_ads
+from app.shopify_detector import check_shopify_http
+from app.web_analyzer import analyze_website_complete
+from app.utils import (
     load_blacklist, is_blacklisted, create_dataframe_pages,
     export_pages_csv, export_ads_csv, export_suivi_csv
 )

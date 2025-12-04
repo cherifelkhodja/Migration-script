@@ -5,7 +5,10 @@ import time
 import requests
 from typing import Optional
 
-from .config import HEADERS, TIMEOUT_SHOPIFY_CHECK
+try:
+    from app.config import HEADERS, TIMEOUT_SHOPIFY_CHECK
+except ImportError:
+    from config import HEADERS, TIMEOUT_SHOPIFY_CHECK
 
 
 def check_shopify_http(url: str) -> bool:

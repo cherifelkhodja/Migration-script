@@ -7,11 +7,18 @@ from urllib.parse import urlparse, urljoin
 from typing import Dict, List, Tuple, Optional
 from bs4 import BeautifulSoup
 
-from .config import (
-    REQUEST_TIMEOUT, HEADERS, DEFAULT_PAYMENTS, TAXONOMY, KEYWORD_OVERRIDES,
-    THEME_ASSET_CANDIDATES, REQUEST_SNIPPET, INLINE_NAME_PATTERNS,
-    ASSET_HEADER_PATTERNS, TIMEOUT_WEB
-)
+try:
+    from app.config import (
+        REQUEST_TIMEOUT, HEADERS, DEFAULT_PAYMENTS, TAXONOMY, KEYWORD_OVERRIDES,
+        THEME_ASSET_CANDIDATES, REQUEST_SNIPPET, INLINE_NAME_PATTERNS,
+        ASSET_HEADER_PATTERNS, TIMEOUT_WEB
+    )
+except ImportError:
+    from config import (
+        REQUEST_TIMEOUT, HEADERS, DEFAULT_PAYMENTS, TAXONOMY, KEYWORD_OVERRIDES,
+        THEME_ASSET_CANDIDATES, REQUEST_SNIPPET, INLINE_NAME_PATTERNS,
+        ASSET_HEADER_PATTERNS, TIMEOUT_WEB
+    )
 
 
 def ensure_url(url: str) -> str:

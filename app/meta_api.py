@@ -8,10 +8,16 @@ import requests
 from collections import Counter
 from typing import List, Dict, Tuple, Optional, Callable
 
-from .config import (
-    ADS_ARCHIVE, TIMEOUT, LIMIT_SEARCH, LIMIT_COUNT, LIMIT_MIN,
-    FIELDS_ADS_COMPLETE
-)
+try:
+    from app.config import (
+        ADS_ARCHIVE, TIMEOUT, LIMIT_SEARCH, LIMIT_COUNT, LIMIT_MIN,
+        FIELDS_ADS_COMPLETE
+    )
+except ImportError:
+    from config import (
+        ADS_ARCHIVE, TIMEOUT, LIMIT_SEARCH, LIMIT_COUNT, LIMIT_MIN,
+        FIELDS_ADS_COMPLETE
+    )
 
 
 class MetaAdsClient:
