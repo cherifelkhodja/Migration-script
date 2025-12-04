@@ -460,17 +460,25 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
         # Afficher les pages trouvées avec option de blacklist
         for pid, data in pages_final.items():
             web = web_results.get(pid, {})
-            col1, col2, col3 = st.columns([3, 1, 1])
+            website = data.get('website', '')
+            fb_link = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={countries[0]}&view_all_page_id={pid}"
+
+            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
 
             with col1:
                 st.write(f"**{data.get('page_name', 'N/A')}** - {data.get('ads_active_total', 0)} ads")
-                st.caption(f"🔗 {data.get('website', 'N/A')} | CMS: {data.get('cms', 'N/A')}")
+                st.caption(f"CMS: {data.get('cms', 'N/A')} | Produits: {web.get('product_count', 'N/A')}")
 
             with col2:
-                fb_link = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={countries[0]}&view_all_page_id={pid}"
-                st.link_button("📘 Voir Ads", fb_link)
+                if website:
+                    st.link_button("🌐 Site", website)
+                else:
+                    st.caption("Pas de site")
 
             with col3:
+                st.link_button("📘 Ads", fb_link)
+
+            with col4:
                 if st.button("🚫 Blacklist", key=f"bl_{pid}"):
                     if db and add_to_blacklist(db, pid, data.get("page_name", ""), "Blacklisté depuis aperçu"):
                         st.success(f"✓ {data.get('page_name', pid)} blacklisté")
