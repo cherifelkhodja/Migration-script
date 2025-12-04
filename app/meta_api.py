@@ -161,35 +161,82 @@ class MetaAdsClient:
 
 
 def extract_website_from_ads(ads_list: List[dict]) -> str:
-    """Extrait l'URL du site web depuis les annonces"""
+    """Extrait l'URL du site web depuis les annonces - Version améliorée"""
     if not ads_list:
         return ""
 
     url_counter = Counter()
 
+    # Liste étendue des domaines à exclure
+    excluded_domains = [
+        "facebook.com", "instagram.com", "fb.me", "fb.com",
+        "messenger.com", "whatsapp.com", "meta.com",
+        "google.com", "youtube.com", "youtu.be",
+        "twitter.com", "x.com", "tiktok.com",
+        "bit.ly", "goo.gl", "t.co", "ow.ly",
+        "linktr.ee", "linkin.bio"
+    ]
+
+    # Patterns regex améliorés
+    url_patterns = [
+        # URL complète
+        r'https?://(?:www\.)?([a-z0-9][-a-z0-9]*\.[a-z]{2,}(?:\.[a-z]{2,})?)',
+        # Domaine simple avec extension
+        r'\b([a-z0-9][-a-z0-9]*\.(?:com|fr|net|org|co|io|shop|store|boutique|eu|be|ch|ca|de|es|it|uk|nl))\b',
+        # Domaine avec sous-domaine
+        r'\b(?:www\.)?([a-z0-9][-a-z0-9]*\.[a-z]{2,}(?:\.[a-z]{2,})?)\b',
+    ]
+
     for ad in ads_list:
-        for field in ["ad_creative_link_captions", "ad_creative_link_titles"]:
+        # Champs à vérifier (ordre de priorité)
+        fields_to_check = [
+            "ad_creative_link_captions",  # Souvent le domaine exact
+            "ad_creative_link_titles",
+            "ad_creative_bodies",          # Corps de l'annonce
+            "ad_snapshot_url",             # URL du snapshot
+        ]
+
+        for field in fields_to_check:
             values = ad.get(field, [])
+
+            # Normaliser en liste
+            if values is None:
+                continue
             if not isinstance(values, list):
-                values = [values] if values else []
+                values = [values]
 
             for val in values:
                 if not val:
                     continue
 
                 val_str = str(val).strip().lower()
-                patterns = [
-                    r'(?:https?://)?(?:www\.)?([a-z0-9-]+\.[a-z]{2,})',
-                    r'([a-z0-9-]+\.[a-z]{2,})',
-                ]
 
-                for pattern in patterns:
+                # Appliquer chaque pattern
+                for pattern in url_patterns:
                     matches = re.findall(pattern, val_str)
                     for match in matches:
-                        clean = match.replace("www.", "").strip("/")
-                        excluded = ["facebook.com", "instagram.com", "fb.me"]
-                        if len(clean) > 4 and "." in clean and not any(x in clean for x in excluded):
-                            url_counter[clean] += 1
+                        # Nettoyer le domaine
+                        clean = match.replace("www.", "").strip("/").strip(".")
+
+                        # Vérifications
+                        if len(clean) < 4:
+                            continue
+                        if "." not in clean:
+                            continue
+                        if any(exc in clean for exc in excluded_domains):
+                            continue
+                        # Éviter les faux positifs (fichiers, etc.)
+                        if clean.endswith(('.js', '.css', '.png', '.jpg', '.gif')):
+                            continue
+
+                        # Bonus pour les champs prioritaires
+                        weight = 1
+                        if field == "ad_creative_link_captions":
+                            weight = 3  # Plus de poids pour les captions
+                        elif field == "ad_creative_link_titles":
+                            weight = 2
+
+                        url_counter[clean] += weight
 
     if not url_counter:
         return ""
