@@ -1,6 +1,9 @@
 """
 Dashboard Streamlit pour Meta Ads Shopify Analyzer
 """
+import warnings
+warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
+
 import os
 import sys
 import time
