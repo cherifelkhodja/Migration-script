@@ -239,6 +239,11 @@ def render_search_ads():
     st.title("🔍 Search Ads")
     st.markdown("Rechercher et analyser des annonces Meta")
 
+    # Vérifier si on a des résultats en aperçu à afficher
+    if st.session_state.get("show_preview_results", False):
+        render_preview_results()
+        return
+
     # Configuration de recherche
     with st.expander("⚙️ Configuration de recherche", expanded=True):
         col1, col2 = st.columns(2)
@@ -296,6 +301,84 @@ def render_search_ads():
             return
 
         run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode)
+
+
+def render_preview_results():
+    """Affiche les résultats en mode aperçu"""
+    st.subheader("📋 Aperçu des résultats")
+    st.warning("⚠️ Mode aperçu activé - Les données ne sont pas encore enregistrées")
+
+    db = get_database()
+    pages_final = st.session_state.get("pages_final", {})
+    web_results = st.session_state.get("web_results", {})
+    countries = st.session_state.get("countries", ["FR"])
+
+    if not pages_final:
+        st.info("Aucun résultat à afficher")
+        if st.button("🔙 Nouvelle recherche"):
+            st.session_state.show_preview_results = False
+            st.rerun()
+        return
+
+    st.info(f"📊 {len(pages_final)} pages trouvées")
+
+    # Afficher les pages avec options
+    for pid, data in list(pages_final.items()):
+        web = web_results.get(pid, {})
+        website = data.get('website', '')
+        fb_link = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={countries[0]}&view_all_page_id={pid}"
+
+        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+
+        with col1:
+            st.write(f"**{data.get('page_name', 'N/A')}** - {data.get('ads_active_total', 0)} ads")
+            st.caption(f"CMS: {data.get('cms', 'N/A')} | Produits: {web.get('product_count', 'N/A')}")
+
+        with col2:
+            if website:
+                st.link_button("🌐 Site", website)
+            else:
+                st.caption("Pas de site")
+
+        with col3:
+            st.link_button("📘 Ads", fb_link)
+
+        with col4:
+            if st.button("🚫", key=f"bl_preview_{pid}", help="Blacklister"):
+                if db and add_to_blacklist(db, pid, data.get("page_name", ""), "Blacklisté depuis aperçu"):
+                    # Retirer de pages_final
+                    del st.session_state.pages_final[pid]
+                    if pid in st.session_state.web_results:
+                        del st.session_state.web_results[pid]
+                    st.rerun()
+
+    st.markdown("---")
+
+    # Boutons d'action
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("💾 Sauvegarder en base de données", type="primary", use_container_width=True):
+            if db:
+                try:
+                    thresholds = st.session_state.get("state_thresholds", None)
+                    languages = st.session_state.get("languages", ["fr"])
+                    pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds)
+                    suivi_saved = save_suivi_page(db, pages_final, web_results, MIN_ADS_SUIVI)
+                    ads_saved = save_ads_recherche(db, pages_final, st.session_state.get("page_ads", {}), countries, MIN_ADS_LISTE)
+
+                    st.success(f"✓ Sauvegardé : {pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads")
+                    st.session_state.show_preview_results = False
+                    st.balloons()
+                except Exception as e:
+                    st.error(f"Erreur sauvegarde: {e}")
+
+    with col2:
+        if st.button("🔙 Nouvelle recherche", use_container_width=True):
+            st.session_state.show_preview_results = False
+            st.session_state.pages_final = {}
+            st.session_state.web_results = {}
+            st.rerun()
 
 
 def run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode=False):
@@ -453,61 +536,10 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
     st.session_state.preview_mode = preview_mode
 
     if preview_mode:
-        # Mode aperçu - afficher les résultats sans sauvegarder
-        st.subheader("📋 Aperçu des résultats")
-        st.warning("⚠️ Mode aperçu activé - Les données ne sont pas encore enregistrées")
-
-        # Afficher les pages trouvées avec option de blacklist
-        for pid, data in pages_final.items():
-            web = web_results.get(pid, {})
-            website = data.get('website', '')
-            fb_link = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={countries[0]}&view_all_page_id={pid}"
-
-            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-
-            with col1:
-                st.write(f"**{data.get('page_name', 'N/A')}** - {data.get('ads_active_total', 0)} ads")
-                st.caption(f"CMS: {data.get('cms', 'N/A')} | Produits: {web.get('product_count', 'N/A')}")
-
-            with col2:
-                if website:
-                    st.link_button("🌐 Site", website)
-                else:
-                    st.caption("Pas de site")
-
-            with col3:
-                st.link_button("📘 Ads", fb_link)
-
-            with col4:
-                if st.button("🚫 Blacklist", key=f"bl_{pid}"):
-                    if db and add_to_blacklist(db, pid, data.get("page_name", ""), "Blacklisté depuis aperçu"):
-                        st.success(f"✓ {data.get('page_name', pid)} blacklisté")
-                        # Retirer de pages_final
-                        del st.session_state.pages_final[pid]
-                        st.rerun()
-
-        st.markdown("---")
-
-        # Bouton pour sauvegarder après vérification
-        if st.button("💾 Sauvegarder en base de données", type="primary", use_container_width=True):
-            if db:
-                try:
-                    thresholds = st.session_state.get("state_thresholds", None)
-                    pages_to_save = st.session_state.pages_final
-                    web_to_save = st.session_state.web_results
-                    pages_saved = save_pages_recherche(db, pages_to_save, web_to_save, countries, languages, thresholds)
-                    suivi_saved = save_suivi_page(db, pages_to_save, web_to_save, MIN_ADS_SUIVI)
-                    ads_saved = save_ads_recherche(db, pages_to_save, st.session_state.page_ads, countries, MIN_ADS_LISTE)
-
-                    col1, col2, col3 = st.columns(3)
-                    col1.metric("Pages", pages_saved)
-                    col2.metric("Suivi", suivi_saved)
-                    col3.metric("Annonces", ads_saved)
-                    st.success("✓ Données sauvegardées !")
-                    st.session_state.preview_mode = False
-                    st.balloons()
-                except Exception as e:
-                    st.error(f"Erreur sauvegarde: {e}")
+        # Mode aperçu - rediriger vers la page d'aperçu
+        st.success(f"✓ Recherche terminée ! {len(pages_final)} pages trouvées")
+        st.session_state.show_preview_results = True
+        st.rerun()
     else:
         # Mode normal - sauvegarder directement
         st.subheader("💾 Phase 7: Sauvegarde en base de données")
