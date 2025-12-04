@@ -438,7 +438,7 @@ def render_results():
                     names=theme_counts.index,
                     title="Répartition par thématique"
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
     with col2:
         if not df.empty and 'Ads Actives' in df.columns:
@@ -448,12 +448,12 @@ def render_results():
                 nbins=20,
                 title="Distribution du nombre d'ads"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     # Tableau
     st.dataframe(
         df,
-        use_container_width=True,
+        width="stretch",
         height=400,
         column_config={
             "Site Web": st.column_config.LinkColumn("Site Web"),
@@ -472,7 +472,7 @@ def render_results():
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        if st.button("📥 Exporter Pages", use_container_width=True):
+        if st.button("📥 Exporter Pages", width="stretch"):
             path = export_pages_csv(
                 pages_final, web_results,
                 ["FR"], ["fr"]
@@ -484,7 +484,7 @@ def render_results():
             pid: data for pid, data in pages_final.items()
             if data.get("ads_active_total", 0) >= MIN_ADS_FOR_ADS_CSV
         }
-        if st.button("📥 Exporter Annonces", use_container_width=True):
+        if st.button("📥 Exporter Annonces", width="stretch"):
             path, count = export_ads_csv(
                 pages_for_ads, st.session_state.page_ads,
                 ["FR"]
@@ -492,7 +492,7 @@ def render_results():
             st.success(f"Exporté: {path} ({count} annonces)")
 
     with col3:
-        if st.button("📥 Exporter Suivi", use_container_width=True):
+        if st.button("📥 Exporter Suivi", width="stretch"):
             path = export_suivi_csv(pages_final, web_results)
             st.success(f"Exporté: {path}")
 
@@ -506,7 +506,7 @@ def render_results():
         data=csv_data,
         file_name=f"meta_ads_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
         mime="text/csv",
-        use_container_width=True
+        width="stretch"
     )
 
 
@@ -526,7 +526,7 @@ def main():
             st.info(f"Mots-clés: {', '.join(config['keywords'])}")
             st.info(f"Pays: {', '.join(config['countries'])} | Langues: {', '.join(config['languages'])}")
 
-        if st.button("🚀 Lancer la recherche", type="primary", use_container_width=True):
+        if st.button("🚀 Lancer la recherche", type="primary", width="stretch"):
             run_search(config)
 
     with tab2:
