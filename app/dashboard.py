@@ -33,7 +33,7 @@ from app.shopify_detector import detect_cms_from_url
 from app.web_analyzer import analyze_website_complete
 from app.utils import (
     load_blacklist, is_blacklisted, create_dataframe_pages,
-    export_pages_csv, export_ads_csv, export_suivi_csv
+    export_pages_csv, export_ads_csv
 )
 
 
@@ -128,6 +128,21 @@ def render_sidebar():
 
         st.divider()
 
+        # Sélection des CMS
+        st.subheader("CMS à inclure")
+        cms_options = [
+            "Shopify", "WooCommerce", "PrestaShop", "Magento",
+            "Wix", "Squarespace", "BigCommerce", "Webflow", "Autre/Inconnu"
+        ]
+        selected_cms = st.multiselect(
+            "CMS à comptabiliser",
+            options=cms_options,
+            default=cms_options,  # Tous par défaut
+            help="Sélectionnez les CMS à inclure dans les résultats"
+        )
+
+        st.divider()
+
         # Blacklist
         blacklist_file = st.file_uploader(
             "Fichier blacklist (CSV)",
@@ -142,7 +157,8 @@ def render_sidebar():
             'languages': languages,
             'min_ads_initial': min_ads_initial,
             'min_ads_export': min_ads_export,
-            'blacklist_file': blacklist_file
+            'blacklist_file': blacklist_file,
+            'selected_cms': selected_cms
         }
 
 
@@ -154,6 +170,7 @@ def run_search(config: dict):
     languages = config['languages']
     min_ads_initial = config['min_ads_initial']
     min_ads_export = config['min_ads_export']
+    selected_cms = config.get('selected_cms', [])
 
     if not token:
         st.error("Token Meta API requis !")
@@ -323,8 +340,27 @@ def run_search(config: dict):
     cms_summary = ", ".join([f"{k}: {v}" for k, v in sorted(cms_counts.items(), key=lambda x: -x[1]) if v > 0])
     st.info(f"CMS détectés: {cms_summary}")
 
-    # Garder toutes les pages avec un site (pas de filtre sur CMS)
-    pages_with_cms = {pid: data for pid, data in pages_with_sites.items()}
+    # Filtrer par CMS sélectionnés
+    def cms_matches_selection(cms_name: str) -> bool:
+        """Vérifie si le CMS correspond à la sélection"""
+        if not selected_cms:
+            return True  # Aucune sélection = tout garder
+        if cms_name in selected_cms:
+            return True
+        # "Autre/Inconnu" pour les CMS non reconnus
+        if "Autre/Inconnu" in selected_cms and cms_name not in [
+            "Shopify", "WooCommerce", "PrestaShop", "Magento",
+            "Wix", "Squarespace", "BigCommerce", "Webflow"
+        ]:
+            return True
+        return False
+
+    pages_with_cms = {
+        pid: data for pid, data in pages_with_sites.items()
+        if cms_matches_selection(data.get("cms", "Unknown"))
+    }
+
+    st.success(f"Pages avec CMS sélectionnés: {len(pages_with_cms)}/{len(pages_with_sites)}")
 
     if not pages_with_cms:
         st.warning("Aucun site trouvé.")
@@ -403,6 +439,8 @@ def run_search(config: dict):
     st.session_state.pages_final = pages_final
     st.session_state.web_results = web_results
     st.session_state.page_ads = dict(page_ads)
+    st.session_state.countries = countries
+    st.session_state.languages = languages
     st.session_state.stats = {
         'total_ads': len(all_ads),
         'total_pages': len(pages),
@@ -425,6 +463,8 @@ def render_results():
     pages_final = st.session_state.pages_final
     web_results = st.session_state.web_results
     stats = st.session_state.stats
+    countries = st.session_state.get('countries', ['FR'])
+    languages = st.session_state.get('languages', ['fr'])
 
     # ═══════════════════════════════════════════════════════════════════════════
     # STATISTIQUES
@@ -445,7 +485,7 @@ def render_results():
     # ═══════════════════════════════════════════════════════════════════════════
     st.header("📋 Résultats détaillés")
 
-    df = create_dataframe_pages(pages_final, web_results, ["FR"])
+    df = create_dataframe_pages(pages_final, web_results, countries)
 
     # Graphiques
     col1, col2, col3 = st.columns(3)
@@ -501,13 +541,14 @@ def render_results():
     # ═══════════════════════════════════════════════════════════════════════════
     st.header("💾 Export CSV")
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
 
     with col1:
+        st.write(f"**Pages**: {len(pages_final)} pages à exporter")
         if st.button("📥 Exporter Pages", width="stretch"):
             path = export_pages_csv(
                 pages_final, web_results,
-                ["FR"], ["fr"]
+                countries, languages
             )
             st.success(f"Exporté: {path}")
 
@@ -516,17 +557,15 @@ def render_results():
             pid: data for pid, data in pages_final.items()
             if data.get("ads_active_total", 0) >= MIN_ADS_FOR_ADS_CSV
         }
+        page_ads = st.session_state.page_ads
+        total_ads = sum(len(page_ads.get(pid, [])) for pid in pages_for_ads.keys())
+        st.write(f"**Annonces**: {len(pages_for_ads)} pages, ~{total_ads} annonces")
         if st.button("📥 Exporter Annonces", width="stretch"):
             path, count = export_ads_csv(
-                pages_for_ads, st.session_state.page_ads,
-                ["FR"]
+                pages_for_ads, page_ads,
+                countries
             )
             st.success(f"Exporté: {path} ({count} annonces)")
-
-    with col3:
-        if st.button("📥 Exporter Suivi", width="stretch"):
-            path = export_suivi_csv(pages_final, web_results)
-            st.success(f"Exporté: {path}")
 
     # Téléchargement direct
     st.divider()
