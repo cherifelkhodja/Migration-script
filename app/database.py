@@ -95,6 +95,21 @@ class AdsRecherche(Base):
     )
 
 
+class Blacklist(Base):
+    """Table blacklist - Pages à exclure des recherches"""
+    __tablename__ = "blacklist"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    page_id = Column(String(50), unique=True, nullable=False, index=True)
+    page_name = Column(String(255))
+    raison = Column(String(255))  # Raison de la mise en blacklist
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_blacklist_page_name', 'page_name'),
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # GESTION DE LA CONNEXION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -140,27 +155,40 @@ class DatabaseManager:
 # FONCTIONS UTILITAIRES
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def get_etat_from_ads_count(ads_count: int) -> str:
+def get_etat_from_ads_count(ads_count: int, thresholds: Dict = None) -> str:
     """
     Détermine l'état basé sur le nombre d'ads actives
 
     Args:
         ads_count: Nombre d'ads actives
+        thresholds: Dictionnaire des seuils personnalisés (optionnel)
+                   Format: {"XS": 1, "S": 10, "M": 20, "L": 35, "XL": 80, "XXL": 150}
 
     Returns:
         État: inactif, XS, S, M, L, XL, XXL
     """
+    # Seuils par défaut
+    if thresholds is None:
+        thresholds = {
+            "XS": 1,
+            "S": 10,
+            "M": 20,
+            "L": 35,
+            "XL": 80,
+            "XXL": 150,
+        }
+
     if ads_count == 0:
         return "inactif"
-    elif ads_count < 10:
+    elif ads_count < thresholds.get("S", 10):
         return "XS"
-    elif ads_count < 20:
+    elif ads_count < thresholds.get("M", 20):
         return "S"
-    elif ads_count < 35:
+    elif ads_count < thresholds.get("L", 35):
         return "M"
-    elif ads_count < 80:
+    elif ads_count < thresholds.get("XL", 80):
         return "L"
-    elif ads_count < 150:
+    elif ads_count < thresholds.get("XXL", 150):
         return "XL"
     else:
         return "XXL"
@@ -182,7 +210,8 @@ def save_pages_recherche(
     pages_final: Dict,
     web_results: Dict,
     countries: List[str],
-    languages: List[str]
+    languages: List[str],
+    thresholds: Dict = None
 ) -> int:
     """
     Sauvegarde ou met à jour les pages dans liste_page_recherche
@@ -194,6 +223,7 @@ def save_pages_recherche(
         web_results: Résultats d'analyse web
         countries: Liste des pays
         languages: Liste des langues
+        thresholds: Seuils personnalisés pour les états (optionnel)
 
     Returns:
         Nombre de pages sauvegardées
@@ -243,7 +273,7 @@ def save_pages_recherche(
                 existing_page.cms = data.get("cms") or web.get("cms", "") or existing_page.cms
                 existing_page.template = web.get("theme", "") or existing_page.template
                 existing_page.devise = data.get("currency", "") or existing_page.devise
-                existing_page.etat = get_etat_from_ads_count(ads_count)
+                existing_page.etat = get_etat_from_ads_count(ads_count, thresholds)
                 existing_page.nombre_ads_active = ads_count
                 existing_page.nombre_produits = web.get("product_count", 0) or existing_page.nombre_produits
                 existing_page.dernier_scan = scan_time
@@ -266,7 +296,7 @@ def save_pages_recherche(
                     cms=data.get("cms") or web.get("cms", "Unknown"),
                     template=web.get("theme", ""),
                     devise=data.get("currency", ""),
-                    etat=get_etat_from_ads_count(ads_count),
+                    etat=get_etat_from_ads_count(ads_count, thresholds),
                     nombre_ads_active=ads_count,
                     nombre_produits=web.get("product_count", 0),
                     dernier_scan=scan_time,
@@ -653,3 +683,95 @@ def get_page_evolution_history(
             results.append(entry)
 
         return results
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GESTION DE LA BLACKLIST
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def add_to_blacklist(
+    db: DatabaseManager,
+    page_id: str,
+    page_name: str = "",
+    raison: str = ""
+) -> bool:
+    """
+    Ajoute une page à la blacklist
+
+    Args:
+        db: Instance DatabaseManager
+        page_id: ID de la page
+        page_name: Nom de la page
+        raison: Raison de la mise en blacklist
+
+    Returns:
+        True si ajouté, False si déjà présent
+    """
+    with db.get_session() as session:
+        # Vérifier si déjà présent
+        existing = session.query(Blacklist).filter(
+            Blacklist.page_id == str(page_id)
+        ).first()
+
+        if existing:
+            return False
+
+        entry = Blacklist(
+            page_id=str(page_id),
+            page_name=page_name,
+            raison=raison,
+            added_at=datetime.utcnow()
+        )
+        session.add(entry)
+        return True
+
+
+def remove_from_blacklist(db: DatabaseManager, page_id: str) -> bool:
+    """
+    Retire une page de la blacklist
+
+    Returns:
+        True si retiré, False si non trouvé
+    """
+    with db.get_session() as session:
+        entry = session.query(Blacklist).filter(
+            Blacklist.page_id == str(page_id)
+        ).first()
+
+        if entry:
+            session.delete(entry)
+            return True
+        return False
+
+
+def get_blacklist(db: DatabaseManager) -> List[Dict]:
+    """Récupère toute la blacklist"""
+    with db.get_session() as session:
+        entries = session.query(Blacklist).order_by(
+            Blacklist.added_at.desc()
+        ).all()
+
+        return [
+            {
+                "page_id": e.page_id,
+                "page_name": e.page_name,
+                "raison": e.raison,
+                "added_at": e.added_at
+            }
+            for e in entries
+        ]
+
+
+def is_in_blacklist(db: DatabaseManager, page_id: str) -> bool:
+    """Vérifie si une page est dans la blacklist"""
+    with db.get_session() as session:
+        return session.query(Blacklist).filter(
+            Blacklist.page_id == str(page_id)
+        ).first() is not None
+
+
+def get_blacklist_ids(db: DatabaseManager) -> set:
+    """Récupère tous les page_id de la blacklist"""
+    with db.get_session() as session:
+        entries = session.query(Blacklist.page_id).all()
+        return {e.page_id for e in entries}

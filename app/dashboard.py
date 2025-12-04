@@ -28,7 +28,8 @@ from app.config import (
     AVAILABLE_COUNTRIES, AVAILABLE_LANGUAGES,
     MIN_ADS_INITIAL, MIN_ADS_FOR_EXPORT,
     DEFAULT_COUNTRIES, DEFAULT_LANGUAGES,
-    DATABASE_URL, MIN_ADS_SUIVI, MIN_ADS_LISTE
+    DATABASE_URL, MIN_ADS_SUIVI, MIN_ADS_LISTE,
+    DEFAULT_STATE_THRESHOLDS
 )
 from app.meta_api import MetaAdsClient, extract_website_from_ads, extract_currency_from_ads
 from app.shopify_detector import detect_cms_from_url
@@ -37,7 +38,8 @@ from app.utils import load_blacklist, is_blacklisted
 from app.database import (
     DatabaseManager, save_pages_recherche, save_suivi_page,
     save_ads_recherche, get_suivi_stats, search_pages, get_suivi_history,
-    get_evolution_stats, get_page_evolution_history
+    get_evolution_stats, get_page_evolution_history, get_etat_from_ads_count,
+    add_to_blacklist, remove_from_blacklist, get_blacklist, get_blacklist_ids
 )
 
 
@@ -57,7 +59,8 @@ def init_session_state():
         'db': None,
         'current_page': 'Dashboard',
         'countries': ['FR'],
-        'languages': ['fr']
+        'languages': ['fr'],
+        'state_thresholds': DEFAULT_STATE_THRESHOLDS.copy()
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -276,6 +279,13 @@ def render_search_ads():
     cms_options = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow", "Autre/Inconnu"]
     selected_cms = st.multiselect("CMS à inclure", options=cms_options, default=cms_options)
 
+    # Mode aperçu
+    st.markdown("---")
+    preview_mode = st.checkbox(
+        "📋 Mode aperçu (ne pas enregistrer en BDD)",
+        help="Permet de voir les résultats avant de les enregistrer, et de blacklister des pages"
+    )
+
     # Bouton de recherche
     if st.button("🚀 Lancer la recherche", type="primary", use_container_width=True):
         if not token:
@@ -285,12 +295,20 @@ def render_search_ads():
             st.error("Au moins un mot-clé requis !")
             return
 
-        run_search_process(token, keywords, countries, languages, min_ads, selected_cms)
+        run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode)
 
 
-def run_search_process(token, keywords, countries, languages, min_ads, selected_cms):
+def run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode=False):
     """Exécute le processus de recherche complet"""
     client = MetaAdsClient(token)
+    db = get_database()
+
+    # Récupérer la blacklist
+    blacklist_ids = set()
+    if db:
+        blacklist_ids = get_blacklist_ids(db)
+        if blacklist_ids:
+            st.info(f"🚫 {len(blacklist_ids)} pages en blacklist seront ignorées")
 
     # Phase 1: Recherche
     st.subheader("🔍 Phase 1: Recherche par mots-clés")
@@ -321,6 +339,11 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
         pid = ad.get("page_id")
         if not pid:
             continue
+
+        # Ignorer les pages blacklistées
+        if str(pid) in blacklist_ids:
+            continue
+
         pname = (ad.get("page_name") or "").strip()
 
         if pid not in pages:
@@ -421,33 +444,83 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
         progress.progress((i + 1) / len(pages_final))
         time.sleep(0.2)
 
-    # Phase 7: Sauvegarde BDD
-    st.subheader("💾 Phase 7: Sauvegarde en base de données")
-    db = get_database()
-
-    if db:
-        try:
-            pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages)
-            suivi_saved = save_suivi_page(db, pages_final, web_results, MIN_ADS_SUIVI)
-            ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, MIN_ADS_LISTE)
-
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Pages", pages_saved)
-            col2.metric("Suivi", suivi_saved)
-            col3.metric("Annonces", ads_saved)
-            st.success("✓ Données sauvegardées !")
-        except Exception as e:
-            st.error(f"Erreur sauvegarde: {e}")
-
-    # Save to session
+    # Save to session first (needed for preview mode)
     st.session_state.pages_final = pages_final
     st.session_state.web_results = web_results
     st.session_state.page_ads = dict(page_ads)
     st.session_state.countries = countries
     st.session_state.languages = languages
+    st.session_state.preview_mode = preview_mode
 
-    st.balloons()
-    st.success("🎉 Recherche terminée !")
+    if preview_mode:
+        # Mode aperçu - afficher les résultats sans sauvegarder
+        st.subheader("📋 Aperçu des résultats")
+        st.warning("⚠️ Mode aperçu activé - Les données ne sont pas encore enregistrées")
+
+        # Afficher les pages trouvées avec option de blacklist
+        for pid, data in pages_final.items():
+            web = web_results.get(pid, {})
+            col1, col2, col3 = st.columns([3, 1, 1])
+
+            with col1:
+                st.write(f"**{data.get('page_name', 'N/A')}** - {data.get('ads_active_total', 0)} ads")
+                st.caption(f"🔗 {data.get('website', 'N/A')} | CMS: {data.get('cms', 'N/A')}")
+
+            with col2:
+                fb_link = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={countries[0]}&view_all_page_id={pid}"
+                st.link_button("📘 Voir Ads", fb_link)
+
+            with col3:
+                if st.button("🚫 Blacklist", key=f"bl_{pid}"):
+                    if db and add_to_blacklist(db, pid, data.get("page_name", ""), "Blacklisté depuis aperçu"):
+                        st.success(f"✓ {data.get('page_name', pid)} blacklisté")
+                        # Retirer de pages_final
+                        del st.session_state.pages_final[pid]
+                        st.rerun()
+
+        st.markdown("---")
+
+        # Bouton pour sauvegarder après vérification
+        if st.button("💾 Sauvegarder en base de données", type="primary", use_container_width=True):
+            if db:
+                try:
+                    thresholds = st.session_state.get("state_thresholds", None)
+                    pages_to_save = st.session_state.pages_final
+                    web_to_save = st.session_state.web_results
+                    pages_saved = save_pages_recherche(db, pages_to_save, web_to_save, countries, languages, thresholds)
+                    suivi_saved = save_suivi_page(db, pages_to_save, web_to_save, MIN_ADS_SUIVI)
+                    ads_saved = save_ads_recherche(db, pages_to_save, st.session_state.page_ads, countries, MIN_ADS_LISTE)
+
+                    col1, col2, col3 = st.columns(3)
+                    col1.metric("Pages", pages_saved)
+                    col2.metric("Suivi", suivi_saved)
+                    col3.metric("Annonces", ads_saved)
+                    st.success("✓ Données sauvegardées !")
+                    st.session_state.preview_mode = False
+                    st.balloons()
+                except Exception as e:
+                    st.error(f"Erreur sauvegarde: {e}")
+    else:
+        # Mode normal - sauvegarder directement
+        st.subheader("💾 Phase 7: Sauvegarde en base de données")
+
+        if db:
+            try:
+                thresholds = st.session_state.get("state_thresholds", None)
+                pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds)
+                suivi_saved = save_suivi_page(db, pages_final, web_results, MIN_ADS_SUIVI)
+                ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, MIN_ADS_LISTE)
+
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Pages", pages_saved)
+                col2.metric("Suivi", suivi_saved)
+                col3.metric("Annonces", ads_saved)
+                st.success("✓ Données sauvegardées !")
+            except Exception as e:
+                st.error(f"Erreur sauvegarde: {e}")
+
+        st.balloons()
+        st.success("🎉 Recherche terminée !")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -479,6 +552,9 @@ def render_pages_shops():
     with col4:
         limit = st.selectbox("Limite", [50, 100, 200, 500], index=1)
 
+    # Mode d'affichage
+    view_mode = st.radio("Mode d'affichage", ["Tableau", "Détaillé"], horizontal=True)
+
     # Recherche
     try:
         results = search_pages(
@@ -492,23 +568,49 @@ def render_pages_shops():
         if results:
             st.markdown(f"**{len(results)} résultats**")
 
-            df = pd.DataFrame(results)
+            if view_mode == "Tableau":
+                df = pd.DataFrame(results)
 
-            # Colonnes à afficher
-            display_cols = ["page_name", "lien_site", "cms", "etat", "nombre_ads_active", "nombre_produits", "thematique"]
-            df_display = df[[c for c in display_cols if c in df.columns]]
+                # Colonnes à afficher
+                display_cols = ["page_name", "lien_site", "keywords", "cms", "etat", "nombre_ads_active", "nombre_produits"]
+                df_display = df[[c for c in display_cols if c in df.columns]]
 
-            # Renommer colonnes
-            df_display.columns = ["Nom", "Site", "CMS", "État", "Ads", "Produits", "Thématique"][:len(df_display.columns)]
+                # Renommer colonnes
+                df_display.columns = ["Nom", "Site", "Keywords", "CMS", "État", "Ads", "Produits"][:len(df_display.columns)]
 
-            st.dataframe(
-                df_display,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Site": st.column_config.LinkColumn("Site"),
-                }
-            )
+                st.dataframe(
+                    df_display,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Site": st.column_config.LinkColumn("Site"),
+                    }
+                )
+            else:
+                # Vue détaillée avec boutons blacklist
+                for page in results:
+                    with st.expander(f"**{page.get('page_name', 'N/A')}** - {page.get('etat', 'N/A')} ({page.get('nombre_ads_active', 0)} ads)"):
+                        col1, col2 = st.columns([3, 1])
+
+                        with col1:
+                            st.write(f"**Site:** {page.get('lien_site', 'N/A')}")
+                            st.write(f"**CMS:** {page.get('cms', 'N/A')} | **Produits:** {page.get('nombre_produits', 0)}")
+                            if page.get('keywords'):
+                                st.write(f"**Keywords:** {page.get('keywords', '')}")
+                            if page.get('thematique'):
+                                st.write(f"**Thématique:** {page.get('thematique', '')}")
+
+                        with col2:
+                            pid = page.get('page_id')
+                            if page.get('lien_fb_ad_library'):
+                                st.link_button("📘 Ads Library", page['lien_fb_ad_library'])
+
+                            if st.button("🚫 Blacklist", key=f"bl_page_{pid}"):
+                                if add_to_blacklist(db, pid, page.get('page_name', ''), "Blacklisté depuis Pages/Shops"):
+                                    st.success(f"✓ Blacklisté")
+                                    st.rerun()
+                                else:
+                                    st.warning("Déjà blacklisté")
         else:
             st.info("Aucun résultat trouvé")
 
@@ -854,7 +956,7 @@ def render_settings():
 
     st.markdown("---")
 
-    # Seuils
+    # Seuils de base
     st.subheader("📊 Seuils de détection")
 
     col1, col2 = st.columns(2)
@@ -863,16 +965,163 @@ def render_settings():
     with col2:
         st.info(f"Min. ads pour liste: **{MIN_ADS_LISTE}**")
 
-    st.markdown("""
-    **États basés sur le nombre d'ads:**
-    - **XXL**: ≥150 ads
-    - **XL**: 80-149 ads
-    - **L**: 35-79 ads
-    - **M**: 20-34 ads
-    - **S**: 10-19 ads
-    - **XS**: 1-9 ads
-    - **Inactif**: 0 ads
-    """)
+    st.markdown("---")
+
+    # Configuration des états
+    st.subheader("🏷️ Configuration des états")
+    st.markdown("Définissez les seuils minimums d'ads actives pour chaque état:")
+
+    # Récupérer les seuils actuels
+    thresholds = st.session_state.state_thresholds
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        new_xs = st.number_input(
+            "XS (min)",
+            min_value=1,
+            max_value=1000,
+            value=thresholds.get("XS", 1),
+            help="Seuil minimum pour l'état XS"
+        )
+        new_m = st.number_input(
+            "M (min)",
+            min_value=1,
+            max_value=1000,
+            value=thresholds.get("M", 20),
+            help="Seuil minimum pour l'état M"
+        )
+
+    with col2:
+        new_s = st.number_input(
+            "S (min)",
+            min_value=1,
+            max_value=1000,
+            value=thresholds.get("S", 10),
+            help="Seuil minimum pour l'état S"
+        )
+        new_l = st.number_input(
+            "L (min)",
+            min_value=1,
+            max_value=1000,
+            value=thresholds.get("L", 35),
+            help="Seuil minimum pour l'état L"
+        )
+
+    with col3:
+        new_xl = st.number_input(
+            "XL (min)",
+            min_value=1,
+            max_value=1000,
+            value=thresholds.get("XL", 80),
+            help="Seuil minimum pour l'état XL"
+        )
+        new_xxl = st.number_input(
+            "XXL (min)",
+            min_value=1,
+            max_value=1000,
+            value=thresholds.get("XXL", 150),
+            help="Seuil minimum pour l'état XXL"
+        )
+
+    # Bouton pour sauvegarder
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        if st.button("💾 Sauvegarder", type="primary"):
+            # Vérifier la cohérence des seuils
+            new_thresholds = {
+                "XS": new_xs,
+                "S": new_s,
+                "M": new_m,
+                "L": new_l,
+                "XL": new_xl,
+                "XXL": new_xxl
+            }
+
+            # Vérifier que les seuils sont croissants
+            if new_xs < new_s < new_m < new_l < new_xl < new_xxl:
+                st.session_state.state_thresholds = new_thresholds
+                st.success("✓ Seuils sauvegardés !")
+            else:
+                st.error("Les seuils doivent être strictement croissants (XS < S < M < L < XL < XXL)")
+
+    with col2:
+        if st.button("🔄 Réinitialiser"):
+            st.session_state.state_thresholds = DEFAULT_STATE_THRESHOLDS.copy()
+            st.rerun()
+
+    # Afficher un aperçu des états
+    st.markdown("---")
+    st.markdown("**Aperçu des états actuels:**")
+
+    current = st.session_state.state_thresholds
+    preview_data = [
+        {"État": "Inactif", "Plage": "0 ads"},
+        {"État": "XS", "Plage": f"{current['XS']}-{current['S']-1} ads"},
+        {"État": "S", "Plage": f"{current['S']}-{current['M']-1} ads"},
+        {"État": "M", "Plage": f"{current['M']}-{current['L']-1} ads"},
+        {"État": "L", "Plage": f"{current['L']}-{current['XL']-1} ads"},
+        {"État": "XL", "Plage": f"{current['XL']}-{current['XXL']-1} ads"},
+        {"État": "XXL", "Plage": f"≥{current['XXL']} ads"},
+    ]
+    st.dataframe(pd.DataFrame(preview_data), use_container_width=True, hide_index=True)
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Gestion de la blacklist
+    st.markdown("---")
+    st.subheader("🚫 Gestion de la Blacklist")
+
+    # Ajouter manuellement une page à la blacklist
+    with st.expander("➕ Ajouter une page à la blacklist"):
+        col1, col2 = st.columns(2)
+        with col1:
+            new_bl_page_id = st.text_input("Page ID", key="new_bl_page_id")
+        with col2:
+            new_bl_page_name = st.text_input("Nom de la page (optionnel)", key="new_bl_page_name")
+
+        new_bl_raison = st.text_input("Raison (optionnel)", key="new_bl_raison")
+
+        if st.button("➕ Ajouter à la blacklist"):
+            if new_bl_page_id:
+                if add_to_blacklist(db, new_bl_page_id, new_bl_page_name, new_bl_raison):
+                    st.success(f"✓ Page {new_bl_page_id} ajoutée à la blacklist")
+                    st.rerun()
+                else:
+                    st.warning("Cette page est déjà dans la blacklist")
+            else:
+                st.error("Page ID requis")
+
+    # Afficher la blacklist
+    st.markdown("**Pages en blacklist:**")
+    try:
+        blacklist = get_blacklist(db)
+
+        if blacklist:
+            st.info(f"🚫 {len(blacklist)} pages en blacklist")
+
+            for entry in blacklist:
+                col1, col2, col3 = st.columns([3, 2, 1])
+
+                with col1:
+                    st.write(f"**{entry.get('page_name') or entry['page_id']}**")
+                    st.caption(f"ID: {entry['page_id']}")
+
+                with col2:
+                    if entry.get('raison'):
+                        st.caption(f"Raison: {entry['raison']}")
+                    if entry.get('added_at'):
+                        st.caption(f"Ajouté: {entry['added_at'].strftime('%Y-%m-%d %H:%M')}")
+
+                with col3:
+                    if st.button("🗑️ Retirer", key=f"rm_bl_{entry['page_id']}"):
+                        if remove_from_blacklist(db, entry['page_id']):
+                            st.success("✓ Retiré")
+                            st.rerun()
+        else:
+            st.info("Aucune page en blacklist")
+
+    except Exception as e:
+        st.error(f"Erreur: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

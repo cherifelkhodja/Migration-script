@@ -30,6 +30,17 @@ MIN_ADS_INITIAL = 1      # Filtre préliminaire (recherche keywords)
 MIN_ADS_FOR_EXPORT = 15  # CSV 1 & 3
 MIN_ADS_FOR_ADS_CSV = 25 # CSV 2
 
+# Seuils d'états (basés sur le nombre d'ads actives)
+# Format: {"état": seuil_minimum}
+DEFAULT_STATE_THRESHOLDS = {
+    "XS": 1,      # 1-9 ads
+    "S": 10,      # 10-19 ads
+    "M": 20,      # 20-34 ads
+    "L": 35,      # 35-79 ads
+    "XL": 80,     # 80-149 ads
+    "XXL": 150,   # 150+ ads
+}
+
 # Parallélisation
 WORKERS_WEB_ANALYSIS = 10
 TIMEOUT_WEB = 25
