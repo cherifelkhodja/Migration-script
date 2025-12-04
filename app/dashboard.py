@@ -36,7 +36,8 @@ from app.web_analyzer import analyze_website_complete
 from app.utils import load_blacklist, is_blacklisted
 from app.database import (
     DatabaseManager, save_pages_recherche, save_suivi_page,
-    save_ads_recherche, get_suivi_stats, search_pages, get_suivi_history
+    save_ads_recherche, get_suivi_stats, search_pages, get_suivi_history,
+    get_evolution_stats, get_page_evolution_history
 )
 
 
@@ -325,10 +326,14 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
         if pid not in pages:
             pages[pid] = {
                 "page_id": pid, "page_name": pname, "website": "",
-                "_ad_ids": set(), "ads_found_search": 0,
+                "_ad_ids": set(), "_keywords": set(), "ads_found_search": 0,
                 "ads_active_total": -1, "currency": "",
                 "cms": "Unknown", "is_shopify": False
             }
+
+        # Track which keyword found this page
+        if ad.get("_keyword"):
+            pages[pid]["_keywords"].add(ad["_keyword"])
 
         ad_id = ad.get("id")
         if ad_id:
@@ -582,24 +587,100 @@ def render_alerts():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def render_monitoring():
-    """Page Monitoring - Suivi historique"""
+    """Page Monitoring - Suivi historique et évolution"""
     st.title("📈 Monitoring")
-    st.markdown("Suivi de l'évolution des pages")
+    st.markdown("Suivi de l'évolution des pages depuis le dernier scan")
 
     db = get_database()
     if not db:
         st.warning("Base de données non connectée")
         return
 
-    # Recherche par page_id
-    page_id = st.text_input("🔍 Entrer un Page ID pour voir l'historique")
+    # Sélecteur de période
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        period = st.selectbox(
+            "📅 Période",
+            options=[7, 14, 30],
+            format_func=lambda x: f"1 semaine" if x == 7 else f"2 semaines" if x == 14 else "1 mois",
+            index=0
+        )
+
+    # Section évolution
+    st.subheader("📊 Évolution depuis le dernier scan")
+
+    try:
+        evolution = get_evolution_stats(db, period_days=period)
+
+        if evolution:
+            st.info(f"📈 {len(evolution)} pages avec évolution sur les {period} derniers jours")
+
+            # Métriques globales
+            total_up = sum(1 for e in evolution if e["delta_ads"] > 0)
+            total_down = sum(1 for e in evolution if e["delta_ads"] < 0)
+            total_stable = sum(1 for e in evolution if e["delta_ads"] == 0)
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("📈 En hausse", total_up)
+            col2.metric("📉 En baisse", total_down)
+            col3.metric("➡️ Stable", total_stable)
+
+            # Tableau d'évolution
+            st.markdown("---")
+
+            for evo in evolution[:20]:  # Top 20
+                delta_color = "green" if evo["delta_ads"] > 0 else "red" if evo["delta_ads"] < 0 else "gray"
+                delta_icon = "📈" if evo["delta_ads"] > 0 else "📉" if evo["delta_ads"] < 0 else "➡️"
+
+                with st.expander(f"{delta_icon} **{evo['nom_site']}** - {evo['delta_ads']:+d} ads ({evo['pct_ads']:+.1f}%)"):
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        st.metric(
+                            "Ads actives",
+                            evo["ads_actuel"],
+                            delta=f"{evo['delta_ads']:+d}",
+                            delta_color="normal" if evo["delta_ads"] >= 0 else "inverse"
+                        )
+
+                    with col2:
+                        st.metric(
+                            "Produits",
+                            evo["produits_actuel"],
+                            delta=f"{evo['delta_produits']:+d}" if evo["delta_produits"] != 0 else None
+                        )
+
+                    with col3:
+                        st.metric("Durée entre scans", f"{evo['duree_jours']:.1f} jours")
+
+                    # Dates des scans
+                    st.caption(f"🕐 Scan actuel: {evo['date_actuel'].strftime('%Y-%m-%d %H:%M') if evo['date_actuel'] else 'N/A'}")
+                    st.caption(f"🕐 Scan précédent: {evo['date_precedent'].strftime('%Y-%m-%d %H:%M') if evo['date_precedent'] else 'N/A'}")
+
+                    # Bouton pour voir l'historique complet
+                    if st.button(f"Voir historique complet", key=f"hist_{evo['page_id']}"):
+                        st.session_state.monitoring_page_id = evo["page_id"]
+                        st.rerun()
+        else:
+            st.info("Aucune évolution détectée. Effectuez plusieurs scans pour voir les changements.")
+    except Exception as e:
+        st.error(f"Erreur: {e}")
+
+    st.markdown("---")
+
+    # Section historique d'une page spécifique
+    st.subheader("🔍 Historique d'une page")
+
+    # Récupérer page_id depuis session ou input
+    default_page_id = st.session_state.get("monitoring_page_id", "")
+    page_id = st.text_input("Entrer un Page ID", value=default_page_id)
 
     if page_id:
         try:
-            history = get_suivi_history(db, page_id=page_id, limit=50)
+            history = get_page_evolution_history(db, page_id=page_id, limit=50)
 
             if history and len(history) > 0:
-                st.subheader(f"Historique de {history[0].get('nom_site', page_id)}")
+                st.success(f"📊 {len(history)} scans trouvés")
 
                 # Graphique d'évolution
                 if len(history) > 1:
@@ -609,7 +690,9 @@ def render_monitoring():
                         y=[h["nombre_ads_active"] for h in history],
                         mode='lines+markers',
                         name='Ads actives',
-                        line=dict(color='#1f77b4', width=2)
+                        line=dict(color='#1f77b4', width=2),
+                        hovertemplate="Ads: %{y}<br>Delta: %{customdata}<extra></extra>",
+                        customdata=[h["delta_ads"] for h in history]
                     ))
                     fig.add_trace(go.Scatter(
                         x=[h["date_scan"] for h in history],
@@ -624,25 +707,25 @@ def render_monitoring():
                         yaxis_title="Nombre",
                         hovermode='x unified'
                     )
-                    st.plotly_chart(fig, key="monitoring_chart", use_container_width=True)
+                    st.plotly_chart(fig, key="monitoring_page_chart", use_container_width=True)
 
-                # Tableau historique
-                df = pd.DataFrame(history)
+                # Tableau avec deltas
+                df_data = []
+                for h in history:
+                    delta_ads_str = f"{h['delta_ads']:+d}" if h["delta_ads"] != 0 else "-"
+                    delta_prod_str = f"{h['delta_produits']:+d}" if h["delta_produits"] != 0 else "-"
+                    df_data.append({
+                        "Date": h["date_scan"].strftime("%Y-%m-%d %H:%M") if h["date_scan"] else "",
+                        "Ads": h["nombre_ads_active"],
+                        "Δ Ads": delta_ads_str,
+                        "Produits": h["nombre_produits"],
+                        "Δ Produits": delta_prod_str
+                    })
+
+                df = pd.DataFrame(df_data)
                 st.dataframe(df, use_container_width=True, hide_index=True)
             else:
                 st.info("Aucun historique trouvé pour cette page")
-        except Exception as e:
-            st.error(f"Erreur: {e}")
-    else:
-        # Derniers scans
-        st.subheader("📊 Derniers scans enregistrés")
-        try:
-            recent = get_suivi_history(db, limit=30)
-            if recent:
-                df = pd.DataFrame(recent)
-                st.dataframe(df, use_container_width=True, hide_index=True)
-            else:
-                st.info("Aucun historique disponible")
         except Exception as e:
             st.error(f"Erreur: {e}")
 

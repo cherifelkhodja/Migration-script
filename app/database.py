@@ -27,6 +27,7 @@ class PageRecherche(Base):
     page_name = Column(String(255))
     lien_site = Column(String(500))
     lien_fb_ad_library = Column(String(500))
+    keywords = Column(Text)  # Keywords utilisés pour trouver cette page (séparés par |)
     thematique = Column(String(100))
     type_produits = Column(Text)
     moyens_paiements = Column(Text)
@@ -185,10 +186,11 @@ def save_pages_recherche(
 ) -> int:
     """
     Sauvegarde ou met à jour les pages dans liste_page_recherche
+    Si une page existe déjà, on ajoute les keywords s'ils ne sont pas déjà présents
 
     Args:
         db: Instance DatabaseManager
-        pages_final: Dictionnaire des pages
+        pages_final: Dictionnaire des pages (avec _keywords set pour chaque page)
         web_results: Résultats d'analyse web
         countries: Liste des pays
         languages: Liste des langues
@@ -204,35 +206,75 @@ def save_pages_recherche(
             web = web_results.get(pid, {})
             ads_count = data.get("ads_active_total", 0)
 
+            # Keywords de cette recherche (set -> liste)
+            new_keywords = data.get("_keywords", set())
+            if isinstance(new_keywords, set):
+                new_keywords = list(new_keywords)
+
             fb_link = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={countries[0]}&view_all_page_id={pid}"
 
-            page_data = {
-                "page_id": str(pid),
-                "page_name": data.get("page_name", ""),
-                "lien_site": data.get("website", ""),
-                "lien_fb_ad_library": fb_link,
-                "thematique": web.get("thematique", ""),
-                "type_produits": web.get("type_produits", ""),
-                "moyens_paiements": web.get("payments", ""),
-                "pays": ",".join(countries),
-                "langue": ",".join(languages),
-                "cms": data.get("cms") or web.get("cms", "Unknown"),
-                "template": web.get("theme", ""),
-                "devise": data.get("currency", ""),
-                "etat": get_etat_from_ads_count(ads_count),
-                "nombre_ads_active": ads_count,
-                "nombre_produits": web.get("product_count", 0),
-                "dernier_scan": scan_time,
-                "updated_at": scan_time,
-            }
+            # Vérifier si la page existe déjà
+            existing_page = session.query(PageRecherche).filter(
+                PageRecherche.page_id == str(pid)
+            ).first()
 
-            # Upsert (insert or update)
-            stmt = insert(PageRecherche).values(**page_data)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=['page_id'],
-                set_={k: v for k, v in page_data.items() if k != 'page_id'}
-            )
-            session.execute(stmt)
+            if existing_page:
+                # La page existe - mise à jour avec ajout des keywords
+                existing_keywords_str = existing_page.keywords or ""
+                existing_keywords_list = [k.strip() for k in existing_keywords_str.split("|") if k.strip()]
+
+                # Ajouter les nouveaux keywords s'ils ne sont pas déjà présents
+                for kw in new_keywords:
+                    if kw and kw not in existing_keywords_list:
+                        existing_keywords_list.append(kw)
+
+                merged_keywords = " | ".join(existing_keywords_list)
+
+                # Mise à jour des champs
+                existing_page.page_name = data.get("page_name", "") or existing_page.page_name
+                existing_page.lien_site = data.get("website", "") or existing_page.lien_site
+                existing_page.lien_fb_ad_library = fb_link
+                existing_page.keywords = merged_keywords
+                existing_page.thematique = web.get("thematique", "") or existing_page.thematique
+                existing_page.type_produits = web.get("type_produits", "") or existing_page.type_produits
+                existing_page.moyens_paiements = web.get("payments", "") or existing_page.moyens_paiements
+                existing_page.pays = ",".join(countries)
+                existing_page.langue = ",".join(languages)
+                existing_page.cms = data.get("cms") or web.get("cms", "") or existing_page.cms
+                existing_page.template = web.get("theme", "") or existing_page.template
+                existing_page.devise = data.get("currency", "") or existing_page.devise
+                existing_page.etat = get_etat_from_ads_count(ads_count)
+                existing_page.nombre_ads_active = ads_count
+                existing_page.nombre_produits = web.get("product_count", 0) or existing_page.nombre_produits
+                existing_page.dernier_scan = scan_time
+                existing_page.updated_at = scan_time
+            else:
+                # Nouvelle page - insertion
+                keywords_str = " | ".join(new_keywords) if new_keywords else ""
+
+                new_page = PageRecherche(
+                    page_id=str(pid),
+                    page_name=data.get("page_name", ""),
+                    lien_site=data.get("website", ""),
+                    lien_fb_ad_library=fb_link,
+                    keywords=keywords_str,
+                    thematique=web.get("thematique", ""),
+                    type_produits=web.get("type_produits", ""),
+                    moyens_paiements=web.get("payments", ""),
+                    pays=",".join(countries),
+                    langue=",".join(languages),
+                    cms=data.get("cms") or web.get("cms", "Unknown"),
+                    template=web.get("theme", ""),
+                    devise=data.get("currency", ""),
+                    etat=get_etat_from_ads_count(ads_count),
+                    nombre_ads_active=ads_count,
+                    nombre_produits=web.get("product_count", 0),
+                    dernier_scan=scan_time,
+                    created_at=scan_time,
+                    updated_at=scan_time,
+                )
+                session.add(new_page)
+
             count += 1
 
     return count
@@ -360,6 +402,8 @@ def get_all_pages(db: DatabaseManager, limit: int = 1000) -> List[Dict]:
                 "page_id": p.page_id,
                 "page_name": p.page_name,
                 "lien_site": p.lien_site,
+                "lien_fb_ad_library": p.lien_fb_ad_library,
+                "keywords": p.keywords,
                 "cms": p.cms,
                 "etat": p.etat,
                 "nombre_ads_active": p.nombre_ads_active,
@@ -473,6 +517,7 @@ def search_pages(
                 "page_name": p.page_name,
                 "lien_site": p.lien_site,
                 "lien_fb_ad_library": p.lien_fb_ad_library,
+                "keywords": p.keywords,
                 "cms": p.cms,
                 "etat": p.etat,
                 "nombre_ads_active": p.nombre_ads_active,
@@ -484,3 +529,127 @@ def search_pages(
             }
             for p in pages
         ]
+
+
+def get_evolution_stats(
+    db: DatabaseManager,
+    period_days: int = 7
+) -> List[Dict]:
+    """
+    Récupère les statistiques d'évolution des pages depuis le dernier scan
+
+    Args:
+        db: Instance DatabaseManager
+        period_days: Nombre de jours pour la période (7, 14, 30)
+
+    Returns:
+        Liste des évolutions avec delta ads/produits et durée entre scans
+    """
+    from datetime import timedelta
+    from sqlalchemy import func, desc
+
+    cutoff_date = datetime.utcnow() - timedelta(days=period_days)
+
+    with db.get_session() as session:
+        # Récupérer les pages avec au moins 2 entrées dans suivi_page
+        subquery = session.query(
+            SuiviPage.page_id,
+            func.count(SuiviPage.id).label('scan_count')
+        ).filter(
+            SuiviPage.date_scan >= cutoff_date
+        ).group_by(SuiviPage.page_id).having(
+            func.count(SuiviPage.id) >= 2
+        ).subquery()
+
+        # Pour chaque page, récupérer les 2 derniers scans
+        results = []
+
+        page_ids = session.query(subquery.c.page_id).all()
+
+        for (page_id,) in page_ids:
+            # Récupérer les 2 derniers scans pour cette page
+            scans = session.query(SuiviPage).filter(
+                SuiviPage.page_id == page_id
+            ).order_by(desc(SuiviPage.date_scan)).limit(2).all()
+
+            if len(scans) >= 2:
+                current = scans[0]
+                previous = scans[1]
+
+                # Calculer la durée entre les scans
+                duration = current.date_scan - previous.date_scan
+                duration_hours = duration.total_seconds() / 3600
+
+                # Calculer les deltas
+                delta_ads = current.nombre_ads_active - previous.nombre_ads_active
+                delta_produits = current.nombre_produits - previous.nombre_produits
+
+                # Calculer le % de changement
+                pct_ads = (delta_ads / previous.nombre_ads_active * 100) if previous.nombre_ads_active > 0 else 0
+                pct_produits = (delta_produits / previous.nombre_produits * 100) if previous.nombre_produits > 0 else 0
+
+                results.append({
+                    "page_id": page_id,
+                    "nom_site": current.nom_site,
+                    "ads_actuel": current.nombre_ads_active,
+                    "ads_precedent": previous.nombre_ads_active,
+                    "delta_ads": delta_ads,
+                    "pct_ads": round(pct_ads, 1),
+                    "produits_actuel": current.nombre_produits,
+                    "produits_precedent": previous.nombre_produits,
+                    "delta_produits": delta_produits,
+                    "pct_produits": round(pct_produits, 1),
+                    "date_actuel": current.date_scan,
+                    "date_precedent": previous.date_scan,
+                    "duree_heures": round(duration_hours, 1),
+                    "duree_jours": round(duration_hours / 24, 1)
+                })
+
+        # Trier par delta ads décroissant (les plus gros changements en premier)
+        results.sort(key=lambda x: abs(x["delta_ads"]), reverse=True)
+
+        return results
+
+
+def get_page_evolution_history(
+    db: DatabaseManager,
+    page_id: str,
+    limit: int = 50
+) -> List[Dict]:
+    """
+    Récupère l'historique complet d'évolution d'une page
+
+    Args:
+        db: Instance DatabaseManager
+        page_id: ID de la page
+        limit: Nombre max d'entrées
+
+    Returns:
+        Liste des scans avec évolution
+    """
+    from sqlalchemy import desc
+
+    with db.get_session() as session:
+        scans = session.query(SuiviPage).filter(
+            SuiviPage.page_id == page_id
+        ).order_by(desc(SuiviPage.date_scan)).limit(limit).all()
+
+        results = []
+        for i, scan in enumerate(scans):
+            entry = {
+                "date_scan": scan.date_scan,
+                "nombre_ads_active": scan.nombre_ads_active,
+                "nombre_produits": scan.nombre_produits,
+                "delta_ads": 0,
+                "delta_produits": 0
+            }
+
+            # Calculer le delta par rapport au scan précédent
+            if i < len(scans) - 1:
+                prev = scans[i + 1]
+                entry["delta_ads"] = scan.nombre_ads_active - prev.nombre_ads_active
+                entry["delta_produits"] = scan.nombre_produits - prev.nombre_produits
+
+            results.append(entry)
+
+        return results
