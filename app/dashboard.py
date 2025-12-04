@@ -11,6 +11,10 @@ from pathlib import Path
 # Ajouter le dossier parent au path pour les imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Charger les variables d'environnement depuis .env
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent / ".env")
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
