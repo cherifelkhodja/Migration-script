@@ -270,7 +270,7 @@ def render_search_ads():
                 format_func=lambda x: f"{x} - {AVAILABLE_LANGUAGES[x]}"
             )
 
-            min_ads = st.slider("Min. ads pour inclusion", 5, 50, MIN_ADS_INITIAL)
+            min_ads = st.slider("Min. ads pour inclusion", 1, 50, MIN_ADS_INITIAL)
 
     # CMS Filter
     cms_options = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow", "Autre/Inconnu"]

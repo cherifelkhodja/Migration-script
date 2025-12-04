@@ -26,7 +26,7 @@ LIMIT_COUNT = 500
 LIMIT_MIN = 100
 
 # Seuils de filtrage
-MIN_ADS_INITIAL = 5      # Filtre préliminaire (recherche keywords)
+MIN_ADS_INITIAL = 1      # Filtre préliminaire (recherche keywords)
 MIN_ADS_FOR_EXPORT = 15  # CSV 1 & 3
 MIN_ADS_FOR_ADS_CSV = 25 # CSV 2
 
