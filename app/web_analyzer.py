@@ -259,7 +259,10 @@ def collect_text_for_classification(base_url: str, html: str) -> str:
 
 
 def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> int:
-    """Compte les produits Shopify via sitemaps"""
+    """
+    Compte les produits Shopify via sitemaps - Version améliorée
+    Gère les différents formats de sitemaps multi-pays Shopify
+    """
     def get_text(u):
         try:
             r = requests.get(u, headers=HEADERS, timeout=REQUEST_TIMEOUT)
@@ -273,45 +276,138 @@ def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> 
     origin = origin.rstrip("/")
 
     country_lower = country_code.lower()
+    country_upper = country_code.upper()
     total = 0
 
-    sm = get_text(urljoin(origin, "/sitemap.xml"))
-    if not sm:
-        return 0
-
-    locs = re.findall(r"<loc>([^<]+)</loc>", sm)
-
-    # Chercher sitemaps avec code pays
-    product_sitemaps = [
-        loc for loc in locs
-        if f"sitemap_products_{country_lower}" in loc.lower() or f"products_{country_lower}" in loc.lower()
+    # Essayer plusieurs URLs de sitemap index
+    sitemap_urls = [
+        f"{origin}/sitemap.xml",
+        f"{origin}/{country_lower}/sitemap.xml",
+        f"{origin}/sitemap_index.xml",
     ]
 
-    # Fallback sur sitemaps globaux
-    if not product_sitemaps:
-        product_sitemaps = [loc for loc in locs if "sitemap_products" in loc]
+    locs = []
+    for sitemap_url in sitemap_urls:
+        sm = get_text(sitemap_url)
+        if sm:
+            locs.extend(re.findall(r"<loc>([^<]+)</loc>", sm))
+            break
 
-    # Essayer URLs directes
-    if not product_sitemaps:
-        for i in range(1, 6):
-            product_sitemaps.append(urljoin(origin, f"/sitemap_products_{country_lower}_{i}.xml"))
-        for i in range(1, 6):
-            product_sitemaps.append(urljoin(origin, f"/sitemap_products_{i}.xml"))
+    if not locs:
+        # Fallback: essayer de compter via /products.json
+        return _count_products_via_api(origin)
 
+    # Patterns pour trouver les sitemaps de produits par pays
+    # Shopify utilise différents formats:
+    # - /sitemap_products_1.xml?from=123&to=456
+    # - /fr/sitemap_products_1.xml
+    # - /sitemap_products_fr_1.xml
+    # - /en-fr/sitemap_products_1.xml
+
+    product_sitemaps = []
+
+    # 1. Chercher sitemaps avec code pays dans le path ou le nom
+    for loc in locs:
+        loc_lower = loc.lower()
+        if "sitemap_products" in loc_lower:
+            # Priorité aux sitemaps du pays spécifique
+            if (f"/{country_lower}/" in loc_lower or
+                f"_{country_lower}_" in loc_lower or
+                f"_{country_lower}." in loc_lower or
+                f"-{country_lower}/" in loc_lower or
+                f"/{country_lower}-" in loc_lower):
+                product_sitemaps.insert(0, loc)  # Priorité haute
+            else:
+                product_sitemaps.append(loc)
+
+    # 2. Si aucun sitemap trouvé, essayer des URLs directes
+    if not product_sitemaps:
+        direct_urls = [
+            # Format avec code pays
+            f"{origin}/{country_lower}/sitemap_products_1.xml",
+            f"{origin}/sitemap_products_{country_lower}_1.xml",
+            # Format standard
+            f"{origin}/sitemap_products_1.xml",
+            f"{origin}/sitemap_products.xml",
+        ]
+        for url in direct_urls:
+            if get_text(url):
+                product_sitemaps.append(url)
+                break
+
+    # 3. Compter les produits dans les sitemaps
+    seen_urls = set()
     for smu in product_sitemaps:
+        if smu in seen_urls:
+            continue
+        seen_urls.add(smu)
+
         txt = get_text(smu)
         if not txt:
-            if "sitemap_products" in smu and total > 0:
-                break
             continue
 
-        count = len(re.findall(r"<url>", txt))
-        total += count
+        # Compter les URLs de produits
+        # Filtrer pour ne compter que les URLs de produits du bon pays si possible
+        product_urls = re.findall(r"<loc>([^<]*?/products/[^<]+)</loc>", txt, re.I)
+
+        if product_urls:
+            # Filtrer par pays si URLs contiennent le code pays
+            country_urls = [u for u in product_urls if f"/{country_lower}/" in u.lower()]
+            if country_urls:
+                total += len(country_urls)
+            else:
+                total += len(product_urls)
+        else:
+            # Fallback: compter toutes les URLs
+            count = len(re.findall(r"<url>", txt))
+            total += count
 
         if total > 10000:
             break
 
+    # 4. Si toujours 0, essayer l'API
+    if total == 0:
+        total = _count_products_via_api(origin)
+
     return total
+
+
+def _count_products_via_api(origin: str) -> int:
+    """Compte les produits via l'API Shopify /products.json"""
+    try:
+        # L'API retourne max 250 produits par page, on estime le total
+        url = f"{origin}/products.json?limit=250"
+        r = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+
+        if r.status_code != 200:
+            return 0
+
+        data = r.json()
+        products = data.get("products", [])
+        count = len(products)
+
+        # Si on a 250 produits, il y en a probablement plus
+        if count == 250:
+            # Essayer de paginer pour avoir un meilleur compte
+            page = 2
+            while page <= 10:  # Max 10 pages = 2500 produits
+                url = f"{origin}/products.json?limit=250&page={page}"
+                r = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+                if r.status_code != 200:
+                    break
+                data = r.json()
+                batch = data.get("products", [])
+                if not batch:
+                    break
+                count += len(batch)
+                if len(batch) < 250:
+                    break
+                page += 1
+
+        return count
+
+    except:
+        return 0
 
 
 def extract_currency_from_html(html: str) -> Optional[str]:
