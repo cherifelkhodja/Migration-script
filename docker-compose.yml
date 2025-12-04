@@ -12,6 +12,8 @@ services:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - meta_ads_network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-meta_ads}"]
       interval: 10s
@@ -35,11 +37,17 @@ services:
       - "${APP_PORT:-8501}:8501"
     volumes:
       - ./résultats:/app/résultats
+    networks:
+      - meta_ads_network
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8501/_stcore/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+
+networks:
+  meta_ads_network:
+    driver: bridge
 
 volumes:
   postgres_data:
