@@ -262,6 +262,11 @@ def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> 
     """
     Compte les produits Shopify via sitemaps - Version améliorée
     Gère les différents formats de sitemaps multi-pays Shopify
+
+    Logique:
+    1. Sitemap avec code pays explicite (/{country}/) -> priorité haute
+    2. Sitemap "root" sans préfixe de langue -> version par défaut du site
+    3. Éviter les sitemaps des autres langues
     """
     def get_text(u):
         try:
@@ -276,66 +281,70 @@ def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> 
     origin = origin.rstrip("/")
 
     country_lower = country_code.lower()
-    country_upper = country_code.upper()
     total = 0
 
-    # Essayer plusieurs URLs de sitemap index
-    sitemap_urls = [
-        f"{origin}/sitemap.xml",
-        f"{origin}/{country_lower}/sitemap.xml",
-        f"{origin}/sitemap_index.xml",
-    ]
+    # Codes langues connus à exclure (sauf si c'est notre pays)
+    other_languages = {"en", "es", "de", "it", "pt", "nl", "pl", "ru", "ja", "zh", "ko", "ar"}
+    other_languages.discard(country_lower)  # Ne pas exclure notre pays
 
-    locs = []
-    for sitemap_url in sitemap_urls:
-        sm = get_text(sitemap_url)
-        if sm:
-            locs.extend(re.findall(r"<loc>([^<]+)</loc>", sm))
-            break
-
-    if not locs:
-        # Fallback: essayer de compter via /products.json
+    # Récupérer le sitemap index
+    sm = get_text(f"{origin}/sitemap.xml")
+    if not sm:
         return _count_products_via_api(origin)
 
-    # Patterns pour trouver les sitemaps de produits par pays
-    # Shopify utilise différents formats:
-    # - /sitemap_products_1.xml?from=123&to=456
-    # - /fr/sitemap_products_1.xml
-    # - /sitemap_products_fr_1.xml
-    # - /en-fr/sitemap_products_1.xml
+    locs = re.findall(r"<loc>([^<]+)</loc>", sm)
 
-    product_sitemaps = []
+    # Séparer les sitemaps produits
+    product_sitemaps_country = []  # Sitemaps avec notre code pays
+    product_sitemaps_root = []     # Sitemaps "root" (sans préfixe langue)
 
-    # 1. Chercher sitemaps avec code pays dans le path ou le nom
     for loc in locs:
         loc_lower = loc.lower()
-        if "sitemap_products" in loc_lower:
-            # Priorité aux sitemaps du pays spécifique
-            if (f"/{country_lower}/" in loc_lower or
-                f"_{country_lower}_" in loc_lower or
-                f"_{country_lower}." in loc_lower or
-                f"-{country_lower}/" in loc_lower or
-                f"/{country_lower}-" in loc_lower):
-                product_sitemaps.insert(0, loc)  # Priorité haute
-            else:
-                product_sitemaps.append(loc)
 
-    # 2. Si aucun sitemap trouvé, essayer des URLs directes
-    if not product_sitemaps:
-        direct_urls = [
-            # Format avec code pays
-            f"{origin}/{country_lower}/sitemap_products_1.xml",
-            f"{origin}/sitemap_products_{country_lower}_1.xml",
-            # Format standard
-            f"{origin}/sitemap_products_1.xml",
-            f"{origin}/sitemap_products.xml",
-        ]
-        for url in direct_urls:
-            if get_text(url):
-                product_sitemaps.append(url)
-                break
+        # On ne s'intéresse qu'aux sitemaps produits
+        if "sitemap_products" not in loc_lower:
+            continue
 
-    # 3. Compter les produits dans les sitemaps
+        # Extraire le path après le domaine
+        try:
+            parsed = urlparse(loc)
+            path = parsed.path.lower()
+        except:
+            path = loc_lower
+
+        # Vérifier si c'est un sitemap avec préfixe de langue
+        has_language_prefix = False
+        is_our_country = False
+
+        # Pattern: /xx/ ou /xx-xx/ au début du path
+        lang_match = re.match(r'^/([a-z]{2})(?:-[a-z]{2})?/', path)
+        if lang_match:
+            lang = lang_match.group(1)
+            has_language_prefix = True
+            if lang == country_lower:
+                is_our_country = True
+            elif lang in other_languages:
+                # C'est une autre langue, on ignore
+                continue
+
+        # Classifier le sitemap
+        if is_our_country:
+            # Sitemap avec notre code pays -> priorité maximale
+            product_sitemaps_country.append(loc)
+        elif not has_language_prefix:
+            # Sitemap "root" sans préfixe -> version par défaut
+            product_sitemaps_root.append(loc)
+
+    # Choisir les sitemaps à utiliser (priorité: pays > root)
+    if product_sitemaps_country:
+        product_sitemaps = product_sitemaps_country
+    elif product_sitemaps_root:
+        product_sitemaps = product_sitemaps_root
+    else:
+        # Fallback: essayer l'API
+        return _count_products_via_api(origin)
+
+    # Compter les produits
     seen_urls = set()
     for smu in product_sitemaps:
         if smu in seen_urls:
@@ -346,26 +355,14 @@ def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> 
         if not txt:
             continue
 
-        # Compter les URLs de produits
-        # Filtrer pour ne compter que les URLs de produits du bon pays si possible
-        product_urls = re.findall(r"<loc>([^<]*?/products/[^<]+)</loc>", txt, re.I)
-
-        if product_urls:
-            # Filtrer par pays si URLs contiennent le code pays
-            country_urls = [u for u in product_urls if f"/{country_lower}/" in u.lower()]
-            if country_urls:
-                total += len(country_urls)
-            else:
-                total += len(product_urls)
-        else:
-            # Fallback: compter toutes les URLs
-            count = len(re.findall(r"<url>", txt))
-            total += count
+        # Compter les URLs
+        count = len(re.findall(r"<url>", txt))
+        total += count
 
         if total > 10000:
             break
 
-    # 4. Si toujours 0, essayer l'API
+    # Si toujours 0, essayer l'API
     if total == 0:
         total = _count_products_via_api(origin)
 
