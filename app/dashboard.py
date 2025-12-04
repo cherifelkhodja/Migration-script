@@ -29,7 +29,7 @@ from app.config import (
     DEFAULT_COUNTRIES, DEFAULT_LANGUAGES
 )
 from app.meta_api import MetaAdsClient, extract_website_from_ads, extract_currency_from_ads
-from app.shopify_detector import check_shopify_http
+from app.shopify_detector import detect_cms_from_url
 from app.web_analyzer import analyze_website_complete
 from app.utils import (
     load_blacklist, is_blacklisted, create_dataframe_pages,
@@ -235,7 +235,9 @@ def run_search(config: dict):
                 "ads_found_search": 0,
                 "ads_active_total": -1,
                 "currency": "",
-                "is_shopify": False
+                "cms": "Unknown",
+                "is_shopify": False,
+                "cms_confidence": 0
             }
 
         ad_id = ad.get("id")
@@ -287,33 +289,45 @@ def run_search(config: dict):
     st.success(f"Sites trouvés: {sites_found}/{len(pages_filtered)}")
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # PHASE 4: DÉTECTION SHOPIFY
+    # PHASE 4: DÉTECTION CMS
     # ═══════════════════════════════════════════════════════════════════════════
-    st.header("🛍️ Phase 4: Détection Shopify")
+    st.header("🔍 Phase 4: Détection CMS")
 
     pages_with_sites = {pid: data for pid, data in pages_filtered.items() if data["website"]}
     progress_bar = st.progress(0)
     status_text = st.empty()
 
-    shopify_count = 0
+    cms_counts = defaultdict(int)
     for i, (pid, data) in enumerate(pages_with_sites.items()):
-        status_text.text(f"Vérification: {data['page_name'][:40]}...")
-        is_shopify = check_shopify_http(data["website"])
+        status_text.text(f"Détection CMS: {data['page_name'][:40]}...")
 
-        if is_shopify:
-            data["is_shopify"] = True
-            shopify_count += 1
+        cms_result = detect_cms_from_url(data["website"])
+        data["cms"] = cms_result["cms"]
+        data["is_shopify"] = cms_result["is_shopify"]
+        data["cms_confidence"] = cms_result["confidence"]
+
+        cms_counts[cms_result["cms"]] += 1
 
         progress_bar.progress((i + 1) / len(pages_with_sites))
-        time.sleep(0.2)
+        time.sleep(0.15)
 
     status_text.empty()
-    pages_shopify = {pid: data for pid, data in pages_filtered.items() if data["is_shopify"]}
 
-    st.success(f"Sites Shopify détectés: {shopify_count}/{len(pages_with_sites)}")
+    # Afficher les stats CMS
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Shopify", cms_counts.get("Shopify", 0))
+    col2.metric("WooCommerce", cms_counts.get("WooCommerce", 0))
+    col3.metric("Autres CMS", sum(v for k, v in cms_counts.items() if k not in ["Shopify", "WooCommerce", "Unknown"]))
 
-    if not pages_shopify:
-        st.warning("Aucun site Shopify trouvé.")
+    # Résumé des CMS détectés
+    cms_summary = ", ".join([f"{k}: {v}" for k, v in sorted(cms_counts.items(), key=lambda x: -x[1]) if v > 0])
+    st.info(f"CMS détectés: {cms_summary}")
+
+    # Garder toutes les pages avec un site (pas de filtre sur CMS)
+    pages_with_cms = {pid: data for pid, data in pages_with_sites.items()}
+
+    if not pages_with_cms:
+        st.warning("Aucun site trouvé.")
         return
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -324,7 +338,7 @@ def run_search(config: dict):
     progress_bar = st.progress(0)
     status_text = st.empty()
 
-    for i, (pid, data) in enumerate(pages_shopify.items()):
+    for i, (pid, data) in enumerate(pages_with_cms.items()):
         status_text.text(f"Comptage: {data['page_name'][:40]}...")
 
         ads_complete, count = client.fetch_all_ads_for_page(pid, countries, languages)
@@ -337,21 +351,21 @@ def run_search(config: dict):
         else:
             data["ads_active_total"] = data["ads_found_search"]
 
-        progress_bar.progress((i + 1) / len(pages_shopify))
-        time.sleep(0.2)
+        progress_bar.progress((i + 1) / len(pages_with_cms))
+        time.sleep(0.15)
 
     status_text.empty()
 
     # Filtre final
     pages_final = {
-        pid: data for pid, data in pages_shopify.items()
+        pid: data for pid, data in pages_with_cms.items()
         if data["ads_active_total"] >= min_ads_export
     }
 
-    st.success(f"Pages Shopify ≥{min_ads_export} ads: {len(pages_final)}")
+    st.success(f"Pages ≥{min_ads_export} ads: {len(pages_final)}")
 
     if not pages_final:
-        st.warning(f"Aucune page Shopify avec ≥{min_ads_export} ads.")
+        st.warning(f"Aucune page avec ≥{min_ads_export} ads.")
         return
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -380,6 +394,11 @@ def run_search(config: dict):
 
     status_text.empty()
 
+    # Compter les CMS dans les résultats finaux
+    final_cms_counts = defaultdict(int)
+    for data in pages_final.values():
+        final_cms_counts[data.get("cms", "Unknown")] += 1
+
     # Sauvegarder dans session state
     st.session_state.pages_final = pages_final
     st.session_state.web_results = web_results
@@ -388,9 +407,10 @@ def run_search(config: dict):
         'total_ads': len(all_ads),
         'total_pages': len(pages),
         'pages_filtered': len(pages_filtered),
-        'pages_shopify': len(pages_shopify),
+        'pages_with_cms': len(pages_with_cms),
         'pages_final': len(pages_final),
-        'total_products': sum(r.get("product_count", 0) for r in web_results.values())
+        'total_products': sum(r.get("product_count", 0) for r in web_results.values()),
+        'cms_counts': dict(final_cms_counts)
     }
 
     st.success("Analyse terminée !")
@@ -411,11 +431,12 @@ def render_results():
     # ═══════════════════════════════════════════════════════════════════════════
     st.header("📈 Statistiques")
 
+    cms_counts = stats.get('cms_counts', {})
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Annonces", stats.get('total_ads', 0))
     col2.metric("Pages Analysées", stats.get('pages_final', 0))
     col3.metric("Total Produits", stats.get('total_products', 0))
-    col4.metric("Sites Shopify", stats.get('pages_shopify', 0))
+    col4.metric("Shopify", cms_counts.get('Shopify', 0))
 
     st.divider()
 
@@ -427,12 +448,23 @@ def render_results():
     df = create_dataframe_pages(pages_final, web_results, ["FR"])
 
     # Graphiques
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
+        if not df.empty and 'CMS' in df.columns:
+            cms_data = df['CMS'].value_counts()
+            if not cms_data.empty:
+                fig = px.pie(
+                    values=cms_data.values,
+                    names=cms_data.index,
+                    title="Répartition par CMS"
+                )
+                st.plotly_chart(fig, width="stretch")
+
+    with col2:
         if not df.empty and 'Thématique' in df.columns:
             theme_counts = df['Thématique'].value_counts()
-            if not theme_counts.empty:
+            if not theme_counts.empty and theme_counts.iloc[0] > 0:
                 fig = px.pie(
                     values=theme_counts.values,
                     names=theme_counts.index,
@@ -440,7 +472,7 @@ def render_results():
                 )
                 st.plotly_chart(fig, width="stretch")
 
-    with col2:
+    with col3:
         if not df.empty and 'Ads Actives' in df.columns:
             fig = px.histogram(
                 df,

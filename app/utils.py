@@ -219,14 +219,16 @@ def create_dataframe_pages(pages_final: Dict, web_results: Dict, countries: List
     rows = []
     for pid, data in pages_final.items():
         web = web_results.get(pid, {})
+        # CMS peut venir de data (détection) ou de web (analyse)
+        cms = data.get("cms") or web.get("cms", "Unknown")
         rows.append({
             "Page ID": pid,
             "Nom": data.get("page_name", ""),
             "Site Web": data.get("website", ""),
             "Ads Actives": data.get("ads_active_total", 0),
             "Produits": web.get("product_count", 0),
+            "CMS": cms,
             "Thématique": web.get("thematique", ""),
-            "CMS": web.get("cms", ""),
             "Thème": web.get("theme", ""),
             "Devise": data.get("currency", ""),
             "Paiements": web.get("payments", ""),
