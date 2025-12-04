@@ -674,7 +674,7 @@ def render_history():
                         title="Répartition par état",
                         labels={"x": "État", "y": "Nombre de pages"}
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, key="hist_etats_chart", use_container_width=True)
 
         with col2:
             cms_stats = stats.get("cms", {})
@@ -684,7 +684,7 @@ def render_history():
                     names=list(cms_stats.keys()),
                     title="Répartition par CMS"
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, key="hist_cms_chart", use_container_width=True)
 
     except Exception as e:
         st.error(f"Erreur lors de la récupération des stats: {e}")
@@ -727,7 +727,6 @@ def render_history():
                 df = pd.DataFrame(results)
                 st.dataframe(
                     df,
-                    use_container_width=True,
                     height=400,
                     column_config={
                         "lien_site": st.column_config.LinkColumn("Site"),
@@ -780,9 +779,9 @@ def render_history():
                         xaxis_title="Date",
                         yaxis_title="Nombre"
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, key="hist_evolution_chart")
 
-                st.dataframe(df, use_container_width=True, height=300)
+                st.dataframe(df, height=300)
                 st.info(f"{len(history)} entrées d'historique")
             else:
                 st.info("Aucun historique trouvé")
