@@ -161,7 +161,10 @@ class MetaAdsClient:
 
 
 def extract_website_from_ads(ads_list: List[dict]) -> str:
-    """Extrait l'URL du site web depuis les annonces - Version améliorée"""
+    """
+    Extrait l'URL du site web depuis les annonces - Version améliorée
+    Utilise plusieurs méthodes et un système de scoring
+    """
     if not ads_list:
         return ""
 
@@ -169,34 +172,61 @@ def extract_website_from_ads(ads_list: List[dict]) -> str:
 
     # Liste étendue des domaines à exclure
     excluded_domains = [
-        "facebook.com", "instagram.com", "fb.me", "fb.com",
+        # Réseaux sociaux
+        "facebook.com", "instagram.com", "fb.me", "fb.com", "fb.watch",
         "messenger.com", "whatsapp.com", "meta.com",
-        "google.com", "youtube.com", "youtu.be",
-        "twitter.com", "x.com", "tiktok.com",
-        "bit.ly", "goo.gl", "t.co", "ow.ly",
-        "linktr.ee", "linkin.bio"
+        "twitter.com", "x.com", "tiktok.com", "pinterest.com",
+        "linkedin.com", "snapchat.com", "threads.net",
+        # Google
+        "google.com", "google.fr", "youtube.com", "youtu.be", "goo.gl",
+        # Raccourcisseurs
+        "bit.ly", "t.co", "ow.ly", "tinyurl.com", "short.link",
+        "rebrand.ly", "cutt.ly", "is.gd",
+        # Autres
+        "linktr.ee", "linkin.bio", "beacons.ai", "allmylinks.com",
+        "shopify.com", "myshopify.com",  # Domaines Shopify génériques
+        "wixsite.com", "squarespace.com",
+        "apple.com", "apps.apple.com", "play.google.com",
     ]
+
+    # Extensions de domaines valides (étendu)
+    valid_tlds = (
+        # Génériques
+        "com", "net", "org", "co", "io", "app", "dev", "me", "info", "biz",
+        # E-commerce
+        "shop", "store", "boutique", "buy", "sale", "deals",
+        # Pays européens
+        "fr", "de", "es", "it", "pt", "nl", "be", "ch", "at", "lu",
+        "uk", "co.uk", "ie", "pl", "se", "no", "dk", "fi",
+        # Autres pays
+        "ca", "us", "au", "nz", "br", "mx", "ar",
+        # Nouveaux TLDs
+        "online", "site", "website", "web", "live", "world", "tech",
+        "fashion", "beauty", "style", "fit", "health", "life",
+    )
 
     # Patterns regex améliorés
     url_patterns = [
-        # URL complète
-        r'https?://(?:www\.)?([a-z0-9][-a-z0-9]*\.[a-z]{2,}(?:\.[a-z]{2,})?)',
-        # Domaine simple avec extension
-        r'\b([a-z0-9][-a-z0-9]*\.(?:com|fr|net|org|co|io|shop|store|boutique|eu|be|ch|ca|de|es|it|uk|nl))\b',
+        # URL complète avec protocole
+        r'https?://(?:www\.)?([a-z0-9][-a-z0-9]*(?:\.[a-z0-9][-a-z0-9]*)*\.[a-z]{2,})',
+        # Domaine avec www
+        r'www\.([a-z0-9][-a-z0-9]*(?:\.[a-z0-9][-a-z0-9]*)*\.[a-z]{2,})',
+        # Domaine simple (mot.extension)
+        r'\b([a-z0-9][-a-z0-9]{1,}\.(?:' + '|'.join(valid_tlds) + r'))\b',
         # Domaine avec sous-domaine
-        r'\b(?:www\.)?([a-z0-9][-a-z0-9]*\.[a-z]{2,}(?:\.[a-z]{2,})?)\b',
+        r'\b([a-z0-9][-a-z0-9]*\.[a-z0-9][-a-z0-9]*\.(?:' + '|'.join(valid_tlds[:20]) + r'))\b',
     ]
 
     for ad in ads_list:
         # Champs à vérifier (ordre de priorité)
-        fields_to_check = [
-            "ad_creative_link_captions",  # Souvent le domaine exact
-            "ad_creative_link_titles",
-            "ad_creative_bodies",          # Corps de l'annonce
-            "ad_snapshot_url",             # URL du snapshot
-        ]
+        fields_priority = {
+            "ad_creative_link_captions": 5,   # Très fiable - c'est souvent le domaine exact
+            "ad_creative_link_titles": 3,     # Fiable
+            "ad_creative_link_descriptions": 2,
+            "ad_creative_bodies": 1,          # Moins fiable mais utile
+        }
 
-        for field in fields_to_check:
+        for field, base_weight in fields_priority.items():
             values = ad.get(field, [])
 
             # Normaliser en liste
@@ -211,37 +241,66 @@ def extract_website_from_ads(ads_list: List[dict]) -> str:
 
                 val_str = str(val).strip().lower()
 
-                # Appliquer chaque pattern
+                # Méthode 1: Le caption EST souvent le domaine directement
+                if field == "ad_creative_link_captions":
+                    # Nettoyer et vérifier si c'est un domaine valide
+                    clean_caption = val_str.replace("www.", "").strip("/").strip()
+                    if "." in clean_caption and len(clean_caption) < 50:
+                        # Vérifier que ça ressemble à un domaine
+                        if re.match(r'^[a-z0-9][-a-z0-9]*\.[a-z]{2,}(?:\.[a-z]{2,})?$', clean_caption):
+                            if not any(exc in clean_caption for exc in excluded_domains):
+                                url_counter[clean_caption] += 10  # Très haute priorité
+
+                # Méthode 2: Extraction par regex
                 for pattern in url_patterns:
                     matches = re.findall(pattern, val_str)
                     for match in matches:
                         # Nettoyer le domaine
                         clean = match.replace("www.", "").strip("/").strip(".")
 
-                        # Vérifications
-                        if len(clean) < 4:
+                        # Vérifications de base
+                        if len(clean) < 4 or len(clean) > 60:
                             continue
                         if "." not in clean:
                             continue
                         if any(exc in clean for exc in excluded_domains):
                             continue
-                        # Éviter les faux positifs (fichiers, etc.)
-                        if clean.endswith(('.js', '.css', '.png', '.jpg', '.gif')):
+                        # Éviter les faux positifs
+                        if clean.endswith(('.js', '.css', '.png', '.jpg', '.gif', '.svg', '.webp')):
+                            continue
+                        if clean.startswith(('cdn.', 'static.', 'assets.', 'img.', 'images.')):
+                            continue
+                        # Éviter les emails
+                        if '@' in val_str and clean in val_str.split('@')[1]:
                             continue
 
-                        # Bonus pour les champs prioritaires
-                        weight = 1
-                        if field == "ad_creative_link_captions":
-                            weight = 3  # Plus de poids pour les captions
-                        elif field == "ad_creative_link_titles":
-                            weight = 2
+                        url_counter[clean] += base_weight
 
-                        url_counter[clean] += weight
+        # Méthode 3: Extraire depuis page_name si c'est un domaine
+        page_name = ad.get("page_name", "")
+        if page_name:
+            page_name_lower = page_name.lower().strip()
+            # Vérifier si le page_name ressemble à un domaine
+            if "." in page_name_lower and " " not in page_name_lower:
+                clean_name = page_name_lower.replace("www.", "").strip("/")
+                if re.match(r'^[a-z0-9][-a-z0-9]*\.[a-z]{2,}(?:\.[a-z]{2,})?$', clean_name):
+                    if not any(exc in clean_name for exc in excluded_domains):
+                        url_counter[clean_name] += 2  # Poids moyen
 
     if not url_counter:
         return ""
 
+    # Prendre le domaine le plus fréquent
     most_common = url_counter.most_common(1)[0][0]
+
+    # Valider que c'est bien un domaine valide
+    if not re.match(r'^[a-z0-9][-a-z0-9]*\.[a-z]{2,}', most_common):
+        # Essayer le second choix
+        if len(url_counter) > 1:
+            most_common = url_counter.most_common(2)[1][0]
+        else:
+            return ""
+
     if not most_common.startswith("http"):
         most_common = "https://" + most_common
 
