@@ -249,6 +249,22 @@ def render_search_ads():
         render_preview_results()
         return
 
+    # Sélection du mode de recherche
+    search_mode = st.radio(
+        "Mode de recherche",
+        ["🔤 Par mots-clés", "🆔 Par Page IDs"],
+        horizontal=True,
+        help="Choisissez entre recherche par mots-clés ou directement par Page IDs"
+    )
+
+    if search_mode == "🔤 Par mots-clés":
+        render_keyword_search()
+    else:
+        render_page_id_search()
+
+
+def render_keyword_search():
+    """Recherche par mots-clés"""
     # Configuration de recherche
     with st.expander("⚙️ Configuration de recherche", expanded=True):
         col1, col2 = st.columns(2)
@@ -258,7 +274,8 @@ def render_search_ads():
                 "Token Meta API",
                 type="password",
                 value=os.getenv("META_ACCESS_TOKEN", ""),
-                help="Votre token d'accès Meta Ads API"
+                help="Votre token d'accès Meta Ads API",
+                key="token_keyword"
             )
 
             keywords_input = st.text_area(
@@ -273,31 +290,34 @@ def render_search_ads():
                 "Pays cibles",
                 options=list(AVAILABLE_COUNTRIES.keys()),
                 default=DEFAULT_COUNTRIES,
-                format_func=lambda x: f"{x} - {AVAILABLE_COUNTRIES[x]}"
+                format_func=lambda x: f"{x} - {AVAILABLE_COUNTRIES[x]}",
+                key="countries_keyword"
             )
 
             languages = st.multiselect(
                 "Langues",
                 options=list(AVAILABLE_LANGUAGES.keys()),
                 default=DEFAULT_LANGUAGES,
-                format_func=lambda x: f"{x} - {AVAILABLE_LANGUAGES[x]}"
+                format_func=lambda x: f"{x} - {AVAILABLE_LANGUAGES[x]}",
+                key="languages_keyword"
             )
 
-            min_ads = st.slider("Min. ads pour inclusion", 1, 50, MIN_ADS_INITIAL)
+            min_ads = st.slider("Min. ads pour inclusion", 1, 50, MIN_ADS_INITIAL, key="min_ads_keyword")
 
     # CMS Filter
     cms_options = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow", "Autre/Inconnu"]
-    selected_cms = st.multiselect("CMS à inclure", options=cms_options, default=cms_options)
+    selected_cms = st.multiselect("CMS à inclure", options=cms_options, default=cms_options, key="cms_keyword")
 
     # Mode aperçu
     st.markdown("---")
     preview_mode = st.checkbox(
         "📋 Mode aperçu (ne pas enregistrer en BDD)",
-        help="Permet de voir les résultats avant de les enregistrer, et de blacklister des pages"
+        help="Permet de voir les résultats avant de les enregistrer, et de blacklister des pages",
+        key="preview_keyword"
     )
 
     # Bouton de recherche
-    if st.button("🚀 Lancer la recherche", type="primary", use_container_width=True):
+    if st.button("🚀 Lancer la recherche", type="primary", use_container_width=True, key="btn_keyword"):
         if not token:
             st.error("Token Meta API requis !")
             return
@@ -306,6 +326,76 @@ def render_search_ads():
             return
 
         run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode)
+
+
+def render_page_id_search():
+    """Recherche par Page IDs (optimisée par batch de 10)"""
+    st.info("⚡ Optimisation: les Page IDs sont traités par batch de 10 pour économiser les requêtes API")
+
+    with st.expander("⚙️ Configuration de recherche", expanded=True):
+        col1, col2 = st.columns(2)
+
+        with col1:
+            token = st.text_input(
+                "Token Meta API",
+                type="password",
+                value=os.getenv("META_ACCESS_TOKEN", ""),
+                help="Votre token d'accès Meta Ads API",
+                key="token_pageid"
+            )
+
+            page_ids_input = st.text_area(
+                "Page IDs (un par ligne)",
+                placeholder="123456789\n987654321\n456789123",
+                height=150,
+                help="Entrez les Page IDs Facebook, un par ligne"
+            )
+            page_ids = [pid.strip() for pid in page_ids_input.split("\n") if pid.strip()]
+
+        with col2:
+            countries = st.multiselect(
+                "Pays cibles",
+                options=list(AVAILABLE_COUNTRIES.keys()),
+                default=DEFAULT_COUNTRIES,
+                format_func=lambda x: f"{x} - {AVAILABLE_COUNTRIES[x]}",
+                key="countries_pageid"
+            )
+
+            languages = st.multiselect(
+                "Langues",
+                options=list(AVAILABLE_LANGUAGES.keys()),
+                default=DEFAULT_LANGUAGES,
+                format_func=lambda x: f"{x} - {AVAILABLE_LANGUAGES[x]}",
+                key="languages_pageid"
+            )
+
+    # CMS Filter
+    cms_options = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow", "Autre/Inconnu"]
+    selected_cms = st.multiselect("CMS à inclure", options=cms_options, default=cms_options, key="cms_pageid")
+
+    # Mode aperçu
+    st.markdown("---")
+    preview_mode = st.checkbox(
+        "📋 Mode aperçu (ne pas enregistrer en BDD)",
+        help="Permet de voir les résultats avant de les enregistrer, et de blacklister des pages",
+        key="preview_pageid"
+    )
+
+    # Stats
+    if page_ids:
+        batch_count = (len(page_ids) + 9) // 10
+        st.caption(f"📊 {len(page_ids)} Page IDs → {batch_count} requêtes API")
+
+    # Bouton de recherche
+    if st.button("🚀 Lancer la recherche par Page IDs", type="primary", use_container_width=True, key="btn_pageid"):
+        if not token:
+            st.error("Token Meta API requis !")
+            return
+        if not page_ids:
+            st.error("Au moins un Page ID requis !")
+            return
+
+        run_page_id_search(token, page_ids, countries, languages, selected_cms, preview_mode)
 
 
 def render_preview_results():
@@ -500,20 +590,40 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
     pages_with_cms = {pid: data for pid, data in pages_with_sites.items() if cms_matches(data.get("cms", "Unknown"))}
     st.success(f"✓ {len(pages_with_cms)} pages avec CMS sélectionnés")
 
-    # Phase 5: Comptage
+    # Phase 5: Comptage (optimisé par batch de 10)
     st.subheader("📊 Phase 5: Comptage des annonces")
     progress = st.progress(0)
 
-    for i, (pid, data) in enumerate(pages_with_cms.items()):
-        ads_complete, count = client.fetch_all_ads_for_page(pid, countries, languages)
-        if count > 0:
-            page_ads[pid] = ads_complete
-            data["ads_active_total"] = count
-            data["currency"] = extract_currency_from_ads(ads_complete)
-        else:
-            data["ads_active_total"] = data["ads_found_search"]
-        progress.progress((i + 1) / len(pages_with_cms))
-        time.sleep(0.1)
+    # Traiter par batch de 10 pages pour économiser les requêtes API
+    page_ids_list = list(pages_with_cms.keys())
+    batch_size = 10
+    total_batches = (len(page_ids_list) + batch_size - 1) // batch_size
+
+    st.caption(f"⚡ Optimisation: {len(page_ids_list)} pages en {total_batches} requêtes (batch de {batch_size})")
+
+    processed = 0
+    for batch_idx in range(0, len(page_ids_list), batch_size):
+        batch_pids = page_ids_list[batch_idx:batch_idx + batch_size]
+
+        # Fetch batch
+        batch_results = client.fetch_ads_for_pages_batch(batch_pids, countries, languages)
+
+        # Traiter les résultats du batch
+        for pid in batch_pids:
+            data = pages_with_cms[pid]
+            ads_complete, count = batch_results.get(str(pid), ([], 0))
+
+            if count > 0:
+                page_ads[pid] = ads_complete
+                data["ads_active_total"] = count
+                data["currency"] = extract_currency_from_ads(ads_complete)
+            else:
+                data["ads_active_total"] = data["ads_found_search"]
+
+            processed += 1
+            progress.progress(processed / len(page_ids_list))
+
+        time.sleep(0.2)  # Pause entre les batches
 
     pages_final = {pid: data for pid, data in pages_with_cms.items() if data["ads_active_total"] >= min_ads}
     st.success(f"✓ {len(pages_final)} pages finales")
@@ -548,6 +658,155 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
     else:
         # Mode normal - sauvegarder directement
         st.subheader("💾 Phase 7: Sauvegarde en base de données")
+
+        if db:
+            try:
+                thresholds = st.session_state.get("state_thresholds", None)
+                pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds)
+                suivi_saved = save_suivi_page(db, pages_final, web_results, MIN_ADS_SUIVI)
+                ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, MIN_ADS_LISTE)
+
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Pages", pages_saved)
+                col2.metric("Suivi", suivi_saved)
+                col3.metric("Annonces", ads_saved)
+                st.success("✓ Données sauvegardées !")
+            except Exception as e:
+                st.error(f"Erreur sauvegarde: {e}")
+
+        st.balloons()
+        st.success("🎉 Recherche terminée !")
+
+
+def run_page_id_search(token, page_ids, countries, languages, selected_cms, preview_mode=False):
+    """Exécute la recherche par Page IDs (optimisée par batch de 10)"""
+    client = MetaAdsClient(token)
+    db = get_database()
+
+    # Récupérer la blacklist
+    blacklist_ids = set()
+    if db:
+        blacklist_ids = get_blacklist_ids(db)
+        if blacklist_ids:
+            st.info(f"🚫 {len(blacklist_ids)} pages en blacklist seront ignorées")
+
+    # Filtrer les page_ids blacklistés
+    page_ids_filtered = [pid for pid in page_ids if str(pid) not in blacklist_ids]
+    if len(page_ids_filtered) < len(page_ids):
+        st.warning(f"⚠️ {len(page_ids) - len(page_ids_filtered)} Page IDs ignorés (blacklist)")
+
+    if not page_ids_filtered:
+        st.error("Aucun Page ID valide après filtrage blacklist")
+        return
+
+    # Phase 1: Récupération des annonces par batch
+    st.subheader("📊 Phase 1: Récupération des annonces")
+    batch_size = 10
+    total_batches = (len(page_ids_filtered) + batch_size - 1) // batch_size
+    st.caption(f"⚡ {len(page_ids_filtered)} Page IDs → {total_batches} requêtes API")
+
+    pages = {}
+    page_ads = defaultdict(list)
+    progress = st.progress(0)
+
+    processed = 0
+    for batch_idx in range(0, len(page_ids_filtered), batch_size):
+        batch_pids = page_ids_filtered[batch_idx:batch_idx + batch_size]
+
+        # Fetch batch
+        batch_results = client.fetch_ads_for_pages_batch(batch_pids, countries, languages)
+
+        # Traiter les résultats
+        for pid in batch_pids:
+            pid_str = str(pid)
+            ads_list, count = batch_results.get(pid_str, ([], 0))
+
+            if count > 0:
+                # Extraire le page_name depuis les ads
+                page_name = ""
+                if ads_list:
+                    page_name = ads_list[0].get("page_name", "")
+
+                pages[pid_str] = {
+                    "page_id": pid_str,
+                    "page_name": page_name,
+                    "website": extract_website_from_ads(ads_list),
+                    "ads_active_total": count,
+                    "currency": extract_currency_from_ads(ads_list),
+                    "cms": "Unknown",
+                    "is_shopify": False,
+                    "_keywords": set()  # Pas de keywords pour cette recherche
+                }
+                page_ads[pid_str] = ads_list
+
+            processed += 1
+            progress.progress(processed / len(page_ids_filtered))
+
+        time.sleep(0.2)  # Pause entre les batches
+
+    st.success(f"✓ {len(pages)} pages avec annonces actives trouvées")
+
+    if not pages:
+        st.warning("Aucune page trouvée avec des annonces actives")
+        return
+
+    # Phase 2: Détection CMS
+    st.subheader("🔍 Phase 2: Détection CMS")
+    pages_with_sites = {pid: data for pid, data in pages.items() if data["website"]}
+    progress = st.progress(0)
+
+    cms_options = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow"]
+
+    for i, (pid, data) in enumerate(pages_with_sites.items()):
+        cms_result = detect_cms_from_url(data["website"])
+        data["cms"] = cms_result["cms"]
+        data["is_shopify"] = cms_result["is_shopify"]
+        progress.progress((i + 1) / len(pages_with_sites))
+        time.sleep(0.1)
+
+    # Filtrer par CMS sélectionnés
+    def cms_matches(cms_name):
+        if cms_name in selected_cms:
+            return True
+        if "Autre/Inconnu" in selected_cms and cms_name not in cms_options:
+            return True
+        return False
+
+    pages_final = {pid: data for pid, data in pages.items() if cms_matches(data.get("cms", "Unknown"))}
+    st.success(f"✓ {len(pages_final)} pages avec CMS sélectionnés")
+
+    if not pages_final:
+        st.warning("Aucune page trouvée avec les CMS sélectionnés")
+        return
+
+    # Phase 3: Analyse web
+    st.subheader("🔬 Phase 3: Analyse des sites web")
+    web_results = {}
+    progress = st.progress(0)
+
+    for i, (pid, data) in enumerate(pages_final.items()):
+        if data["website"]:
+            result = analyze_website_complete(data["website"], countries[0])
+            web_results[pid] = result
+            if not data["currency"] and result.get("currency_from_site"):
+                data["currency"] = result["currency_from_site"]
+        progress.progress((i + 1) / len(pages_final))
+        time.sleep(0.2)
+
+    # Save to session
+    st.session_state.pages_final = pages_final
+    st.session_state.web_results = web_results
+    st.session_state.page_ads = dict(page_ads)
+    st.session_state.countries = countries
+    st.session_state.languages = languages
+    st.session_state.preview_mode = preview_mode
+
+    if preview_mode:
+        st.success(f"✓ Recherche terminée ! {len(pages_final)} pages trouvées")
+        st.session_state.show_preview_results = True
+        st.rerun()
+    else:
+        st.subheader("💾 Phase 4: Sauvegarde en base de données")
 
         if db:
             try:

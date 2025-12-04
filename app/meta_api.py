@@ -159,6 +159,80 @@ class MetaAdsClient:
 
         return all_ads, len(all_ads)
 
+    def fetch_ads_for_pages_batch(
+        self,
+        page_ids: List[str],
+        countries: List[str],
+        languages: List[str],
+        max_per_request: int = 10
+    ) -> Dict[str, Tuple[List[dict], int]]:
+        """
+        Récupère les annonces pour plusieurs pages en une seule requête
+        L'API Meta permet jusqu'à 10 page_ids par requête
+
+        Args:
+            page_ids: Liste des IDs de pages (max 10 recommandé)
+            countries: Liste des codes pays
+            languages: Liste des codes langues
+            max_per_request: Nombre max de pages par requête (défaut: 10)
+
+        Returns:
+            Dict {page_id: (liste des annonces, count)}
+        """
+        results = {}
+
+        # Limiter à max_per_request pages par batch
+        page_ids_to_fetch = page_ids[:max_per_request]
+
+        params = {
+            "search_page_ids": json.dumps([str(pid) for pid in page_ids_to_fetch]),
+            "ad_active_status": "ACTIVE",
+            "ad_type": "ALL",
+            "ad_reached_countries": json.dumps(countries),
+            "languages": json.dumps(languages),
+            "fields": FIELDS_ADS_COMPLETE,
+            "limit": LIMIT_COUNT
+        }
+
+        url = ADS_ARCHIVE
+        all_ads = []
+
+        # Initialiser les résultats pour chaque page
+        for pid in page_ids_to_fetch:
+            results[str(pid)] = ([], 0)
+
+        while True:
+            try:
+                data = self._get_api(url, params)
+            except:
+                break
+
+            batch = data.get("data", [])
+            all_ads.extend(batch)
+
+            next_url = data.get("paging", {}).get("next")
+            if not next_url:
+                break
+            url = next_url
+            params = {}
+
+        # Regrouper les annonces par page_id
+        ads_by_page = {}
+        for ad in all_ads:
+            pid = str(ad.get("page_id", ""))
+            if pid:
+                if pid not in ads_by_page:
+                    ads_by_page[pid] = []
+                ads_by_page[pid].append(ad)
+
+        # Construire les résultats finaux
+        for pid in page_ids_to_fetch:
+            pid_str = str(pid)
+            ads = ads_by_page.get(pid_str, [])
+            results[pid_str] = (ads, len(ads))
+
+        return results
+
 
 def extract_website_from_ads(ads_list: List[dict]) -> str:
     """
