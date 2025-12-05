@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Scheduler pour les scans automatiques Meta Ads.
+Scheduler pour les scans automatiques Meta Ads ET les recherches en arrière-plan.
 Exécute les scans programmés selon leur fréquence (daily, weekly, monthly).
+Traite aussi les recherches de la SearchQueue soumises via l'UI.
 
 Pour Railway: Déployer comme service "worker" séparé.
 """
 import os
 import sys
 import time
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -25,7 +27,8 @@ logger = logging.getLogger(__name__)
 try:
     from app.database import (
         DatabaseManager, get_scheduled_scans, mark_scan_executed,
-        upsert_page_recherche
+        upsert_page_recherche, get_pending_searches, update_search_queue_status,
+        SearchQueue, recover_interrupted_searches
     )
     from app.meta_api import MetaAdsClient
     from app.web_analyzer import WebAnalyzer
@@ -232,6 +235,104 @@ def check_and_run_scheduled_scans():
     logger.info("=" * 60)
 
 
+# Variable globale pour éviter les exécutions parallèles
+_search_queue_running = False
+
+
+def process_search_queue():
+    """
+    Traite les recherches en file d'attente (SearchQueue).
+    Appelé périodiquement par le scheduler.
+    """
+    global _search_queue_running
+
+    # Éviter les exécutions parallèles
+    if _search_queue_running:
+        logger.debug("Traitement queue déjà en cours, skip...")
+        return
+
+    _search_queue_running = True
+
+    try:
+        db = DatabaseManager(DATABASE_URL)
+
+        # Récupérer les recherches interrompues au redémarrage
+        try:
+            interrupted = recover_interrupted_searches(db)
+            if interrupted > 0:
+                logger.info(f"⚠️ {interrupted} recherche(s) interrompue(s) récupérée(s)")
+        except Exception as e:
+            logger.error(f"Erreur récupération recherches interrompues: {e}")
+
+        # Récupérer les recherches en attente (max 1 à la fois pour éviter surcharge)
+        pending = get_pending_searches(db, limit=1)
+
+        if not pending:
+            return
+
+        search = pending[0]
+        search_id = search.id
+
+        logger.info("=" * 60)
+        logger.info(f"🔍 Traitement recherche #{search_id}")
+
+        try:
+            # Récupérer les paramètres
+            with db.get_session() as session:
+                search_data = session.query(SearchQueue).filter(SearchQueue.id == search_id).first()
+                if not search_data or search_data.status != "pending":
+                    logger.warning(f"Recherche #{search_id} n'est plus en attente")
+                    return
+
+                keywords = json.loads(search_data.keywords) if search_data.keywords else []
+                cms_filter = json.loads(search_data.cms_filter) if search_data.cms_filter else []
+                ads_min = search_data.ads_min
+                countries = search_data.countries
+                languages = search_data.languages
+
+            logger.info(f"   Keywords: {keywords[:3]}{'...' if len(keywords) > 3 else ''}")
+            logger.info(f"   CMS: {cms_filter}")
+            logger.info(f"   Pays: {countries}")
+
+            # Marquer comme en cours
+            update_search_queue_status(db, search_id, "running")
+
+            # Exécuter la recherche
+            from app.search_executor import execute_background_search
+
+            result = execute_background_search(
+                db=db,
+                search_id=search_id,
+                keywords=keywords,
+                cms_filter=cms_filter,
+                ads_min=ads_min,
+                countries=countries,
+                languages=languages
+            )
+
+            # Marquer comme terminé
+            update_search_queue_status(
+                db,
+                search_id,
+                "completed",
+                search_log_id=result.get("search_log_id")
+            )
+
+            logger.info(f"✅ Recherche #{search_id} terminée avec succès")
+            logger.info(f"   Pages trouvées: {result.get('pages_saved', 0)}")
+
+        except Exception as e:
+            logger.error(f"❌ Recherche #{search_id} échouée: {e}")
+            update_search_queue_status(db, search_id, "failed", error=str(e)[:500])
+
+        logger.info("=" * 60)
+
+    except Exception as e:
+        logger.error(f"❌ Erreur traitement queue: {e}")
+    finally:
+        _search_queue_running = False
+
+
 def main():
     """Point d'entrée principal du scheduler"""
     logger.info("🚀 Démarrage du Meta Ads Scheduler")
@@ -254,10 +355,25 @@ def main():
         logger.error(f"❌ Erreur connexion DB: {e}")
         sys.exit(1)
 
+    # Récupérer les recherches interrompues au démarrage
+    try:
+        interrupted = recover_interrupted_searches(db)
+        if interrupted > 0:
+            logger.info(f"⚠️ {interrupted} recherche(s) interrompue(s) au démarrage")
+    except Exception as e:
+        logger.warning(f"Erreur récupération: {e}")
+
+    # Vérifier s'il y a des recherches en attente
+    try:
+        pending = get_pending_searches(db, limit=10)
+        logger.info(f"📋 {len(pending)} recherche(s) en attente dans la queue")
+    except Exception as e:
+        logger.warning(f"Erreur vérification queue: {e}")
+
     # Créer le scheduler
     scheduler = BlockingScheduler()
 
-    # Vérifier toutes les 5 minutes
+    # Job 1: Vérifier les scans programmés toutes les 5 minutes
     scheduler.add_job(
         check_and_run_scheduled_scans,
         trigger=IntervalTrigger(minutes=5),
@@ -266,12 +382,29 @@ def main():
         replace_existing=True
     )
 
+    # Job 2: Traiter la queue de recherches toutes les 30 secondes
+    scheduler.add_job(
+        process_search_queue,
+        trigger=IntervalTrigger(seconds=30),
+        id='process_queue',
+        name='Traitement queue de recherches',
+        replace_existing=True
+    )
+
     # Exécuter immédiatement au démarrage
-    logger.info("🔍 Vérification initiale...")
+    logger.info("🔍 Vérification initiale des scans...")
     check_and_run_scheduled_scans()
 
-    logger.info("⏰ Scheduler démarré - vérification toutes les 5 minutes")
+    # Traiter immédiatement les recherches en attente
+    logger.info("🔍 Traitement initial de la queue...")
+    process_search_queue()
+
+    logger.info("=" * 60)
+    logger.info("⏰ Scheduler démarré:")
+    logger.info("   - Scans programmés: toutes les 5 minutes")
+    logger.info("   - Queue de recherches: toutes les 30 secondes")
     logger.info("   Appuyez sur Ctrl+C pour arrêter")
+    logger.info("=" * 60)
 
     try:
         scheduler.start()
