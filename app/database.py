@@ -2784,6 +2784,123 @@ def complete_search_log(
         return True
 
 
+def update_search_log(
+    db: DatabaseManager,
+    log_id: int,
+    status: str = None,
+    error_message: str = None,
+    total_ads_found: int = None,
+    total_pages_found: int = None,
+    pages_after_filter: int = None,
+    pages_shopify: int = None,
+    pages_other_cms: int = None,
+    winning_ads_count: int = None,
+    blacklisted_ads_skipped: int = None,
+    pages_saved: int = None,
+    ads_saved: int = None,
+    phases_data: list = None,
+    **api_metrics
+) -> bool:
+    """
+    Met à jour un log de recherche avec les métriques.
+    Wrapper pour complete_search_log avec signature simplifiée.
+
+    Args:
+        db: Instance DatabaseManager
+        log_id: ID du log
+        status: completed, failed, cancelled, no_results
+        error_message: Message d'erreur si failed
+        total_ads_found: Total d'ads trouvées
+        total_pages_found: Total de pages trouvées
+        pages_after_filter: Pages après filtrage
+        pages_shopify: Pages Shopify détectées
+        pages_other_cms: Pages autres CMS
+        winning_ads_count: Nombre d'ads gagnantes
+        blacklisted_ads_skipped: Ads blacklistées ignorées
+        pages_saved: Pages sauvegardées
+        ads_saved: Ads sauvegardées
+        phases_data: Liste des phases pour le log
+        **api_metrics: Métriques API additionnelles
+    """
+    import json
+
+    with db.get_session() as session:
+        log = session.query(SearchLog).filter(SearchLog.id == log_id).first()
+        if not log:
+            return False
+
+        # Status et timing
+        if status:
+            log.status = status
+            if status in ("completed", "failed", "cancelled", "no_results"):
+                log.ended_at = datetime.utcnow()
+                if log.started_at:
+                    log.duration_seconds = (log.ended_at - log.started_at).total_seconds()
+
+        if error_message:
+            log.error_message = error_message
+
+        # Métriques principales
+        if total_ads_found is not None:
+            log.total_ads_found = total_ads_found
+        if total_pages_found is not None:
+            log.total_pages_found = total_pages_found
+        if pages_after_filter is not None:
+            log.pages_after_filter = pages_after_filter
+        if pages_shopify is not None:
+            log.pages_shopify = pages_shopify
+        if pages_other_cms is not None:
+            log.pages_other_cms = pages_other_cms
+        if winning_ads_count is not None:
+            log.winning_ads_count = winning_ads_count
+        if blacklisted_ads_skipped is not None:
+            log.blacklisted_ads_skipped = blacklisted_ads_skipped
+        if pages_saved is not None:
+            log.pages_saved = pages_saved
+        if ads_saved is not None:
+            log.ads_saved = ads_saved
+
+        # Phases data
+        if phases_data is not None:
+            log.phases_data = json.dumps(phases_data, ensure_ascii=False, default=str)
+
+        # Métriques API
+        if api_metrics:
+            if "meta_api_calls" in api_metrics:
+                log.meta_api_calls = api_metrics.get("meta_api_calls", 0)
+            if "scraper_api_calls" in api_metrics:
+                log.scraper_api_calls = api_metrics.get("scraper_api_calls", 0)
+            if "web_requests" in api_metrics:
+                log.web_requests = api_metrics.get("web_requests", 0)
+            if "meta_api_errors" in api_metrics:
+                log.meta_api_errors = api_metrics.get("meta_api_errors", 0)
+            if "scraper_api_errors" in api_metrics:
+                log.scraper_api_errors = api_metrics.get("scraper_api_errors", 0)
+            if "web_errors" in api_metrics:
+                log.web_errors = api_metrics.get("web_errors", 0)
+            if "rate_limit_hits" in api_metrics:
+                log.rate_limit_hits = api_metrics.get("rate_limit_hits", 0)
+            if "meta_api_avg_time" in api_metrics:
+                log.meta_api_avg_time = api_metrics.get("meta_api_avg_time", 0)
+            if "scraper_api_avg_time" in api_metrics:
+                log.scraper_api_avg_time = api_metrics.get("scraper_api_avg_time", 0)
+            if "web_avg_time" in api_metrics:
+                log.web_avg_time = api_metrics.get("web_avg_time", 0)
+            if "scraper_api_cost" in api_metrics:
+                log.scraper_api_cost = api_metrics.get("scraper_api_cost", 0)
+
+            # API details
+            api_details_data = {}
+            if api_metrics.get("api_details"):
+                api_details_data["keyword_stats"] = api_metrics["api_details"]
+            if api_metrics.get("scraper_errors_by_type"):
+                api_details_data["scraper_errors_by_type"] = api_metrics["scraper_errors_by_type"]
+            if api_details_data:
+                log.api_details = json.dumps(api_details_data, ensure_ascii=False)
+
+        return True
+
+
 def save_api_calls(db: DatabaseManager, search_log_id: int, calls: list) -> int:
     """
     Sauvegarde les appels API en base de données
