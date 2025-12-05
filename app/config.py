@@ -57,9 +57,25 @@ WINNING_AD_CRITERIA = [
 ]
 
 # Parallélisation
-WORKERS_WEB_ANALYSIS = 10
+WORKERS_WEB_ANALYSIS = 5  # Réduit pour éviter les bans (était 10)
 TIMEOUT_WEB = 25
 TIMEOUT_SHOPIFY_CHECK = 10
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Throttling API (délais pour éviter les rate limits)
+# Meta API
+META_DELAY_BETWEEN_KEYWORDS = 1.5      # Secondes entre chaque mot-clé
+META_DELAY_BETWEEN_PAGES = 0.3         # Secondes entre chaque page de pagination
+META_DELAY_BETWEEN_BATCHES = 0.5       # Secondes entre chaque batch de 10 pages
+META_DELAY_ON_ERROR = 2.0              # Délai supplémentaire après une erreur
+
+# Web/Shopify scraping
+WEB_DELAY_BETWEEN_REQUESTS = 0.5       # Secondes entre chaque requête web
+WEB_DELAY_CMS_CHECK = 0.3              # Délai entre les checks CMS
+WEB_MAX_CONCURRENT = 3                 # Max requêtes simultanées (réduit de 5)
+
+# Adaptative throttling (augmente les délais si rate limits détectés)
+THROTTLE_MULTIPLIER_ON_RATE_LIMIT = 2.0  # Multiplie les délais si rate limit
 
 # Fields Meta API
 FIELDS_ADS_COMPLETE = ",".join([

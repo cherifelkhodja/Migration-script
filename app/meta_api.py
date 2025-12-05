@@ -12,7 +12,8 @@ from threading import Lock
 try:
     from app.config import (
         ADS_ARCHIVE, TIMEOUT, LIMIT_SEARCH, LIMIT_COUNT, LIMIT_MIN,
-        FIELDS_ADS_COMPLETE
+        FIELDS_ADS_COMPLETE,
+        META_DELAY_BETWEEN_PAGES, META_DELAY_ON_ERROR
     )
     from app.api_tracker import get_current_tracker
 except ImportError:
@@ -20,6 +21,8 @@ except ImportError:
         ADS_ARCHIVE, TIMEOUT, LIMIT_SEARCH, LIMIT_COUNT, LIMIT_MIN,
         FIELDS_ADS_COMPLETE
     )
+    META_DELAY_BETWEEN_PAGES = 0.3
+    META_DELAY_ON_ERROR = 2.0
     try:
         from api_tracker import get_current_tracker
     except ImportError:
@@ -388,6 +391,9 @@ class MetaAdsClient:
             if not next_url:
                 break
 
+            # Délai entre les pages pour éviter rate limit
+            time.sleep(META_DELAY_BETWEEN_PAGES)
+
             url = next_url
             params = {}
 
@@ -435,6 +441,10 @@ class MetaAdsClient:
             next_url = data.get("paging", {}).get("next")
             if not next_url:
                 break
+
+            # Délai entre les pages pour éviter rate limit
+            time.sleep(META_DELAY_BETWEEN_PAGES)
+
             url = next_url
             params = {}
 
@@ -494,6 +504,10 @@ class MetaAdsClient:
             next_url = data.get("paging", {}).get("next")
             if not next_url:
                 break
+
+            # Délai entre les pages pour éviter rate limit
+            time.sleep(META_DELAY_BETWEEN_PAGES)
+
             url = next_url
             params = {}
 

@@ -31,7 +31,9 @@ from app.config import (
     MIN_ADS_INITIAL, MIN_ADS_FOR_EXPORT,
     DEFAULT_COUNTRIES, DEFAULT_LANGUAGES,
     DATABASE_URL, MIN_ADS_SUIVI, MIN_ADS_LISTE,
-    DEFAULT_STATE_THRESHOLDS, WINNING_AD_CRITERIA
+    DEFAULT_STATE_THRESHOLDS, WINNING_AD_CRITERIA,
+    META_DELAY_BETWEEN_KEYWORDS, META_DELAY_BETWEEN_BATCHES,
+    WEB_DELAY_CMS_CHECK, WORKERS_WEB_ANALYSIS
 )
 from app.meta_api import MetaAdsClient, extract_website_from_ads, extract_currency_from_ads
 from app.shopify_detector import detect_cms_from_url
@@ -1641,7 +1643,7 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
 
         # Délai entre les mots-clés pour éviter le rate limit
         if i > 0:
-            time.sleep(1.0)  # 1 seconde entre chaque mot-clé
+            time.sleep(META_DELAY_BETWEEN_KEYWORDS)  # Configurable dans config.py
 
         try:
             ads = client.search_ads(kw, countries, languages)
@@ -1882,7 +1884,7 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
 
             processed += 1
 
-        time.sleep(0.2)  # Pause entre les batches
+        time.sleep(META_DELAY_BETWEEN_BATCHES)  # Pause entre les batches
 
     pages_final = {pid: data for pid, data in pages_with_cms.items() if data["ads_active_total"] >= min_ads}
     tracker.complete_phase(f"{len(pages_final)} pages finales")
@@ -2143,7 +2145,7 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
             processed += 1
             progress.progress(processed / len(page_ids_filtered))
 
-        time.sleep(0.2)  # Pause entre les batches
+        time.sleep(META_DELAY_BETWEEN_BATCHES)  # Pause entre les batches
 
     st.success(f"✓ {len(pages)} pages avec annonces actives trouvées")
 
@@ -2163,7 +2165,7 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
         data["cms"] = cms_result["cms"]
         data["is_shopify"] = cms_result["is_shopify"]
         progress.progress((i + 1) / len(pages_with_sites))
-        time.sleep(0.1)
+        time.sleep(WEB_DELAY_CMS_CHECK)  # Délai pour éviter ban Shopify
 
     # Filtrer par CMS sélectionnés
     def cms_matches(cms_name):
