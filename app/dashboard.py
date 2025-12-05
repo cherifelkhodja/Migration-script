@@ -429,11 +429,12 @@ def render_classification_filters(
     countries = get_all_countries(db) if show_pays else []
 
     # Filtre Thématique (catégorie principale)
+    selected_thematique = "Toutes"
     if show_thematique:
         with cols[col_idx % len(cols)]:
             thematique_options = ["Toutes"] + categories
             selected_thematique = st.selectbox(
-                "🏷️ Thématique",
+                "Thématique",
                 thematique_options,
                 index=0,
                 key=f"{key_prefix}_thematique"
@@ -442,12 +443,12 @@ def render_classification_filters(
                 result["thematique"] = selected_thematique
         col_idx += 1
 
-    # Filtre Classification
+    # Filtre Classification (dépend de la thématique sélectionnée)
     if show_subcategory:
         with cols[col_idx % len(cols)]:
-            # Les classifications dépendent de la thématique sélectionnée
-            if result["thematique"]:
-                subcategories = get_all_subcategories(db, category=result["thematique"])
+            # Filtrer les classifications selon la thématique choisie
+            if selected_thematique != "Toutes":
+                subcategories = get_all_subcategories(db, category=selected_thematique)
             else:
                 subcategories = get_all_subcategories(db)
 
@@ -3252,7 +3253,37 @@ def render_pages_shops():
                     else:
                         st.warning("Sélectionnez au moins une colonne")
 
-            st.markdown(f"**{len(results)} résultats**")
+            col_results, col_help = st.columns([3, 1])
+            with col_results:
+                st.markdown(f"**{len(results)} résultats**")
+            with col_help:
+                with st.popover("ℹ️ Calcul du score"):
+                    st.markdown("""
+**Score de performance (0-100 pts)**
+
+**Nombre d'ads actives** (max 40 pts)
+- ≥150 ads → 40 pts
+- ≥80 ads → 35 pts
+- ≥35 ads → 25 pts
+- ≥20 ads → 15 pts
+- ≥10 ads → 10 pts
+- ≥1 ad → 5 pts
+
+**Winning Ads** (max 30 pts)
+- ≥10 winning → 30 pts
+- ≥5 winning → 25 pts
+- ≥3 winning → 20 pts
+- ≥1 winning → 15 pts
+
+**Produits** (max 20 pts)
+- ≥100 produits → 20 pts
+- ≥50 produits → 15 pts
+- ≥20 produits → 10 pts
+- ≥5 produits → 5 pts
+
+**Bonus CMS** (+10 pts)
+- Shopify → +10 pts
+""")
 
             # ═══ MODE SÉLECTION (BULK ACTIONS) ═══
             if view_mode == "Sélection":
