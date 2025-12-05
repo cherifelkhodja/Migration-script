@@ -1984,12 +1984,23 @@ def render_keyword_search():
             cms_options = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow", "Autre/Inconnu"]
             selected_cms = st.multiselect("CMS à inclure", options=cms_options, default=["Shopify"], key="cms_keyword")
 
-    # Mode aperçu (simplifié)
-    preview_mode = st.checkbox(
-        "📋 Mode aperçu",
-        help="Voir les résultats avant de les enregistrer en base de données",
-        key="preview_keyword"
-    )
+    # Options de mode
+    opt_col1, opt_col2 = st.columns(2)
+
+    with opt_col1:
+        background_mode = st.checkbox(
+            "⏳ Lancer en arrière-plan",
+            help="La recherche continue même si vous quittez la page. Résultats disponibles dans 'Background Searches'.",
+            key="background_keyword"
+        )
+
+    with opt_col2:
+        preview_mode = st.checkbox(
+            "📋 Mode aperçu",
+            help="Voir les résultats avant de les enregistrer en base de données",
+            key="preview_keyword",
+            disabled=background_mode  # Désactivé si arrière-plan
+        )
 
     # Bouton de recherche
     if st.button("🚀 Lancer la recherche", type="primary", use_container_width=True, key="btn_keyword"):
@@ -1997,7 +2008,29 @@ def render_keyword_search():
             st.error("Au moins un mot-clé requis !")
             return
 
-        run_search_process(keywords, countries, languages, min_ads, selected_cms, preview_mode)
+        if background_mode:
+            # Mode arrière-plan: ajouter à la file d'attente
+            from app.background_worker import get_worker
+            worker = get_worker()
+
+            search_id = worker.submit_search(
+                keywords=keywords,
+                cms_filter=selected_cms if selected_cms else ["Shopify"],
+                ads_min=min_ads,
+                countries=",".join(countries) if countries else "FR",
+                languages=",".join(languages) if languages else "fr"
+            )
+
+            st.success(f"✅ Recherche #{search_id} ajoutée à la file d'attente!")
+            st.info("💡 Vous pouvez quitter cette page, la recherche continuera en arrière-plan. Consultez les résultats dans **Background Searches**.")
+
+            # Proposer d'aller voir les recherches en arrière-plan
+            if st.button("📋 Voir les recherches en arrière-plan", key="goto_bg"):
+                st.session_state.current_page = "Background Searches"
+                st.rerun()
+        else:
+            # Mode direct: exécution synchrone
+            run_search_process(keywords, countries, languages, min_ads, selected_cms, preview_mode)
 
 
 def render_page_id_search():
