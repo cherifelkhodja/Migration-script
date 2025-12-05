@@ -1312,30 +1312,14 @@ def render_keyword_search():
         col1, col2 = st.columns(2)
 
         with col1:
-            # Token principal
-            token = st.text_input(
-                "Token Meta API #1",
-                type="password",
-                value=os.getenv("META_ACCESS_TOKEN", ""),
-                help="Votre token d'accès Meta Ads API principal",
-                key="token_keyword"
-            )
-
-            # Token secondaire (optionnel) - pour rotation anti-ban
-            token2 = st.text_input(
-                "Token Meta API #2 (optionnel)",
-                type="password",
-                value=os.getenv("META_ACCESS_TOKEN_2", ""),
-                help="Second token pour rotation automatique (anti rate-limit)",
-                key="token2_keyword"
-            )
-
             keywords_input = st.text_area(
                 "Mots-clés (un par ligne)",
                 placeholder="dropshipping\necommerce\nboutique",
-                height=100
+                height=120
             )
             keywords = [k.strip() for k in keywords_input.split("\n") if k.strip()]
+
+            min_ads = st.slider("Min. ads pour inclusion", 1, 50, MIN_ADS_INITIAL, key="min_ads_keyword")
 
         with col2:
             countries = st.multiselect(
@@ -1354,8 +1338,6 @@ def render_keyword_search():
                 key="languages_keyword"
             )
 
-            min_ads = st.slider("Min. ads pour inclusion", 1, 50, MIN_ADS_INITIAL, key="min_ads_keyword")
-
     # CMS Filter
     cms_options = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow", "Autre/Inconnu"]
     selected_cms = st.multiselect("CMS à inclure", options=cms_options, default=cms_options, key="cms_keyword")
@@ -1370,14 +1352,11 @@ def render_keyword_search():
 
     # Bouton de recherche
     if st.button("🚀 Lancer la recherche", type="primary", use_container_width=True, key="btn_keyword"):
-        if not token:
-            st.error("Token Meta API requis !")
-            return
         if not keywords:
             st.error("Au moins un mot-clé requis !")
             return
 
-        run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode, token2=token2)
+        run_search_process(keywords, countries, languages, min_ads, selected_cms, preview_mode)
 
 
 def render_page_id_search():
@@ -1388,22 +1367,6 @@ def render_page_id_search():
         col1, col2 = st.columns(2)
 
         with col1:
-            token = st.text_input(
-                "Token Meta API #1",
-                type="password",
-                value=os.getenv("META_ACCESS_TOKEN", ""),
-                help="Votre token d'accès Meta Ads API principal",
-                key="token_pageid"
-            )
-
-            token2 = st.text_input(
-                "Token Meta API #2 (optionnel)",
-                type="password",
-                value=os.getenv("META_ACCESS_TOKEN_2", ""),
-                help="Second token pour rotation automatique (anti rate-limit)",
-                key="token2_pageid"
-            )
-
             page_ids_input = st.text_area(
                 "Page IDs (un par ligne)",
                 placeholder="123456789\n987654321\n456789123",
@@ -1448,14 +1411,11 @@ def render_page_id_search():
 
     # Bouton de recherche
     if st.button("🚀 Lancer la recherche par Page IDs", type="primary", use_container_width=True, key="btn_pageid"):
-        if not token:
-            st.error("Token Meta API requis !")
-            return
         if not page_ids:
             st.error("Au moins un Page ID requis !")
             return
 
-        run_page_id_search(token, page_ids, countries, languages, selected_cms, preview_mode)
+        run_page_id_search(page_ids, countries, languages, selected_cms, preview_mode)
 
 
 def render_preview_results():
@@ -1541,36 +1501,35 @@ def render_preview_results():
             st.rerun()
 
 
-def run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode=False, token2: str = ""):
+def run_search_process(keywords, countries, languages, min_ads, selected_cms, preview_mode=False):
     """Exécute le processus de recherche complet avec tracking détaillé et logging"""
     from app.api_tracker import APITracker, set_current_tracker, clear_current_tracker
     from app.meta_api import init_token_rotator, clear_token_rotator
 
     db = get_database()
 
-    # Charger les tokens depuis la base de données en priorité
-    db_tokens = []
+    # Charger les tokens depuis la base de données
+    tokens = []
     if db:
         try:
-            from app.database import get_active_meta_tokens
-            db_tokens = get_active_meta_tokens(db)
+            from app.database import get_active_meta_tokens, ensure_tables_exist
+            ensure_tables_exist(db)
+            tokens = get_active_meta_tokens(db)
         except Exception as e:
             st.warning(f"⚠️ Impossible de charger les tokens depuis la DB: {e}")
 
-    # Si pas de tokens en DB, utiliser les tokens passés en paramètre
-    if db_tokens:
-        tokens = db_tokens
-        st.info(f"🔄 {len(tokens)} token(s) chargé(s) depuis la base de données")
-    else:
-        tokens = [token] if token else []
-        if token2 and token2.strip():
-            tokens.append(token2.strip())
-        if tokens:
-            st.info(f"📝 Utilisation de {len(tokens)} token(s) saisi(s) manuellement")
+    # Fallback sur variable d'environnement si pas de tokens en DB
+    if not tokens:
+        env_token = os.getenv("META_ACCESS_TOKEN", "")
+        if env_token:
+            tokens = [env_token]
+            st.info("📝 Utilisation du token depuis META_ACCESS_TOKEN")
 
     if not tokens:
-        st.error("❌ Aucun token Meta API disponible. Configurez vos tokens dans Settings.")
+        st.error("❌ Aucun token Meta API disponible. Configurez vos tokens dans **Settings > Tokens Meta API**.")
         return
+
+    st.info(f"🔄 {len(tokens)} token(s) actif(s)")
 
     # Initialiser le TokenRotator avec le db pour enregistrer les stats
     rotator = init_token_rotator(tokens, db=db)
@@ -2000,10 +1959,38 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
         st.success("🎉 Recherche terminée !")
 
 
-def run_page_id_search(token, page_ids, countries, languages, selected_cms, preview_mode=False):
+def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mode=False):
     """Exécute la recherche par Page IDs (optimisée par batch de 10)"""
-    client = MetaAdsClient(token)
+    from app.meta_api import init_token_rotator
+
     db = get_database()
+
+    # Charger les tokens depuis la base de données
+    tokens = []
+    if db:
+        try:
+            from app.database import get_active_meta_tokens, ensure_tables_exist
+            ensure_tables_exist(db)
+            tokens = get_active_meta_tokens(db)
+        except Exception as e:
+            st.warning(f"⚠️ Impossible de charger les tokens: {e}")
+
+    # Fallback sur variable d'environnement
+    if not tokens:
+        env_token = os.getenv("META_ACCESS_TOKEN", "")
+        if env_token:
+            tokens = [env_token]
+
+    if not tokens:
+        st.error("❌ Aucun token Meta API disponible. Configurez vos tokens dans **Settings > Tokens Meta API**.")
+        return
+
+    # Initialiser le TokenRotator
+    rotator = init_token_rotator(tokens, db=db)
+    if rotator.token_count > 1:
+        st.success(f"🔄 Rotation automatique activée ({rotator.token_count} tokens)")
+
+    client = MetaAdsClient(rotator.get_current_token())
 
     # Récupérer la blacklist
     blacklist_ids = set()
