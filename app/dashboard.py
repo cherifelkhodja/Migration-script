@@ -1691,25 +1691,80 @@ def render_pages_shops():
         st.warning("Base de données non connectée")
         return
 
-    # Filtres
+    # Initialiser les pages sélectionnées dans session_state
+    if 'selected_pages' not in st.session_state:
+        st.session_state.selected_pages = []
+
+    # ═══ FILTRES SAUVEGARDÉS ═══
+    saved_filters = get_saved_filters(db, filter_type="pages")
+
+    col_saved, col_save_btn = st.columns([4, 1])
+    with col_saved:
+        filter_options = ["-- Filtres sauvegardés --"] + [f["name"] for f in saved_filters]
+        selected_saved = st.selectbox("📂 Charger un filtre", filter_options, key="load_filter")
+
+    # Charger le filtre sélectionné
+    loaded_filter = None
+    if selected_saved != "-- Filtres sauvegardés --":
+        for f in saved_filters:
+            if f["name"] == selected_saved:
+                loaded_filter = f["filters"]
+                break
+
+    # ═══ FILTRES ═══
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        search_term = st.text_input("🔍 Rechercher", placeholder="Nom ou site...")
+        default_search = loaded_filter.get("search_term", "") if loaded_filter else ""
+        search_term = st.text_input("🔍 Rechercher", value=default_search, placeholder="Nom ou site...")
 
     with col2:
-        cms_filter = st.selectbox("CMS", ["Tous", "Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Unknown"])
+        cms_options = ["Tous", "Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Unknown"]
+        default_cms = loaded_filter.get("cms", "Tous") if loaded_filter else "Tous"
+        cms_idx = cms_options.index(default_cms) if default_cms in cms_options else 0
+        cms_filter = st.selectbox("CMS", cms_options, index=cms_idx)
 
     with col3:
-        etat_filter = st.selectbox("État", ["Tous", "XXL", "XL", "L", "M", "S", "XS", "inactif"])
+        etat_options = ["Tous", "XXL", "XL", "L", "M", "S", "XS", "inactif"]
+        default_etat = loaded_filter.get("etat", "Tous") if loaded_filter else "Tous"
+        etat_idx = etat_options.index(default_etat) if default_etat in etat_options else 0
+        etat_filter = st.selectbox("État", etat_options, index=etat_idx)
 
     with col4:
         limit = st.selectbox("Limite", [50, 100, 200, 500], index=1)
 
+    # Sauvegarder le filtre actuel
+    with col_save_btn:
+        st.write("")
+        with st.popover("💾 Sauver"):
+            new_filter_name = st.text_input("Nom du filtre", key="new_filter_name")
+            if st.button("Sauvegarder", key="save_filter_btn"):
+                if new_filter_name:
+                    current_filters = {
+                        "search_term": search_term,
+                        "cms": cms_filter,
+                        "etat": etat_filter
+                    }
+                    save_filter(db, new_filter_name, current_filters, "pages")
+                    st.success(f"Filtre '{new_filter_name}' sauvegardé!")
+                    st.rerun()
+
+    # Supprimer un filtre sauvegardé
+    if saved_filters:
+        with st.expander("🗑️ Gérer les filtres sauvegardés"):
+            for sf in saved_filters:
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.write(f"📂 {sf['name']}")
+                with col2:
+                    if st.button("❌", key=f"del_filter_{sf['id']}"):
+                        delete_saved_filter(db, sf['id'])
+                        st.rerun()
+
     # Mode d'affichage et export
-    col_mode, col_export = st.columns([3, 1])
+    col_mode, col_bulk, col_export = st.columns([2, 1, 1])
     with col_mode:
-        view_mode = st.radio("Mode d'affichage", ["Tableau", "Détaillé"], horizontal=True)
+        view_mode = st.radio("Mode d'affichage", ["Tableau", "Détaillé", "Sélection"], horizontal=True)
 
     # Recherche
     try:
@@ -1754,7 +1809,7 @@ def render_pages_shops():
 
                 csv_data = export_to_csv(export_data)
                 st.download_button(
-                    "📥 Export CSV",
+                    "📥 CSV",
                     csv_data,
                     file_name=f"pages_export_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                     mime="text/csv"
@@ -1762,7 +1817,98 @@ def render_pages_shops():
 
             st.markdown(f"**{len(results)} résultats**")
 
-            if view_mode == "Tableau":
+            # ═══ MODE SÉLECTION (BULK ACTIONS) ═══
+            if view_mode == "Sélection":
+                st.info("☑️ Cochez les pages puis appliquez une action groupée")
+
+                # Barre d'actions groupées
+                col_actions = st.columns([1, 1, 1, 1, 2])
+
+                with col_actions[0]:
+                    if st.button("☑️ Tout sélectionner"):
+                        st.session_state.selected_pages = [p.get("page_id") for p in results]
+                        st.rerun()
+
+                with col_actions[1]:
+                    if st.button("❎ Tout désélectionner"):
+                        st.session_state.selected_pages = []
+                        st.rerun()
+
+                selected_count = len(st.session_state.selected_pages)
+                st.caption(f"**{selected_count}** page(s) sélectionnée(s)")
+
+                # Actions sur la sélection
+                if selected_count > 0:
+                    st.markdown("---")
+                    st.markdown("**Actions groupées:**")
+                    action_cols = st.columns(5)
+
+                    with action_cols[0]:
+                        if st.button("⭐ Ajouter favoris", use_container_width=True):
+                            count = bulk_add_to_favorites(db, st.session_state.selected_pages)
+                            st.success(f"{count} page(s) ajoutée(s) aux favoris")
+                            st.session_state.selected_pages = []
+                            st.rerun()
+
+                    with action_cols[1]:
+                        if st.button("🚫 Blacklister", use_container_width=True):
+                            count = bulk_add_to_blacklist(db, st.session_state.selected_pages, "Bulk blacklist")
+                            st.success(f"{count} page(s) blacklistée(s)")
+                            st.session_state.selected_pages = []
+                            st.rerun()
+
+                    with action_cols[2]:
+                        # Ajouter à une collection
+                        collections = get_collections(db)
+                        if collections:
+                            coll_names = [c["name"] for c in collections]
+                            selected_coll = st.selectbox("📁 Collection", ["--"] + coll_names, key="bulk_coll")
+                            if selected_coll != "--":
+                                coll_id = next(c["id"] for c in collections if c["name"] == selected_coll)
+                                if st.button("Ajouter", key="bulk_add_coll"):
+                                    count = bulk_add_to_collection(db, coll_id, st.session_state.selected_pages)
+                                    st.success(f"{count} page(s) ajoutée(s)")
+                                    st.session_state.selected_pages = []
+                                    st.rerun()
+
+                    with action_cols[3]:
+                        # Ajouter un tag
+                        all_tags = get_all_tags(db)
+                        if all_tags:
+                            tag_names = [t["name"] for t in all_tags]
+                            selected_tag = st.selectbox("🏷️ Tag", ["--"] + tag_names, key="bulk_tag")
+                            if selected_tag != "--":
+                                tag_id = next(t["id"] for t in all_tags if t["name"] == selected_tag)
+                                if st.button("Ajouter", key="bulk_add_tag"):
+                                    count = bulk_add_tag(db, tag_id, st.session_state.selected_pages)
+                                    st.success(f"Tag ajouté à {count} page(s)")
+                                    st.session_state.selected_pages = []
+                                    st.rerun()
+
+                st.markdown("---")
+
+                # Liste avec checkboxes
+                for page in results:
+                    pid = page.get("page_id")
+                    score = page.get("score", 0)
+                    score_icon = get_score_color(score)
+
+                    col_check, col_info = st.columns([1, 10])
+
+                    with col_check:
+                        is_selected = pid in st.session_state.selected_pages
+                        if st.checkbox("", value=is_selected, key=f"sel_{pid}"):
+                            if pid not in st.session_state.selected_pages:
+                                st.session_state.selected_pages.append(pid)
+                        else:
+                            if pid in st.session_state.selected_pages:
+                                st.session_state.selected_pages.remove(pid)
+
+                    with col_info:
+                        st.write(f"{score_icon} **{page.get('page_name', 'N/A')}** | {page.get('etat', 'N/A')} | {page.get('nombre_ads_active', 0)} ads | Score: {score}")
+
+            # ═══ MODE TABLEAU ═══
+            elif view_mode == "Tableau":
                 df = pd.DataFrame(results)
 
                 # Ajouter colonne Score visuel
