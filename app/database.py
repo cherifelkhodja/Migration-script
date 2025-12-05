@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Dict, Optional, Any
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, Float, Index
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, Float, Index, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.dialects.postgresql import insert
