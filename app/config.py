@@ -21,8 +21,8 @@ ADS_ARCHIVE = f"{BASE_URL}/ads_archive"
 TIMEOUT = 20
 
 # Limites de pagination
-LIMIT_SEARCH = 500
-LIMIT_COUNT = 500
+LIMIT_SEARCH = 1000    # Limite max par requête (pagination automatique si plus)
+LIMIT_COUNT = 1000     # Limite pour comptage des ads
 LIMIT_MIN = 100
 
 # Seuils de filtrage
