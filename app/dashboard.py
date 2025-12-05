@@ -5,11 +5,12 @@ Design moderne avec navigation latérale
 import warnings
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 
+import io
 import os
 import sys
 import time
 from collections import defaultdict, Counter
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # Ajouter le dossier parent au path pour les imports
@@ -40,7 +41,8 @@ from app.database import (
     save_ads_recherche, get_suivi_stats, search_pages, get_suivi_history,
     get_evolution_stats, get_page_evolution_history, get_etat_from_ads_count,
     add_to_blacklist, remove_from_blacklist, get_blacklist, get_blacklist_ids,
-    is_winning_ad, save_winning_ads, get_winning_ads, get_winning_ads_stats
+    is_winning_ad, save_winning_ads, get_winning_ads, get_winning_ads_stats,
+    get_all_pages, get_winning_ads_by_page
 )
 
 
@@ -85,6 +87,184 @@ def get_database() -> DatabaseManager:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# FONCTIONS UTILITAIRES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def calculate_page_score(page_data: dict, winning_count: int = 0) -> int:
+    """
+    Calcule un score de performance pour une page (0-100)
+    Basé sur: nombre d'ads, état, winning ads, produits
+    """
+    score = 0
+
+    # Score basé sur le nombre d'ads (max 40 points)
+    ads_count = page_data.get("nombre_ads_active", 0) or page_data.get("ads_active_total", 0)
+    if ads_count >= 150:
+        score += 40
+    elif ads_count >= 80:
+        score += 35
+    elif ads_count >= 35:
+        score += 25
+    elif ads_count >= 20:
+        score += 15
+    elif ads_count >= 10:
+        score += 10
+    elif ads_count >= 1:
+        score += 5
+
+    # Score basé sur les winning ads (max 30 points)
+    if winning_count >= 10:
+        score += 30
+    elif winning_count >= 5:
+        score += 25
+    elif winning_count >= 3:
+        score += 20
+    elif winning_count >= 1:
+        score += 15
+
+    # Score basé sur le nombre de produits (max 20 points)
+    products = page_data.get("nombre_produits", 0) or 0
+    if products >= 100:
+        score += 20
+    elif products >= 50:
+        score += 15
+    elif products >= 20:
+        score += 10
+    elif products >= 5:
+        score += 5
+
+    # Bonus CMS Shopify (10 points)
+    cms = page_data.get("cms", "")
+    if cms == "Shopify":
+        score += 10
+
+    return min(score, 100)
+
+
+def export_to_csv(data: list, columns: list = None) -> str:
+    """Convertit une liste de dictionnaires en CSV"""
+    if not data:
+        return ""
+
+    df = pd.DataFrame(data)
+    if columns:
+        df = df[[c for c in columns if c in df.columns]]
+
+    return df.to_csv(index=False, sep=";")
+
+
+def get_score_color(score: int) -> str:
+    """Retourne la couleur selon le score"""
+    if score >= 80:
+        return "🟢"
+    elif score >= 60:
+        return "🟡"
+    elif score >= 40:
+        return "🟠"
+    else:
+        return "🔴"
+
+
+def detect_trends(db: DatabaseManager, days: int = 7) -> dict:
+    """
+    Détecte les tendances (pages en forte croissance/décroissance)
+
+    Returns:
+        Dict avec 'rising' et 'falling' lists
+    """
+    evolution = get_evolution_stats(db, period_days=days)
+
+    rising = []
+    falling = []
+
+    for evo in evolution:
+        delta_pct = evo.get("pct_ads", 0)
+
+        if delta_pct >= 50:  # +50% ou plus
+            rising.append({
+                "page_id": evo["page_id"],
+                "nom_site": evo["nom_site"],
+                "delta_ads": evo["delta_ads"],
+                "pct_ads": delta_pct,
+                "ads_actuel": evo["ads_actuel"]
+            })
+        elif delta_pct <= -30:  # -30% ou moins
+            falling.append({
+                "page_id": evo["page_id"],
+                "nom_site": evo["nom_site"],
+                "delta_ads": evo["delta_ads"],
+                "pct_ads": delta_pct,
+                "ads_actuel": evo["ads_actuel"]
+            })
+
+    return {
+        "rising": sorted(rising, key=lambda x: x["pct_ads"], reverse=True)[:10],
+        "falling": sorted(falling, key=lambda x: x["pct_ads"])[:10]
+    }
+
+
+def generate_alerts(db: DatabaseManager) -> list:
+    """
+    Génère des alertes basées sur les données
+
+    Returns:
+        Liste d'alertes avec type, message, data
+    """
+    alerts = []
+
+    try:
+        # Alerte: Nouvelles pages XXL
+        xxl_pages = search_pages(db, etat="XXL", limit=50)
+        recent_xxl = [p for p in xxl_pages if p.get("dernier_scan") and
+                      (datetime.utcnow() - p["dernier_scan"]).days <= 1]
+        if recent_xxl:
+            alerts.append({
+                "type": "success",
+                "icon": "🚀",
+                "title": f"{len(recent_xxl)} nouvelle(s) page(s) XXL",
+                "message": f"Pages détectées avec ≥150 ads actives",
+                "data": recent_xxl[:5]
+            })
+
+        # Alerte: Tendances à la hausse
+        trends = detect_trends(db, days=7)
+        if trends["rising"]:
+            alerts.append({
+                "type": "info",
+                "icon": "📈",
+                "title": f"{len(trends['rising'])} page(s) en forte croissance",
+                "message": "Pages avec +50% d'ads en 7 jours",
+                "data": trends["rising"][:5]
+            })
+
+        # Alerte: Pages en chute
+        if trends["falling"]:
+            alerts.append({
+                "type": "warning",
+                "icon": "📉",
+                "title": f"{len(trends['falling'])} page(s) en déclin",
+                "message": "Pages avec -30% d'ads ou plus",
+                "data": trends["falling"][:5]
+            })
+
+        # Alerte: Winning ads récentes
+        winning_stats = get_winning_ads_stats(db, days=1)
+        if winning_stats.get("total", 0) > 0:
+            alerts.append({
+                "type": "success",
+                "icon": "🏆",
+                "title": f"{winning_stats['total']} winning ad(s) aujourd'hui",
+                "message": f"Reach moyen: {winning_stats.get('avg_reach', 0):,}",
+                "data": winning_stats.get("by_page", [])[:5]
+            })
+
+    except Exception as e:
+        pass
+
+    return alerts
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # NAVIGATION SIDEBAR
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -92,6 +272,27 @@ def render_sidebar():
     """Affiche la sidebar avec navigation"""
     with st.sidebar:
         st.markdown("## 📊 Meta Ads Analyzer")
+
+        # Global Search
+        search_query = st.text_input(
+            "🔍 Recherche rapide",
+            placeholder="Nom, site, page_id...",
+            key="global_search"
+        )
+        if search_query and len(search_query) >= 2:
+            db = get_database()
+            if db:
+                results = search_pages(db, search_term=search_query, limit=5)
+                if results:
+                    st.caption(f"{len(results)} résultat(s)")
+                    for r in results:
+                        if st.button(f"→ {r.get('page_name', 'N/A')[:25]}", key=f"sr_{r['page_id']}"):
+                            st.session_state.selected_page_id = r['page_id']
+                            st.session_state.current_page = "Pages / Shops"
+                            st.rerun()
+                else:
+                    st.caption("Aucun résultat")
+
         st.markdown("---")
 
         # Main Navigation
@@ -175,9 +376,11 @@ def render_dashboard():
 
     try:
         stats = get_suivi_stats(db)
+        winning_stats = get_winning_ads_stats(db, days=7)
+        winning_by_page = get_winning_ads_by_page(db, days=30)
 
-        # KPIs principaux
-        col1, col2, col3, col4 = st.columns(4)
+        # KPIs principaux avec trends
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         total_pages = stats.get("total_pages", 0)
         etats = stats.get("etats", {})
@@ -185,11 +388,29 @@ def render_dashboard():
 
         actives = sum(v for k, v in etats.items() if k != "inactif")
         shopify_count = cms_stats.get("Shopify", 0)
+        xxl_count = etats.get("XXL", 0)
+        winning_total = winning_stats.get("total", 0)
 
         col1.metric("📄 Total Pages", total_pages)
-        col2.metric("✅ Pages Actives", actives)
-        col3.metric("🛒 Shopify", shopify_count)
-        col4.metric("❌ Inactives", etats.get("inactif", 0))
+        col2.metric("✅ Actives", actives)
+        col3.metric("🚀 XXL (≥150)", xxl_count)
+        col4.metric("🛒 Shopify", shopify_count)
+        col5.metric("🏆 Winning (7j)", winning_total)
+
+        # Quick Alerts
+        alerts = generate_alerts(db)
+        if alerts:
+            st.markdown("---")
+            st.subheader("🔔 Alertes")
+            alert_cols = st.columns(min(len(alerts), 4))
+            for i, alert in enumerate(alerts[:4]):
+                with alert_cols[i]:
+                    if alert["type"] == "success":
+                        st.success(f"{alert['icon']} **{alert['title']}**\n\n{alert['message']}")
+                    elif alert["type"] == "warning":
+                        st.warning(f"{alert['icon']} **{alert['title']}**\n\n{alert['message']}")
+                    else:
+                        st.info(f"{alert['icon']} **{alert['title']}**\n\n{alert['message']}")
 
         st.markdown("---")
 
@@ -229,18 +450,61 @@ def render_dashboard():
             else:
                 st.info("Aucune donnée disponible")
 
-        # Dernières pages
+        # Top performers avec score
         st.markdown("---")
-        st.subheader("📋 Dernières Pages Ajoutées")
+        st.subheader("🌟 Top Performers (avec Score)")
 
-        recent_pages = search_pages(db, limit=10)
-        if recent_pages:
-            df = pd.DataFrame(recent_pages)
-            cols_to_show = ["page_name", "lien_site", "cms", "etat", "nombre_ads_active"]
+        top_pages = search_pages(db, limit=15)
+        if top_pages:
+            # Calculer les scores
+            for page in top_pages:
+                winning_count = winning_by_page.get(page["page_id"], 0)
+                page["score"] = calculate_page_score(page, winning_count)
+                page["winning_count"] = winning_count
+                page["score_display"] = f"{get_score_color(page['score'])} {page['score']}"
+
+            # Trier par score
+            top_pages = sorted(top_pages, key=lambda x: x["score"], reverse=True)[:10]
+
+            df = pd.DataFrame(top_pages)
+            cols_to_show = ["page_name", "cms", "etat", "nombre_ads_active", "winning_count", "score_display"]
+            col_names = ["Nom", "CMS", "État", "Ads", "🏆 Winning", "Score"]
             df_display = df[[c for c in cols_to_show if c in df.columns]]
+            df_display.columns = col_names[:len(df_display.columns)]
             st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+            # Export button
+            csv_data = export_to_csv(top_pages)
+            st.download_button(
+                "📥 Exporter en CSV",
+                csv_data,
+                "top_performers.csv",
+                "text/csv",
+                key="export_top"
+            )
         else:
             st.info("Aucune page en base. Lancez une recherche pour commencer.")
+
+        # Tendances
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.subheader("📈 En forte croissance (7j)")
+            trends = detect_trends(db, days=7)
+            if trends["rising"]:
+                for t in trends["rising"][:5]:
+                    st.write(f"🚀 **{t['nom_site']}** +{t['pct_ads']:.0f}% ({t['ads_actuel']} ads)")
+            else:
+                st.caption("Aucune tendance détectée")
+
+        with col2:
+            st.subheader("📉 En déclin")
+            if trends.get("falling"):
+                for t in trends["falling"][:5]:
+                    st.write(f"⚠️ **{t['nom_site']}** {t['pct_ads']:.0f}% ({t['ads_actuel']} ads)")
+            else:
+                st.caption("Aucune page en déclin")
 
     except Exception as e:
         st.error(f"Erreur: {e}")
@@ -917,7 +1181,7 @@ def run_page_id_search(token, page_ids, countries, languages, selected_cms, prev
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def render_pages_shops():
-    """Page Pages/Shops - Liste des pages"""
+    """Page Pages/Shops - Liste des pages avec score et export"""
     st.title("🏪 Pages / Shops")
     st.markdown("Explorer toutes les pages et boutiques")
 
@@ -941,8 +1205,10 @@ def render_pages_shops():
     with col4:
         limit = st.selectbox("Limite", [50, 100, 200, 500], index=1)
 
-    # Mode d'affichage
-    view_mode = st.radio("Mode d'affichage", ["Tableau", "Détaillé"], horizontal=True)
+    # Mode d'affichage et export
+    col_mode, col_export = st.columns([3, 1])
+    with col_mode:
+        view_mode = st.radio("Mode d'affichage", ["Tableau", "Détaillé"], horizontal=True)
 
     # Recherche
     try:
@@ -955,17 +1221,61 @@ def render_pages_shops():
         )
 
         if results:
+            # Enrichir avec scores et winning ads
+            winning_by_page = get_winning_ads_by_page(db, limit=1000)
+            winning_counts = {str(w["page_id"]): w["count"] for w in winning_by_page}
+
+            for page in results:
+                pid = str(page.get("page_id", ""))
+                winning_count = winning_counts.get(pid, 0)
+                page["winning_ads"] = winning_count
+                page["score"] = calculate_page_score(page, winning_count)
+
+            # Trier par score
+            results = sorted(results, key=lambda x: x.get("score", 0), reverse=True)
+
+            # Export CSV
+            with col_export:
+                export_data = [{
+                    "Page ID": p.get("page_id", ""),
+                    "Nom": p.get("page_name", ""),
+                    "Site": p.get("lien_site", ""),
+                    "CMS": p.get("cms", ""),
+                    "État": p.get("etat", ""),
+                    "Ads": p.get("nombre_ads_active", 0),
+                    "Winning Ads": p.get("winning_ads", 0),
+                    "Produits": p.get("nombre_produits", 0),
+                    "Score": p.get("score", 0),
+                    "Keywords": p.get("keywords", ""),
+                    "Thématique": p.get("thematique", ""),
+                    "Ads Library": p.get("lien_fb_ad_library", "")
+                } for p in results]
+
+                csv_data = export_to_csv(export_data)
+                st.download_button(
+                    "📥 Export CSV",
+                    csv_data,
+                    file_name=f"pages_export_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv"
+                )
+
             st.markdown(f"**{len(results)} résultats**")
 
             if view_mode == "Tableau":
                 df = pd.DataFrame(results)
 
+                # Ajouter colonne Score visuel
+                df["score_display"] = df.apply(
+                    lambda r: f"{get_score_color(r.get('score', 0))} {r.get('score', 0)}", axis=1
+                )
+
                 # Colonnes à afficher
-                display_cols = ["page_name", "lien_site", "keywords", "cms", "etat", "nombre_ads_active", "nombre_produits"]
+                display_cols = ["score_display", "page_name", "lien_site", "cms", "etat", "nombre_ads_active", "winning_ads", "nombre_produits"]
                 df_display = df[[c for c in display_cols if c in df.columns]]
 
                 # Renommer colonnes
-                df_display.columns = ["Nom", "Site", "Keywords", "CMS", "État", "Ads", "Produits"][:len(df_display.columns)]
+                col_names = ["Score", "Nom", "Site", "CMS", "État", "Ads", "🏆", "Produits"]
+                df_display.columns = col_names[:len(df_display.columns)]
 
                 st.dataframe(
                     df_display,
@@ -976,14 +1286,19 @@ def render_pages_shops():
                     }
                 )
             else:
-                # Vue détaillée avec boutons blacklist
+                # Vue détaillée avec boutons blacklist et score
                 for page in results:
-                    with st.expander(f"**{page.get('page_name', 'N/A')}** - {page.get('etat', 'N/A')} ({page.get('nombre_ads_active', 0)} ads)"):
+                    score = page.get("score", 0)
+                    winning = page.get("winning_ads", 0)
+                    score_icon = get_score_color(score)
+
+                    with st.expander(f"{score_icon} **{page.get('page_name', 'N/A')}** - Score: {score} | {page.get('etat', 'N/A')} ({page.get('nombre_ads_active', 0)} ads, {winning} 🏆)"):
                         col1, col2 = st.columns([3, 1])
 
                         with col1:
                             st.write(f"**Site:** {page.get('lien_site', 'N/A')}")
                             st.write(f"**CMS:** {page.get('cms', 'N/A')} | **Produits:** {page.get('nombre_produits', 0)}")
+                            st.write(f"**Score:** {score}/100 | **Winning Ads:** {winning}")
                             if page.get('keywords'):
                                 st.write(f"**Keywords:** {page.get('keywords', '')}")
                             if page.get('thematique'):
@@ -993,6 +1308,9 @@ def render_pages_shops():
                             pid = page.get('page_id')
                             if page.get('lien_fb_ad_library'):
                                 st.link_button("📘 Ads Library", page['lien_fb_ad_library'])
+
+                            # Bouton copie Page ID
+                            st.code(pid, language=None)
 
                             if st.button("🚫 Blacklist", key=f"bl_page_{pid}"):
                                 if add_to_blacklist(db, pid, page.get('page_name', ''), "Blacklisté depuis Pages/Shops"):
@@ -1061,16 +1379,86 @@ def render_watchlists():
 def render_alerts():
     """Page Alerts - Alertes et notifications"""
     st.title("🔔 Alerts")
-    st.markdown("Alertes et changements détectés")
+    st.markdown("Alertes et changements détectés automatiquement")
 
-    st.info("🚧 Fonctionnalité en cours de développement")
-    st.markdown("""
-    **Fonctionnalités à venir:**
-    - Alertes sur nouveaux concurrents
-    - Notification quand une page passe en XXL
-    - Détection de pages devenues inactives
-    - Alertes personnalisées par watchlist
-    """)
+    db = get_database()
+    if not db:
+        st.warning("Base de données non connectée")
+        return
+
+    try:
+        alerts = generate_alerts(db)
+
+        if alerts:
+            st.success(f"📬 {len(alerts)} alerte(s) active(s)")
+
+            for alert in alerts:
+                if alert["type"] == "success":
+                    with st.expander(f"✅ {alert['icon']} {alert['title']}", expanded=True):
+                        st.success(alert["message"])
+                        if alert.get("data"):
+                            for item in alert["data"][:5]:
+                                if isinstance(item, dict):
+                                    name = item.get("page_name") or item.get("nom_site", "N/A")
+                                    st.write(f"  • {name}")
+
+                elif alert["type"] == "warning":
+                    with st.expander(f"⚠️ {alert['icon']} {alert['title']}", expanded=True):
+                        st.warning(alert["message"])
+                        if alert.get("data"):
+                            for item in alert["data"][:5]:
+                                if isinstance(item, dict):
+                                    name = item.get("page_name") or item.get("nom_site", "N/A")
+                                    delta = item.get("pct_ads", 0)
+                                    st.write(f"  • {name} ({delta:+.0f}%)")
+
+                else:
+                    with st.expander(f"ℹ️ {alert['icon']} {alert['title']}", expanded=True):
+                        st.info(alert["message"])
+                        if alert.get("data"):
+                            for item in alert["data"][:5]:
+                                if isinstance(item, dict):
+                                    name = item.get("page_name") or item.get("nom_site", "N/A")
+                                    delta = item.get("pct_ads", 0)
+                                    ads = item.get("ads_actuel", 0)
+                                    if delta:
+                                        st.write(f"  • {name} ({delta:+.0f}%, {ads} ads)")
+                                    else:
+                                        st.write(f"  • {name}")
+
+                st.markdown("")
+        else:
+            st.info("🔕 Aucune alerte pour le moment")
+            st.caption("Les alertes sont générées automatiquement lors des scans")
+
+        # Section détection manuelle
+        st.markdown("---")
+        st.subheader("🔍 Détection manuelle")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("📈 Rechercher pages en croissance", use_container_width=True):
+                trends = detect_trends(db, days=7)
+                if trends["rising"]:
+                    st.success(f"{len(trends['rising'])} page(s) en forte croissance")
+                    for t in trends["rising"]:
+                        st.write(f"🚀 **{t['nom_site']}** +{t['pct_ads']:.0f}%")
+                else:
+                    st.info("Aucune page en forte croissance")
+
+        with col2:
+            if st.button("📉 Rechercher pages en déclin", use_container_width=True):
+                trends = detect_trends(db, days=7)
+                if trends["falling"]:
+                    st.warning(f"{len(trends['falling'])} page(s) en déclin")
+                    for t in trends["falling"]:
+                        st.write(f"⚠️ **{t['nom_site']}** {t['pct_ads']:.0f}%")
+                else:
+                    st.info("Aucune page en déclin détectée")
+
+    except Exception as e:
+        st.error(f"Erreur: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1332,7 +1720,7 @@ def render_winning_ads():
         """)
 
     # Filtres
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         period = st.selectbox(
@@ -1350,6 +1738,14 @@ def render_winning_ads():
             "Trier par",
             options=["Reach", "Date de scan", "Âge de l'ad"],
             index=0
+        )
+
+    with col4:
+        dedup_mode = st.selectbox(
+            "Dédupliquer",
+            options=["Aucune", "Par Ad ID", "Par Page"],
+            index=0,
+            help="Par Ad ID: 1 seule entrée par ad. Par Page: 1 meilleure ad par page."
         )
 
     try:
@@ -1398,12 +1794,65 @@ def render_winning_ads():
 
         # Liste des winning ads
         st.markdown("---")
-        st.subheader("📋 Liste des Winning Ads")
 
         winning_ads = get_winning_ads(db, limit=limit, days=period)
 
         if winning_ads:
-            st.info(f"🏆 {len(winning_ads)} winning ads trouvées")
+            # Appliquer la déduplication AVANT l'export
+            if dedup_mode == "Par Ad ID":
+                seen_ids = set()
+                deduped = []
+                for ad in winning_ads:
+                    ad_id = ad.get("ad_id")
+                    if ad_id not in seen_ids:
+                        seen_ids.add(ad_id)
+                        deduped.append(ad)
+                winning_ads = deduped
+
+            elif dedup_mode == "Par Page":
+                # Garder la meilleure ad par page (plus haut reach)
+                best_by_page = {}
+                for ad in winning_ads:
+                    pid = ad.get("page_id")
+                    reach = ad.get("eu_total_reach", 0) or 0
+                    if pid not in best_by_page or reach > (best_by_page[pid].get("eu_total_reach", 0) or 0):
+                        best_by_page[pid] = ad
+                winning_ads = list(best_by_page.values())
+                # Re-trier par reach
+                winning_ads = sorted(winning_ads, key=lambda x: x.get("eu_total_reach", 0) or 0, reverse=True)
+
+            # Header avec export
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.subheader("📋 Liste des Winning Ads")
+            with col2:
+                # Préparer données pour export (déjà dédupliquées)
+                export_data = []
+                for ad in winning_ads:
+                    export_data.append({
+                        "page_name": ad.get("page_name", ""),
+                        "page_id": ad.get("page_id", ""),
+                        "ad_id": ad.get("ad_id", ""),
+                        "reach": ad.get("eu_total_reach", 0),
+                        "age_days": ad.get("ad_age_days", 0),
+                        "criteria": ad.get("matched_criteria", ""),
+                        "ad_text": (ad.get("ad_creative_bodies", "") or "")[:200],
+                        "site": ad.get("lien_site", ""),
+                        "ad_url": ad.get("ad_snapshot_url", ""),
+                        "scan_date": ad.get("date_scan").strftime("%Y-%m-%d") if ad.get("date_scan") else ""
+                    })
+                csv_data = export_to_csv(export_data)
+                dedup_suffix = f"_{dedup_mode.lower().replace(' ', '_')}" if dedup_mode != "Aucune" else ""
+                st.download_button(
+                    "📥 Export CSV",
+                    csv_data,
+                    f"winning_ads_{period}j{dedup_suffix}.csv",
+                    "text/csv",
+                    key="export_winning"
+                )
+
+            dedup_info = f" (dédupliqué: {dedup_mode})" if dedup_mode != "Aucune" else ""
+            st.info(f"🏆 {len(winning_ads)} winning ads trouvées{dedup_info}")
 
             for ad in winning_ads:
                 reach_formatted = f"{ad.get('eu_total_reach', 0):,}" if ad.get('eu_total_reach') else "N/A"
@@ -1450,6 +1899,10 @@ def render_winning_ads():
 
                         if ad.get('lien_site'):
                             st.link_button("🌐 Site", ad['lien_site'])
+
+                        # Copie rapide (code box avec bouton copie intégré)
+                        st.caption("📋 Page ID:")
+                        st.code(ad.get('page_id', ''), language=None)
 
         else:
             st.info("Aucune winning ad trouvée pour cette période. Lancez une recherche pour en détecter.")
