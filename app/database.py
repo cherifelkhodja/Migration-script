@@ -1234,9 +1234,9 @@ def save_winning_ads(
     db: DatabaseManager,
     winning_ads_data: List[Dict],
     pages_final: Dict = None
-) -> int:
+) -> tuple:
     """
-    Sauvegarde les winning ads dans la base de données
+    Sauvegarde les winning ads dans la base de données (avec déduplication)
 
     Args:
         db: Instance DatabaseManager
@@ -1244,17 +1244,30 @@ def save_winning_ads(
         pages_final: Dictionnaire des pages (optionnel, pour récupérer le website)
 
     Returns:
-        Nombre de winning ads sauvegardées
+        Tuple (nombre sauvegardées, nombre de doublons ignorés)
     """
     if not winning_ads_data:
-        return 0
+        return (0, 0)
 
     scan_time = datetime.utcnow()
-    count = 0
+    saved_count = 0
+    skipped_count = 0
 
     with db.get_session() as session:
+        # Récupérer tous les ad_id existants pour déduplication
+        existing_ad_ids = set(
+            row[0] for row in session.query(WinningAds.ad_id).all()
+        )
+
         for data in winning_ads_data:
             ad = data.get("ad", {})
+            ad_id = str(ad.get("id", ""))
+
+            # Vérifier si l'ad existe déjà (déduplication)
+            if ad_id in existing_ad_ids:
+                skipped_count += 1
+                continue
+
             page_id = str(data.get("page_id", ad.get("page_id", "")))
 
             # Récupérer le website depuis pages_final si disponible
@@ -1275,7 +1288,7 @@ def save_winning_ads(
                     pass
 
             winning_entry = WinningAds(
-                ad_id=str(ad.get("id", "")),
+                ad_id=ad_id,
                 page_id=page_id,
                 page_name=ad.get("page_name", ""),
                 ad_creation_time=ad_creation,
@@ -1290,9 +1303,10 @@ def save_winning_ads(
                 date_scan=scan_time
             )
             session.add(winning_entry)
-            count += 1
+            existing_ad_ids.add(ad_id)  # Ajouter au set pour éviter doublons dans le même batch
+            saved_count += 1
 
-    return count
+    return (saved_count, skipped_count)
 
 
 def get_winning_ads(
