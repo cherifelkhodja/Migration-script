@@ -535,7 +535,7 @@ def extract_currency_from_html(html: str) -> Optional[str]:
 
 
 def analyze_website_complete(url: str, country_code: str = "FR") -> Dict:
-    """Analyse complète d'un site web"""
+    """Analyse complète d'un site web avec extraction des données pour classification Gemini"""
     try:
         url = ensure_url(url)
         resp = get_web(url, timeout=TIMEOUT_WEB)
@@ -544,7 +544,8 @@ def analyze_website_complete(url: str, country_code: str = "FR") -> Dict:
             return {
                 "cms": "ERROR", "theme": "ERROR", "payments": "",
                 "thematique": "", "type_produits": "", "product_count": 0,
-                "currency_from_site": ""
+                "currency_from_site": "",
+                "site_title": "", "site_description": "", "site_h1": "", "site_keywords": ""
             }
 
         final_url = resp.url
@@ -565,6 +566,27 @@ def analyze_website_complete(url: str, country_code: str = "FR") -> Dict:
 
         currency_from_site = extract_currency_from_html(html)
 
+        # Extraire les données pour classification Gemini (économise un 2e scraping)
+        site_title = ""
+        title_tag = soup.find('title')
+        if title_tag and title_tag.string:
+            site_title = title_tag.string.strip()[:200]
+
+        site_description = ""
+        desc_tag = soup.find('meta', attrs={'name': 'description'})
+        if desc_tag and desc_tag.get('content'):
+            site_description = desc_tag['content'].strip()[:400]
+
+        site_h1 = ""
+        h1_tag = soup.find('h1')
+        if h1_tag:
+            site_h1 = h1_tag.get_text(strip=True)[:150]
+
+        site_keywords = ""
+        kw_tag = soup.find('meta', attrs={'name': 'keywords'})
+        if kw_tag and kw_tag.get('content'):
+            site_keywords = kw_tag['content'].strip()[:200]
+
         return {
             "cms": cms,
             "theme": theme,
@@ -572,11 +594,17 @@ def analyze_website_complete(url: str, country_code: str = "FR") -> Dict:
             "thematique": thematique or "",
             "type_produits": ";".join(product_list),
             "product_count": product_count,
-            "currency_from_site": currency_from_site or ""
+            "currency_from_site": currency_from_site or "",
+            # Données pour classification Gemini
+            "site_title": site_title,
+            "site_description": site_description,
+            "site_h1": site_h1,
+            "site_keywords": site_keywords
         }
     except Exception as e:
         return {
             "cms": "ERROR", "theme": "ERROR", "payments": "",
             "thematique": "", "type_produits": "", "product_count": 0,
-            "currency_from_site": ""
+            "currency_from_site": "",
+            "site_title": "", "site_description": "", "site_h1": "", "site_keywords": ""
         }

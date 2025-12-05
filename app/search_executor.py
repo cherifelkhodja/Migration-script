@@ -172,7 +172,7 @@ def execute_background_search(
         Dict avec les résultats et search_log_id
     """
     from app.meta_api import MetaAdsClient, init_token_rotator
-    from app.cms_detector import detect_cms_from_url
+    from app.shopify_detector import detect_cms_from_url
     from app.web_analyzer import analyze_website_complete, extract_currency_from_ads
     from app.winning_detector import is_winning_ad
     from app.database import (
@@ -619,6 +619,7 @@ def execute_background_search(
         raise
 
     # ═══ PHASE 9: Classification automatique (Gemini) ═══
+    # Utilise les données pré-extraites en phase 6 pour éviter de re-scraper
     classified_count = 0
     gemini_key = os.getenv("GEMINI_API_KEY", "")
 
@@ -626,24 +627,32 @@ def execute_background_search(
         tracker.start_phase(9, "Classification automatique (Gemini)", total_phases=9)
 
         try:
-            from app.gemini_classifier import classify_and_save
-            from app.database import build_taxonomy_prompt, init_default_taxonomy
+            from app.gemini_classifier import classify_with_extracted_content
+            from app.database import init_default_taxonomy
 
             # Initialiser la taxonomie si nécessaire
             init_default_taxonomy(db)
 
-            # Préparer les pages à classifier
-            pages_to_classify = [
-                {"page_id": pid, "url": data.get("website", "")}
-                for pid, data in pages_final.items()
-                if data.get("website")
-            ]
+            # Préparer les pages avec les données DÉJÀ EXTRAITES en phase 6
+            pages_to_classify = []
+            for pid, data in pages_final.items():
+                if data.get("website"):
+                    # Récupérer les données extraites pendant l'analyse web (phase 6)
+                    web_data = web_results.get(pid, {})
+                    pages_to_classify.append({
+                        "page_id": pid,
+                        "url": data.get("website", ""),
+                        "site_title": web_data.get("site_title", ""),
+                        "site_description": web_data.get("site_description", ""),
+                        "site_h1": web_data.get("site_h1", ""),
+                        "site_keywords": web_data.get("site_keywords", "")
+                    })
 
             if pages_to_classify:
                 tracker.update_step("Classification", 1, 1, f"{len(pages_to_classify)} pages")
 
-                # Classifier
-                result = classify_and_save(db, pages=pages_to_classify)
+                # Classifier avec les données pré-extraites (pas de re-scraping!)
+                result = classify_with_extracted_content(db, pages_to_classify)
 
                 classified_count = result.get("classified", 0)
                 errors_count = result.get("errors", 0)
@@ -654,7 +663,7 @@ def execute_background_search(
                     "Erreurs": errors_count,
                 }
                 tracker.complete_phase(f"{classified_count} pages classifiées", stats=phase9_stats)
-                print(f"[Search #{search_id}] Classification: {classified_count}/{len(pages_to_classify)} pages")
+                print(f"[Search #{search_id}] Classification: {classified_count}/{len(pages_to_classify)} pages (sans re-scraping)")
             else:
                 tracker.complete_phase("Aucune page avec URL à classifier", stats={"Pages": 0})
 
