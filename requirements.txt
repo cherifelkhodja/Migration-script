@@ -36,3 +36,6 @@ psycopg2-binary>=2.9.0
 
 # Scheduler (pour Railway cron jobs)
 apscheduler>=3.10.0
+
+# Auto-refresh pour Streamlit
+streamlit-autorefresh>=1.0.1
