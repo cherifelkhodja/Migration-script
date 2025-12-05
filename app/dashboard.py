@@ -265,6 +265,367 @@ def generate_alerts(db: DatabaseManager) -> list:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SYSTÈME DE GRAPHIQUES AMÉLIORÉS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Palette de couleurs cohérente
+CHART_COLORS = {
+    # États - du meilleur au moins bon
+    "XXL": "#10B981",   # Vert émeraude
+    "XL": "#34D399",    # Vert clair
+    "L": "#60A5FA",     # Bleu
+    "M": "#FBBF24",     # Jaune/Orange
+    "S": "#F97316",     # Orange
+    "XS": "#EF4444",    # Rouge
+    "inactif": "#9CA3AF",  # Gris
+    # CMS
+    "Shopify": "#96BF48",
+    "WooCommerce": "#7B5FC7",
+    "PrestaShop": "#DF0067",
+    "Magento": "#F46F25",
+    "Wix": "#0C6EFC",
+    "Unknown": "#9CA3AF",
+    # Génériques
+    "primary": "#3B82F6",
+    "success": "#10B981",
+    "warning": "#F59E0B",
+    "danger": "#EF4444",
+    "info": "#06B6D4",
+    "neutral": "#6B7280",
+}
+
+# Style commun pour tous les graphiques
+CHART_LAYOUT = {
+    "font": {"family": "Inter, sans-serif", "size": 12, "color": "#374151"},
+    "paper_bgcolor": "rgba(0,0,0,0)",
+    "plot_bgcolor": "rgba(0,0,0,0)",
+    "margin": {"l": 20, "r": 20, "t": 40, "b": 20},
+    "hoverlabel": {
+        "bgcolor": "white",
+        "font_size": 13,
+        "font_family": "Inter, sans-serif"
+    }
+}
+
+
+def info_card(title: str, explanation: str, icon: str = "💡"):
+    """Affiche une carte d'explication pour les débutants"""
+    with st.expander(f"{icon} {title}", expanded=False):
+        st.markdown(f"<p style='color: #6B7280; font-size: 14px;'>{explanation}</p>", unsafe_allow_html=True)
+
+
+def chart_header(title: str, subtitle: str = None, help_text: str = None):
+    """Affiche un header de graphique avec titre, sous-titre et aide optionnelle"""
+    if help_text:
+        col1, col2 = st.columns([5, 1])
+        with col1:
+            st.markdown(f"**{title}**")
+            if subtitle:
+                st.caption(subtitle)
+        with col2:
+            st.markdown(f"<span title='{help_text}' style='cursor: help; font-size: 18px;'>ℹ️</span>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"**{title}**")
+        if subtitle:
+            st.caption(subtitle)
+
+
+def create_horizontal_bar_chart(
+    labels: list,
+    values: list,
+    title: str = "",
+    colors: list = None,
+    show_values: bool = True,
+    value_suffix: str = "",
+    height: int = 300
+) -> go.Figure:
+    """
+    Crée un graphique à barres horizontales clair et lisible.
+    Idéal pour comparer des catégories.
+    """
+    if colors is None:
+        colors = [CHART_COLORS.get(label, CHART_COLORS["primary"]) for label in labels]
+
+    # Inverser pour afficher le plus grand en haut
+    labels_rev = list(reversed(labels))
+    values_rev = list(reversed(values))
+    colors_rev = list(reversed(colors))
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        y=labels_rev,
+        x=values_rev,
+        orientation='h',
+        marker_color=colors_rev,
+        text=[f"{v:,}{value_suffix}" for v in values_rev] if show_values else None,
+        textposition='outside',
+        textfont={"size": 12, "color": "#374151"},
+        hovertemplate="<b>%{y}</b><br>%{x:,}" + value_suffix + "<extra></extra>"
+    ))
+
+    fig.update_layout(
+        **CHART_LAYOUT,
+        title={"text": title, "x": 0, "font": {"size": 14, "color": "#1F2937"}},
+        height=height,
+        showlegend=False,
+        xaxis={"showgrid": True, "gridcolor": "#F3F4F6", "zeroline": False},
+        yaxis={"showgrid": False},
+        bargap=0.3
+    )
+
+    return fig
+
+
+def create_donut_chart(
+    labels: list,
+    values: list,
+    title: str = "",
+    colors: list = None,
+    show_percentages: bool = True,
+    height: int = 300
+) -> go.Figure:
+    """
+    Crée un graphique en anneau (donut) avec pourcentages clairs.
+    Idéal pour montrer des proportions.
+    """
+    if colors is None:
+        colors = [CHART_COLORS.get(label, CHART_COLORS["neutral"]) for label in labels]
+
+    total = sum(values)
+    percentages = [(v / total * 100) if total > 0 else 0 for v in values]
+
+    # Créer les labels avec pourcentages
+    text_labels = [f"{l}<br><b>{p:.0f}%</b>" for l, p in zip(labels, percentages)]
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Pie(
+        labels=labels,
+        values=values,
+        hole=0.5,
+        marker_colors=colors,
+        textinfo='label+percent' if show_percentages else 'label',
+        textposition='outside',
+        textfont={"size": 11},
+        hovertemplate="<b>%{label}</b><br>%{value:,} (%{percent})<extra></extra>",
+        pull=[0.02] * len(labels)  # Légère séparation
+    ))
+
+    # Ajouter le total au centre
+    fig.add_annotation(
+        text=f"<b>{total:,}</b><br><span style='font-size:10px'>Total</span>",
+        x=0.5, y=0.5,
+        font={"size": 16, "color": "#1F2937"},
+        showarrow=False
+    )
+
+    fig.update_layout(
+        **CHART_LAYOUT,
+        title={"text": title, "x": 0, "font": {"size": 14, "color": "#1F2937"}},
+        height=height,
+        showlegend=True,
+        legend={"orientation": "h", "yanchor": "bottom", "y": -0.2, "xanchor": "center", "x": 0.5}
+    )
+
+    return fig
+
+
+def create_trend_chart(
+    dates: list,
+    values: list,
+    title: str = "",
+    value_name: str = "Valeur",
+    color: str = None,
+    show_trend: bool = True,
+    height: int = 300,
+    secondary_values: list = None,
+    secondary_name: str = None
+) -> go.Figure:
+    """
+    Crée un graphique de tendance (ligne) avec zone colorée.
+    Idéal pour montrer l'évolution dans le temps.
+    """
+    if color is None:
+        color = CHART_COLORS["primary"]
+
+    fig = go.Figure()
+
+    # Zone sous la courbe
+    fig.add_trace(go.Scatter(
+        x=dates,
+        y=values,
+        fill='tozeroy',
+        fillcolor=f"rgba{tuple(list(int(color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4)) + [0.1])}",
+        line={"color": color, "width": 3},
+        mode='lines+markers',
+        name=value_name,
+        marker={"size": 8, "color": color},
+        hovertemplate=f"<b>{value_name}</b>: %{{y:,}}<br>%{{x|%d/%m/%Y}}<extra></extra>"
+    ))
+
+    # Courbe secondaire optionnelle
+    if secondary_values and secondary_name:
+        secondary_color = CHART_COLORS["success"]
+        fig.add_trace(go.Scatter(
+            x=dates,
+            y=secondary_values,
+            line={"color": secondary_color, "width": 2, "dash": "dot"},
+            mode='lines+markers',
+            name=secondary_name,
+            marker={"size": 6, "color": secondary_color},
+            hovertemplate=f"<b>{secondary_name}</b>: %{{y:,}}<br>%{{x|%d/%m/%Y}}<extra></extra>"
+        ))
+
+    # Ligne de tendance
+    if show_trend and len(values) > 1:
+        import numpy as np
+        x_numeric = list(range(len(values)))
+        z = np.polyfit(x_numeric, values, 1)
+        p = np.poly1d(z)
+        trend_values = [p(i) for i in x_numeric]
+
+        trend_color = CHART_COLORS["success"] if z[0] > 0 else CHART_COLORS["danger"]
+        fig.add_trace(go.Scatter(
+            x=dates,
+            y=trend_values,
+            line={"color": trend_color, "width": 2, "dash": "dash"},
+            mode='lines',
+            name="Tendance",
+            hoverinfo='skip'
+        ))
+
+    fig.update_layout(
+        **CHART_LAYOUT,
+        title={"text": title, "x": 0, "font": {"size": 14, "color": "#1F2937"}},
+        height=height,
+        showlegend=True,
+        legend={"orientation": "h", "yanchor": "bottom", "y": -0.25, "xanchor": "center", "x": 0.5},
+        xaxis={"showgrid": True, "gridcolor": "#F3F4F6", "tickformat": "%d/%m"},
+        yaxis={"showgrid": True, "gridcolor": "#F3F4F6", "zeroline": False},
+        hovermode='x unified'
+    )
+
+    return fig
+
+
+def create_gauge_chart(
+    value: int,
+    max_value: int = 100,
+    title: str = "",
+    thresholds: list = None,
+    height: int = 200
+) -> go.Figure:
+    """
+    Crée une jauge de progression.
+    Idéal pour montrer un score ou un pourcentage.
+    """
+    if thresholds is None:
+        thresholds = [
+            {"range": [0, 40], "color": CHART_COLORS["danger"]},
+            {"range": [40, 60], "color": CHART_COLORS["warning"]},
+            {"range": [60, 80], "color": "#FBBF24"},
+            {"range": [80, 100], "color": CHART_COLORS["success"]},
+        ]
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Indicator(
+        mode="gauge+number",
+        value=value,
+        title={"text": title, "font": {"size": 14, "color": "#1F2937"}},
+        number={"font": {"size": 32, "color": "#1F2937"}, "suffix": f"/{max_value}"},
+        gauge={
+            "axis": {"range": [0, max_value], "tickcolor": "#9CA3AF"},
+            "bar": {"color": "#3B82F6", "thickness": 0.3},
+            "bgcolor": "#F3F4F6",
+            "borderwidth": 0,
+            "steps": thresholds,
+            "threshold": {
+                "line": {"color": "#1F2937", "width": 2},
+                "thickness": 0.8,
+                "value": value
+            }
+        }
+    ))
+
+    fig.update_layout(
+        **CHART_LAYOUT,
+        height=height,
+    )
+
+    return fig
+
+
+def create_metric_card(
+    value: str,
+    label: str,
+    delta: str = None,
+    delta_color: str = "normal",
+    icon: str = ""
+):
+    """
+    Affiche une métrique stylisée avec delta optionnel.
+    """
+    st.metric(
+        label=f"{icon} {label}" if icon else label,
+        value=value,
+        delta=delta,
+        delta_color=delta_color
+    )
+
+
+def create_comparison_bars(
+    categories: list,
+    series1_values: list,
+    series2_values: list,
+    series1_name: str = "Actuel",
+    series2_name: str = "Précédent",
+    title: str = "",
+    height: int = 300
+) -> go.Figure:
+    """
+    Crée un graphique de comparaison avec deux séries.
+    Idéal pour comparer deux périodes.
+    """
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        name=series1_name,
+        x=categories,
+        y=series1_values,
+        marker_color=CHART_COLORS["primary"],
+        text=[f"{v:,}" for v in series1_values],
+        textposition='outside',
+        textfont={"size": 10}
+    ))
+
+    fig.add_trace(go.Bar(
+        name=series2_name,
+        x=categories,
+        y=series2_values,
+        marker_color=CHART_COLORS["neutral"],
+        text=[f"{v:,}" for v in series2_values],
+        textposition='outside',
+        textfont={"size": 10}
+    ))
+
+    fig.update_layout(
+        **CHART_LAYOUT,
+        title={"text": title, "x": 0, "font": {"size": 14, "color": "#1F2937"}},
+        height=height,
+        barmode='group',
+        bargap=0.3,
+        bargroupgap=0.1,
+        legend={"orientation": "h", "yanchor": "bottom", "y": -0.25, "xanchor": "center", "x": 0.5},
+        xaxis={"showgrid": False},
+        yaxis={"showgrid": True, "gridcolor": "#F3F4F6"}
+    )
+
+    return fig
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # NAVIGATION SIDEBAR
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -414,38 +775,61 @@ def render_dashboard():
 
         st.markdown("---")
 
-        # Graphiques
+        # Info card pour débutants
+        info_card(
+            "Comment lire ces graphiques ?",
+            """
+            <b>États des pages</b> : Classement basé sur le nombre d'annonces actives.<br>
+            • <b>XXL</b> (≥150 ads) = Pages très actives, probablement rentables<br>
+            • <b>XL</b> (80-149) = Pages performantes<br>
+            • <b>L</b> (35-79) = Bonne activité<br>
+            • <b>M/S/XS</b> = Activité modérée à faible<br><br>
+            <b>CMS</b> : La technologie utilisée par le site (Shopify est le plus courant en e-commerce).
+            """,
+            "📚"
+        )
+
+        # Graphiques améliorés
         col1, col2 = st.columns(2)
 
         with col1:
-            st.subheader("Répartition par État")
+            chart_header(
+                "📊 Répartition par État",
+                "Classement des pages selon leur nombre d'annonces actives",
+                "XXL = ≥150 ads, XL = 80-149, L = 35-79, M = 20-34, S = 10-19, XS = 1-9"
+            )
             if etats:
                 ordre_etats = ["XXL", "XL", "L", "M", "S", "XS", "inactif"]
                 etats_ordonne = [(k, etats.get(k, 0)) for k in ordre_etats if etats.get(k, 0) > 0]
                 if etats_ordonne:
-                    fig = px.bar(
-                        x=[e[0] for e in etats_ordonne],
-                        y=[e[1] for e in etats_ordonne],
-                        color=[e[0] for e in etats_ordonne],
-                        color_discrete_map={
-                            "XXL": "#1f77b4", "XL": "#2ca02c", "L": "#98df8a",
-                            "M": "#ffbb78", "S": "#ff7f0e", "XS": "#d62728", "inactif": "#7f7f7f"
-                        }
+                    labels = [e[0] for e in etats_ordonne]
+                    values = [e[1] for e in etats_ordonne]
+                    fig = create_horizontal_bar_chart(
+                        labels=labels,
+                        values=values,
+                        value_suffix=" pages",
+                        height=280
                     )
-                    fig.update_layout(showlegend=False, xaxis_title="", yaxis_title="Nombre")
                     st.plotly_chart(fig, key="dash_etats", use_container_width=True)
             else:
                 st.info("Aucune donnée disponible")
 
         with col2:
-            st.subheader("Répartition par CMS")
+            chart_header(
+                "🛒 Répartition par CMS",
+                "Technologie e-commerce utilisée par les sites",
+                "Shopify est la plateforme la plus populaire pour le dropshipping"
+            )
             if cms_stats:
-                fig = px.pie(
-                    values=list(cms_stats.values()),
-                    names=list(cms_stats.keys()),
-                    hole=0.4
+                # Trier par valeur décroissante
+                sorted_cms = sorted(cms_stats.items(), key=lambda x: x[1], reverse=True)
+                labels = [c[0] for c in sorted_cms]
+                values = [c[1] for c in sorted_cms]
+                fig = create_donut_chart(
+                    labels=labels,
+                    values=values,
+                    height=280
                 )
-                fig.update_layout(showlegend=True)
                 st.plotly_chart(fig, key="dash_cms", use_container_width=True)
             else:
                 st.info("Aucune donnée disponible")
@@ -1561,30 +1945,27 @@ def render_monitoring():
             if history and len(history) > 0:
                 st.success(f"📊 {len(history)} scans trouvés")
 
-                # Graphique d'évolution
+                # Graphique d'évolution amélioré
                 if len(history) > 1:
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=[h["date_scan"] for h in history],
-                        y=[h["nombre_ads_active"] for h in history],
-                        mode='lines+markers',
-                        name='Ads actives',
-                        line=dict(color='#1f77b4', width=2),
-                        hovertemplate="Ads: %{y}<br>Delta: %{customdata}<extra></extra>",
-                        customdata=[h["delta_ads"] for h in history]
-                    ))
-                    fig.add_trace(go.Scatter(
-                        x=[h["date_scan"] for h in history],
-                        y=[h["nombre_produits"] for h in history],
-                        mode='lines+markers',
-                        name='Produits',
-                        line=dict(color='#2ca02c', width=2)
-                    ))
-                    fig.update_layout(
-                        title="Évolution dans le temps",
-                        xaxis_title="Date",
-                        yaxis_title="Nombre",
-                        hovermode='x unified'
+                    chart_header(
+                        "📈 Évolution dans le temps",
+                        "Suivi du nombre d'annonces et de produits",
+                        "La ligne pointillée indique la tendance générale"
+                    )
+
+                    dates = [h["date_scan"] for h in history]
+                    ads_values = [h["nombre_ads_active"] for h in history]
+                    products_values = [h["nombre_produits"] for h in history]
+
+                    fig = create_trend_chart(
+                        dates=dates,
+                        values=ads_values,
+                        value_name="Ads actives",
+                        color=CHART_COLORS["primary"],
+                        secondary_values=products_values,
+                        secondary_name="Produits",
+                        show_trend=True,
+                        height=350
                     )
                     st.plotly_chart(fig, key="monitoring_page_chart", use_container_width=True)
 
@@ -1626,16 +2007,33 @@ def render_analytics():
     try:
         stats = get_suivi_stats(db)
 
+        # Info card
+        info_card(
+            "Que signifient ces statistiques ?",
+            """
+            Cette page vous donne une vue d'ensemble de votre base de données de pages publicitaires.<br><br>
+            • <b>Distribution par État</b> : Montre combien de pages sont dans chaque catégorie d'activité<br>
+            • <b>Distribution par CMS</b> : Les plateformes e-commerce utilisées (Shopify domine le marché)<br>
+            • <b>Thématiques</b> : Les niches/secteurs les plus représentés dans votre base
+            """,
+            "📚"
+        )
+
         # Stats générales
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Pages", stats.get("total_pages", 0))
+        col1, col2, col3, col4 = st.columns(4)
 
         etats = stats.get("etats", {})
-        actives = sum(v for k, v in etats.items() if k != "inactif")
-        col2.metric("Pages Actives", actives)
-
         cms_stats = stats.get("cms", {})
-        col3.metric("CMS Différents", len(cms_stats))
+        total_pages = stats.get("total_pages", 0)
+        actives = sum(v for k, v in etats.items() if k != "inactif")
+
+        col1.metric("📄 Total Pages", f"{total_pages:,}")
+        col2.metric("✅ Pages Actives", f"{actives:,}")
+        col3.metric("🛒 CMS Différents", len(cms_stats))
+
+        # Taux d'activité
+        taux_actif = (actives / total_pages * 100) if total_pages > 0 else 0
+        col4.metric("📈 Taux d'activité", f"{taux_actif:.1f}%")
 
         st.markdown("---")
 
@@ -1643,29 +2041,58 @@ def render_analytics():
         col1, col2 = st.columns(2)
 
         with col1:
-            st.subheader("Distribution par État")
+            chart_header(
+                "📊 Distribution par État",
+                "Nombre de pages par niveau d'activité",
+                "Plus une page a d'ads actives, plus elle est probablement performante"
+            )
             if etats:
-                fig = px.funnel(
-                    x=list(etats.values()),
-                    y=list(etats.keys()),
-                    color=list(etats.keys())
+                # Ordonner les états
+                ordre_etats = ["XXL", "XL", "L", "M", "S", "XS", "inactif"]
+                etats_ordonne = [(k, etats.get(k, 0)) for k in ordre_etats if etats.get(k, 0) > 0]
+
+                labels = [e[0] for e in etats_ordonne]
+                values = [e[1] for e in etats_ordonne]
+
+                fig = create_horizontal_bar_chart(
+                    labels=labels,
+                    values=values,
+                    value_suffix=" pages",
+                    height=300
                 )
-                st.plotly_chart(fig, key="analytics_funnel", use_container_width=True)
+                st.plotly_chart(fig, key="analytics_states", use_container_width=True)
+            else:
+                st.info("Aucune donnée disponible")
 
         with col2:
-            st.subheader("Distribution par CMS")
+            chart_header(
+                "🛒 Distribution par CMS",
+                "Plateformes e-commerce utilisées",
+                "Shopify est le leader du marché dropshipping"
+            )
             if cms_stats:
-                fig = px.bar(
-                    x=list(cms_stats.keys()),
-                    y=list(cms_stats.values()),
-                    color=list(cms_stats.keys())
+                # Trier par valeur décroissante
+                sorted_cms = sorted(cms_stats.items(), key=lambda x: x[1], reverse=True)
+                labels = [c[0] for c in sorted_cms]
+                values = [c[1] for c in sorted_cms]
+
+                fig = create_horizontal_bar_chart(
+                    labels=labels,
+                    values=values,
+                    value_suffix=" sites",
+                    height=300
                 )
-                fig.update_layout(showlegend=False)
                 st.plotly_chart(fig, key="analytics_cms", use_container_width=True)
+            else:
+                st.info("Aucune donnée disponible")
 
         # Top thématiques
         st.markdown("---")
-        st.subheader("🏷️ Analyse par thématique")
+        chart_header(
+            "🏷️ Analyse par thématique",
+            "Répartition des pages selon leur niche/secteur",
+            "Identifiez les marchés les plus compétitifs"
+        )
 
         all_pages = search_pages(db, limit=500)
         if all_pages:
@@ -1675,12 +2102,21 @@ def render_analytics():
                 themes[theme] = themes.get(theme, 0) + 1
 
             if themes:
-                fig = px.treemap(
-                    names=list(themes.keys()),
-                    values=list(themes.values()),
-                    parents=[""] * len(themes)
+                # Trier et prendre top 10
+                sorted_themes = sorted(themes.items(), key=lambda x: x[1], reverse=True)[:10]
+                labels = [t[0] for t in sorted_themes]
+                values = [t[1] for t in sorted_themes]
+
+                fig = create_horizontal_bar_chart(
+                    labels=labels,
+                    values=values,
+                    colors=[CHART_COLORS["info"]] * len(labels),
+                    value_suffix=" pages",
+                    height=350
                 )
                 st.plotly_chart(fig, key="analytics_themes", use_container_width=True)
+        else:
+            st.info("Aucune donnée disponible")
 
     except Exception as e:
         st.error(f"Erreur: {e}")
@@ -1769,21 +2205,47 @@ def render_winning_ads():
         # Graphique par critère
         if by_criteria:
             st.markdown("---")
+
+            # Info card
+            info_card(
+                "Comprendre les critères de Winning Ads",
+                """
+                Chaque critère représente une combinaison âge/reach :<br>
+                • <b>≤4j >15k</b> : Ad de moins de 4 jours avec plus de 15 000 personnes touchées<br>
+                • Plus le ratio reach/âge est élevé, plus l'ad est performante<br>
+                • Une ad qui touche beaucoup de monde rapidement indique un bon produit/créative
+                """,
+                "🎯"
+            )
+
             col1, col2 = st.columns(2)
 
             with col1:
-                st.subheader("Répartition par critère")
-                fig = px.bar(
-                    x=list(by_criteria.keys()),
-                    y=list(by_criteria.values()),
-                    color=list(by_criteria.keys()),
-                    labels={"x": "Critère", "y": "Nombre"}
+                chart_header(
+                    "📊 Répartition par critère",
+                    "Quels seuils sont les plus atteints",
+                    "Le critère le plus fréquent indique le niveau de performance moyen"
                 )
-                fig.update_layout(showlegend=False)
+                # Trier par valeur
+                sorted_criteria = sorted(by_criteria.items(), key=lambda x: x[1], reverse=True)
+                labels = [c[0] for c in sorted_criteria]
+                values = [c[1] for c in sorted_criteria]
+
+                fig = create_horizontal_bar_chart(
+                    labels=labels,
+                    values=values,
+                    colors=[CHART_COLORS["success"]] * len(labels),
+                    value_suffix=" ads",
+                    height=280
+                )
                 st.plotly_chart(fig, key="winning_by_criteria", use_container_width=True)
 
             with col2:
-                st.subheader("Top Pages avec Winning Ads")
+                chart_header(
+                    "🏆 Top Pages avec Winning Ads",
+                    "Pages ayant le plus d'annonces performantes",
+                    "Ces pages ont probablement trouvé des produits/créatives gagnants"
+                )
                 by_page = stats.get("by_page", [])
                 if by_page:
                     df_pages = pd.DataFrame(by_page)
