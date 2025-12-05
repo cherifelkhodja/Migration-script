@@ -45,7 +45,7 @@ from app.database import (
     get_evolution_stats, get_page_evolution_history, get_etat_from_ads_count,
     add_to_blacklist, remove_from_blacklist, get_blacklist, get_blacklist_ids,
     is_winning_ad, save_winning_ads, get_winning_ads, get_winning_ads_stats,
-    get_all_pages, get_winning_ads_by_page, get_cached_pages_info,
+    get_all_pages, get_winning_ads_by_page, get_cached_pages_info, get_dashboard_trends,
     # Tags
     get_all_tags, create_tag, delete_tag, add_tag_to_page, remove_tag_from_page,
     get_page_tags, get_pages_by_tag,
@@ -1384,6 +1384,9 @@ def render_dashboard():
         winning_stats = get_winning_ads_stats(db, days=7)
         winning_by_page = get_winning_ads_by_page(db, days=30)
 
+        # Récupérer les tendances (7 jours vs 7 jours précédents)
+        trends = get_dashboard_trends(db, days=7)
+
         # KPIs principaux avec trends
         col1, col2, col3, col4, col5 = st.columns(5)
 
@@ -1396,11 +1399,64 @@ def render_dashboard():
         xxl_count = etats.get("XXL", 0)
         winning_total = winning_stats.get("total", 0)
 
-        col1.metric("📄 Total Pages", total_pages)
-        col2.metric("✅ Actives", actives)
+        # Formater les deltas pour affichage
+        pages_delta = trends.get("pages", {}).get("delta", 0)
+        winning_delta = trends.get("winning_ads", {}).get("delta", 0)
+        rising = trends.get("evolution", {}).get("rising", 0)
+        falling = trends.get("evolution", {}).get("falling", 0)
+
+        col1.metric(
+            "📄 Total Pages",
+            total_pages,
+            delta=f"+{pages_delta} (7j)" if pages_delta > 0 else f"{pages_delta} (7j)" if pages_delta < 0 else None,
+            delta_color="normal"
+        )
+        col2.metric(
+            "✅ Actives",
+            actives,
+            delta=f"📈 {rising} montantes" if rising > 0 else None,
+            delta_color="normal"
+        )
         col3.metric("🚀 XXL (≥150)", xxl_count)
         col4.metric("🛒 Shopify", shopify_count)
-        col5.metric("🏆 Winning (7j)", winning_total)
+        col5.metric(
+            "🏆 Winning (7j)",
+            winning_total,
+            delta=f"+{winning_delta} vs sem. préc." if winning_delta > 0 else f"{winning_delta} vs sem. préc." if winning_delta < 0 else None,
+            delta_color="normal" if winning_delta >= 0 else "inverse"
+        )
+
+        # Encart Tendances (7 jours)
+        if rising > 0 or falling > 0 or pages_delta != 0 or winning_delta != 0:
+            with st.expander("📈 Tendances (7 derniers jours)", expanded=False):
+                trend_cols = st.columns(4)
+                with trend_cols[0]:
+                    st.metric(
+                        "Nouvelles pages",
+                        trends.get("pages", {}).get("current", 0),
+                        delta=f"+{pages_delta}" if pages_delta > 0 else str(pages_delta) if pages_delta < 0 else "stable"
+                    )
+                with trend_cols[1]:
+                    st.metric(
+                        "Winning ads",
+                        trends.get("winning_ads", {}).get("current", 0),
+                        delta=f"+{winning_delta}" if winning_delta > 0 else str(winning_delta) if winning_delta < 0 else "stable"
+                    )
+                with trend_cols[2]:
+                    searches_delta = trends.get("searches", {}).get("delta", 0)
+                    st.metric(
+                        "Recherches",
+                        trends.get("searches", {}).get("current", 0),
+                        delta=f"+{searches_delta}" if searches_delta > 0 else str(searches_delta) if searches_delta < 0 else "stable"
+                    )
+                with trend_cols[3]:
+                    net_evolution = rising - falling
+                    st.metric(
+                        "Balance évolution",
+                        f"📈 {rising} / 📉 {falling}",
+                        delta=f"+{net_evolution} net" if net_evolution > 0 else f"{net_evolution} net" if net_evolution < 0 else "équilibré",
+                        delta_color="normal" if net_evolution >= 0 else "inverse"
+                    )
 
         # Quick Alerts
         alerts = generate_alerts(db)
@@ -2629,30 +2685,68 @@ def render_pages_shops():
             # Trier par score
             results = sorted(results, key=lambda x: x.get("score", 0), reverse=True)
 
-            # Export CSV
+            # Export CSV personnalisé
             with col_export:
-                export_data = [{
-                    "Page ID": p.get("page_id", ""),
-                    "Nom": p.get("page_name", ""),
-                    "Site": p.get("lien_site", ""),
-                    "CMS": p.get("cms", ""),
-                    "État": p.get("etat", ""),
-                    "Ads": p.get("nombre_ads_active", 0),
-                    "Winning Ads": p.get("winning_ads", 0),
-                    "Produits": p.get("nombre_produits", 0),
-                    "Score": p.get("score", 0),
-                    "Keywords": p.get("keywords", ""),
-                    "Thématique": p.get("thematique", ""),
-                    "Ads Library": p.get("lien_fb_ad_library", "")
-                } for p in results]
+                # Définir toutes les colonnes disponibles
+                all_export_columns = {
+                    "Page ID": lambda p: p.get("page_id", ""),
+                    "Nom": lambda p: p.get("page_name", ""),
+                    "Site": lambda p: p.get("lien_site", ""),
+                    "CMS": lambda p: p.get("cms", ""),
+                    "État": lambda p: p.get("etat", ""),
+                    "Ads Actives": lambda p: p.get("nombre_ads_active", 0),
+                    "Winning Ads": lambda p: p.get("winning_ads", 0),
+                    "Produits": lambda p: p.get("nombre_produits", 0),
+                    "Score": lambda p: p.get("score", 0),
+                    "Keywords": lambda p: p.get("keywords", ""),
+                    "Thématique": lambda p: p.get("thematique", ""),
+                    "Ads Library": lambda p: p.get("lien_fb_ad_library", ""),
+                    "Page Facebook": lambda p: f"https://www.facebook.com/{p.get('page_id', '')}",
+                    "Date création": lambda p: p.get("date_creation", ""),
+                    "Dernière MAJ": lambda p: p.get("date_maj", "")
+                }
 
-                csv_data = export_to_csv(export_data)
-                st.download_button(
-                    "📥 CSV",
-                    csv_data,
-                    file_name=f"pages_export_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
-                    mime="text/csv"
-                )
+                # Colonnes par défaut
+                default_columns = ["Page ID", "Nom", "Site", "CMS", "État", "Ads Actives", "Winning Ads", "Score"]
+
+                with st.popover("📥 Export CSV"):
+                    st.markdown("**Colonnes à exporter:**")
+                    selected_columns = st.multiselect(
+                        "Sélectionner les colonnes",
+                        options=list(all_export_columns.keys()),
+                        default=default_columns,
+                        key="export_columns_pages",
+                        label_visibility="collapsed"
+                    )
+
+                    # Présets rapides
+                    col_p1, col_p2 = st.columns(2)
+                    with col_p1:
+                        if st.button("📋 Essentiel", key="preset_essential", use_container_width=True):
+                            st.session_state.export_columns_pages = ["Page ID", "Nom", "Site", "CMS", "État", "Score"]
+                            st.rerun()
+                    with col_p2:
+                        if st.button("📊 Complet", key="preset_full", use_container_width=True):
+                            st.session_state.export_columns_pages = list(all_export_columns.keys())
+                            st.rerun()
+
+                    if selected_columns:
+                        # Générer les données d'export
+                        export_data = []
+                        for p in results:
+                            row = {col: all_export_columns[col](p) for col in selected_columns}
+                            export_data.append(row)
+
+                        csv_data = export_to_csv(export_data)
+                        st.download_button(
+                            f"📥 Télécharger ({len(selected_columns)} colonnes)",
+                            csv_data,
+                            file_name=f"pages_export_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                    else:
+                        st.warning("Sélectionnez au moins une colonne")
 
             st.markdown(f"**{len(results)} résultats**")
 
@@ -3424,35 +3518,69 @@ def render_winning_ads():
         winning_ads = get_winning_ads(db, limit=actual_limit, days=period)
 
         if winning_ads:
-            # Header avec export
+            # Header avec export personnalisé
             col1, col2 = st.columns([3, 1])
             with col1:
                 st.subheader("📋 Liste des Winning Ads")
             with col2:
-                # Préparer données pour export
-                export_data = []
-                for ad in winning_ads:
-                    export_data.append({
-                        "page_name": ad.get("page_name", ""),
-                        "page_id": ad.get("page_id", ""),
-                        "ad_id": ad.get("ad_id", ""),
-                        "reach": ad.get("eu_total_reach", 0),
-                        "age_days": ad.get("ad_age_days", 0),
-                        "criteria": ad.get("matched_criteria", ""),
-                        "ad_text": (ad.get("ad_creative_bodies", "") or "")[:200],
-                        "site": ad.get("lien_site", ""),
-                        "ad_url": ad.get("ad_snapshot_url", ""),
-                        "scan_date": ad.get("date_scan").strftime("%Y-%m-%d") if ad.get("date_scan") else ""
-                    })
-                csv_data = export_to_csv(export_data)
-                group_suffix = f"_{group_by.lower().replace(' ', '_')}" if group_by != "Aucun" else ""
-                st.download_button(
-                    "📥 Export CSV",
-                    csv_data,
-                    f"winning_ads_{period}j{group_suffix}.csv",
-                    "text/csv",
-                    key="export_winning"
-                )
+                # Colonnes disponibles pour export
+                all_winning_columns = {
+                    "Page": lambda ad: ad.get("page_name", ""),
+                    "Page ID": lambda ad: ad.get("page_id", ""),
+                    "Ad ID": lambda ad: ad.get("ad_id", ""),
+                    "Reach": lambda ad: ad.get("eu_total_reach", 0),
+                    "Âge (jours)": lambda ad: ad.get("ad_age_days", 0),
+                    "Critère": lambda ad: ad.get("matched_criteria", ""),
+                    "Texte Ad": lambda ad: (ad.get("ad_creative_bodies", "") or "")[:200],
+                    "Site": lambda ad: ad.get("lien_site", ""),
+                    "CMS": lambda ad: ad.get("cms", ""),
+                    "URL Ad": lambda ad: ad.get("ad_snapshot_url", ""),
+                    "Date scan": lambda ad: ad.get("date_scan").strftime("%Y-%m-%d") if ad.get("date_scan") else "",
+                    "Page Facebook": lambda ad: f"https://www.facebook.com/{ad.get('page_id', '')}",
+                    "Ad Library": lambda ad: f"https://www.facebook.com/ads/library/?id={ad.get('ad_id', '')}"
+                }
+
+                default_winning_cols = ["Page", "Ad ID", "Reach", "Âge (jours)", "Critère", "Site"]
+
+                with st.popover("📥 Export CSV"):
+                    st.markdown("**Colonnes à exporter:**")
+                    selected_winning_cols = st.multiselect(
+                        "Colonnes",
+                        options=list(all_winning_columns.keys()),
+                        default=default_winning_cols,
+                        key="export_columns_winning",
+                        label_visibility="collapsed"
+                    )
+
+                    # Présets
+                    col_w1, col_w2 = st.columns(2)
+                    with col_w1:
+                        if st.button("📋 Essentiel", key="preset_win_ess", use_container_width=True):
+                            st.session_state.export_columns_winning = ["Page", "Ad ID", "Reach", "Critère"]
+                            st.rerun()
+                    with col_w2:
+                        if st.button("📊 Complet", key="preset_win_full", use_container_width=True):
+                            st.session_state.export_columns_winning = list(all_winning_columns.keys())
+                            st.rerun()
+
+                    if selected_winning_cols:
+                        export_data = []
+                        for ad in winning_ads:
+                            row = {col: all_winning_columns[col](ad) for col in selected_winning_cols}
+                            export_data.append(row)
+
+                        csv_data = export_to_csv(export_data)
+                        group_suffix = f"_{group_by.lower().replace(' ', '_')}" if group_by != "Aucun" else ""
+                        st.download_button(
+                            f"📥 Télécharger ({len(selected_winning_cols)} col.)",
+                            csv_data,
+                            f"winning_ads_{period}j{group_suffix}.csv",
+                            "text/csv",
+                            key="export_winning",
+                            use_container_width=True
+                        )
+                    else:
+                        st.warning("Sélectionnez au moins une colonne")
 
             group_info = f" (groupé: {group_by})" if group_by != "Aucun" else ""
             st.info(f"🏆 {len(winning_ads)} winning ads trouvées{group_info}")

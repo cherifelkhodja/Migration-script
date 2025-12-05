@@ -814,6 +814,130 @@ def get_suivi_stats(db: DatabaseManager) -> Dict:
         }
 
 
+def get_dashboard_trends(db: DatabaseManager, days: int = 7) -> Dict:
+    """
+    Calcule les tendances en comparant la période actuelle avec la précédente.
+
+    Args:
+        db: Instance DatabaseManager
+        days: Nombre de jours pour chaque période (défaut: 7)
+
+    Returns:
+        Dict avec les stats actuelles, précédentes et deltas
+    """
+    from datetime import timedelta
+    from sqlalchemy import func
+
+    now = datetime.utcnow()
+    current_start = now - timedelta(days=days)
+    previous_start = now - timedelta(days=days * 2)
+
+    with db.get_session() as session:
+        # ═══ PAGES AJOUTÉES ═══
+        # Pages ajoutées dans la période actuelle
+        current_pages = session.query(PageRecherche).filter(
+            PageRecherche.date_creation >= current_start
+        ).count()
+
+        # Pages ajoutées dans la période précédente
+        previous_pages = session.query(PageRecherche).filter(
+            PageRecherche.date_creation >= previous_start,
+            PageRecherche.date_creation < current_start
+        ).count()
+
+        # ═══ WINNING ADS ═══
+        # Winning ads période actuelle
+        current_winning = session.query(WinningAds).filter(
+            WinningAds.date_scan >= current_start
+        ).count()
+
+        # Winning ads période précédente
+        previous_winning = session.query(WinningAds).filter(
+            WinningAds.date_scan >= previous_start,
+            WinningAds.date_scan < current_start
+        ).count()
+
+        # ═══ RECHERCHES ═══
+        # Recherches période actuelle
+        current_searches = session.query(SearchLog).filter(
+            SearchLog.created_at >= current_start
+        ).count()
+
+        # Recherches période précédente
+        previous_searches = session.query(SearchLog).filter(
+            SearchLog.created_at >= previous_start,
+            SearchLog.created_at < current_start
+        ).count()
+
+        # ═══ EVOLUTION DES ÉTATS ═══
+        # Compter les pages XXL actuellement
+        xxl_current = session.query(PageRecherche).filter(
+            PageRecherche.etat == "XXL"
+        ).count()
+
+        # Shopify actuellement
+        shopify_current = session.query(PageRecherche).filter(
+            PageRecherche.cms == "Shopify"
+        ).count()
+
+        # Total actif (non inactif)
+        active_current = session.query(PageRecherche).filter(
+            PageRecherche.etat != "inactif"
+        ).count()
+
+        # Pour les deltas d'état, on utilise l'historique de suivi
+        # Compter les évolutions positives (pages montantes)
+        evolution = get_pages_evolution(db, days=days)
+        rising_count = len([e for e in evolution if e.get("pct_ads", 0) >= 20])
+        falling_count = len([e for e in evolution if e.get("pct_ads", 0) <= -20])
+
+        def calc_delta(current, previous):
+            """Calcule le delta et le pourcentage de changement"""
+            delta = current - previous
+            if previous > 0:
+                pct = ((current - previous) / previous) * 100
+            elif current > 0:
+                pct = 100  # De 0 à quelque chose = +100%
+            else:
+                pct = 0
+            return delta, pct
+
+        pages_delta, pages_pct = calc_delta(current_pages, previous_pages)
+        winning_delta, winning_pct = calc_delta(current_winning, previous_winning)
+        searches_delta, searches_pct = calc_delta(current_searches, previous_searches)
+
+        return {
+            "period_days": days,
+            "pages": {
+                "current": current_pages,
+                "previous": previous_pages,
+                "delta": pages_delta,
+                "pct": pages_pct
+            },
+            "winning_ads": {
+                "current": current_winning,
+                "previous": previous_winning,
+                "delta": winning_delta,
+                "pct": winning_pct
+            },
+            "searches": {
+                "current": current_searches,
+                "previous": previous_searches,
+                "delta": searches_delta,
+                "pct": searches_pct
+            },
+            "totals": {
+                "xxl": xxl_current,
+                "shopify": shopify_current,
+                "active": active_current
+            },
+            "evolution": {
+                "rising": rising_count,
+                "falling": falling_count
+            }
+        }
+
+
 def get_suivi_history(
     db: DatabaseManager,
     page_id: str = None,
