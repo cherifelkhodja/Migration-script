@@ -4966,22 +4966,41 @@ def render_search_logs():
             st.markdown("**Mots-clés:**")
             st.code(keywords)
 
-            # Détails des phases
+            # Détails des phases avec stats
             phases_data = log.get("phases_data", [])
             if phases_data:
-                st.markdown("**Phases d'exécution:**")
+                st.markdown("**📊 Détails par phase:**")
 
-                phase_table = []
                 for p in phases_data:
-                    phase_table.append({
-                        "Phase": f"{p.get('num', '?')}. {p.get('name', 'N/A')}",
-                        "Durée": p.get("time_formatted", "-"),
-                        "Résultat": p.get("result", "-")
-                    })
+                    phase_num = p.get('num', '?')
+                    phase_name = p.get('name', 'N/A')
+                    phase_time = p.get("time_formatted", "-")
+                    phase_result = p.get("result", "-")
+                    phase_stats = p.get("stats", {})
 
-                if phase_table:
-                    df_phases = pd.DataFrame(phase_table)
-                    st.dataframe(df_phases, hide_index=True, use_container_width=True)
+                    # Header de la phase avec expander
+                    with st.expander(f"**Phase {phase_num}:** {phase_name} — {phase_result} ({phase_time})", expanded=False):
+                        if phase_stats:
+                            # Afficher les stats en 2 colonnes
+                            stat_items = list(phase_stats.items())
+                            for i in range(0, len(stat_items), 2):
+                                cols = st.columns(2)
+                                for j, col in enumerate(cols):
+                                    if i + j < len(stat_items):
+                                        key, value = stat_items[i + j]
+                                        with col:
+                                            # Formater la valeur
+                                            if isinstance(value, int) and value >= 1000:
+                                                display_val = f"{value:,}".replace(",", " ")
+                                            elif isinstance(value, float):
+                                                display_val = f"{value:.1f}"
+                                            elif isinstance(value, dict):
+                                                display_val = ", ".join(f"{k}: {v}" for k, v in value.items())
+                                            else:
+                                                display_val = str(value)
+                                            st.metric(key, display_val)
+                        else:
+                            st.caption("Pas de statistiques détaillées pour cette phase")
 
             # ═══ STATISTIQUES API ═══
             meta_api_calls = log.get("meta_api_calls", 0) or 0
