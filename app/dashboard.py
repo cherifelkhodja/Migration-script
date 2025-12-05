@@ -6223,9 +6223,27 @@ def render_search_logs():
                             df_details = pd.DataFrame(details_table)
                             st.dataframe(df_details, hide_index=True, use_container_width=True)
 
-            # Message d'erreur si failed
+            # Message d'erreur ou d'avertissement
             if status == "failed" and log.get("error_message"):
                 st.error(f"Erreur: {log.get('error_message')}")
+            elif status == "no_results":
+                # Afficher la raison pour les recherches sans résultats
+                error_msg = log.get("error_message")
+                if error_msg:
+                    st.warning(f"⚠️ {error_msg}")
+                else:
+                    # Message par défaut si pas d'erreur spécifique
+                    total_ads = log.get("total_ads_found", 0)
+                    pages_found = log.get("total_pages_found", 0)
+                    pages_filtered = log.get("pages_after_filter", 0)
+                    min_ads = log.get("min_ads", 0)
+
+                    if total_ads == 0:
+                        st.warning("⚠️ Aucune publicité trouvée pour ces mots-clés dans les pays/langues sélectionnés")
+                    elif pages_found == 0:
+                        st.warning("⚠️ Publicités trouvées mais aucune page n'a pu être extraite")
+                    elif pages_filtered == 0:
+                        st.warning(f"⚠️ {pages_found} pages trouvées mais aucune ne correspond aux filtres (min {min_ads} ads, CMS: {log.get('selected_cms', 'Tous')})")
 
             # Détails supplémentaires
             with st.columns([3, 1])[1]:
