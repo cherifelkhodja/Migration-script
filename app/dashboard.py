@@ -162,6 +162,141 @@ def get_database() -> DatabaseManager:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SEARCH PROGRESS TRACKER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SearchProgressTracker:
+    """
+    Gestionnaire de progression pour les recherches avec timers détaillés.
+    Affiche le temps écoulé par phase et sous-étape.
+    """
+
+    def __init__(self, container):
+        """
+        Args:
+            container: Streamlit container pour l'affichage
+        """
+        self.container = container
+        self.start_time = time.time()
+        self.phase_start = None
+        self.step_start = None
+        self.phases_completed = []
+
+        # Placeholders pour mise à jour dynamique
+        with self.container:
+            self.header = st.empty()
+            self.phase_status = st.empty()
+            self.step_status = st.empty()
+            self.progress_bar = st.progress(0)
+            self.stats_cols = st.columns(4)
+            self.details = st.empty()
+
+    def format_time(self, seconds: float) -> str:
+        """Formate le temps en format lisible"""
+        if seconds < 60:
+            return f"{seconds:.1f}s"
+        else:
+            mins = int(seconds // 60)
+            secs = seconds % 60
+            return f"{mins}m {secs:.1f}s"
+
+    def start_phase(self, phase_num: int, phase_name: str, total_phases: int = 7):
+        """Démarre une nouvelle phase"""
+        self.phase_start = time.time()
+        self.current_phase = phase_num
+        self.current_phase_name = phase_name
+        self.total_phases = total_phases
+
+        # Temps total écoulé
+        total_elapsed = time.time() - self.start_time
+
+        self.header.markdown(f"""
+        ### ⏱️ Progression de la recherche
+        **Temps total:** {self.format_time(total_elapsed)}
+        """)
+
+        self.phase_status.info(f"**Phase {phase_num}/{total_phases}:** {phase_name}")
+        self.step_status.empty()
+
+        # Mettre à jour les stats
+        with self.stats_cols[0]:
+            st.metric("Phase", f"{phase_num}/{total_phases}")
+        with self.stats_cols[1]:
+            st.metric("Temps total", self.format_time(total_elapsed))
+
+    def update_step(self, step_name: str, current: int, total: int, extra_info: str = None):
+        """Met à jour la sous-étape courante"""
+        self.step_start = time.time() if current == 1 else self.step_start
+
+        # Calcul du temps estimé restant
+        if current > 0:
+            elapsed_phase = time.time() - self.phase_start
+            avg_per_item = elapsed_phase / current
+            remaining_items = total - current
+            eta = avg_per_item * remaining_items
+            eta_str = f" | ETA: {self.format_time(eta)}" if eta > 1 else ""
+        else:
+            eta_str = ""
+
+        # Progress
+        progress = current / total if total > 0 else 0
+        self.progress_bar.progress(progress)
+
+        # Step info
+        step_info = f"🔄 {step_name} ({current}/{total}){eta_str}"
+        if extra_info:
+            step_info += f"\n\n`{extra_info}`"
+        self.step_status.markdown(step_info)
+
+        # Update stats
+        phase_elapsed = time.time() - self.phase_start
+        with self.stats_cols[2]:
+            st.metric("Temps phase", self.format_time(phase_elapsed))
+        with self.stats_cols[3]:
+            st.metric("Progression", f"{int(progress * 100)}%")
+
+    def complete_phase(self, result_summary: str):
+        """Marque une phase comme terminée"""
+        phase_elapsed = time.time() - self.phase_start
+        self.phases_completed.append({
+            "num": self.current_phase,
+            "name": self.current_phase_name,
+            "time": phase_elapsed,
+            "result": result_summary
+        })
+
+        self.phase_status.success(f"✅ **Phase {self.current_phase}:** {self.current_phase_name} ({self.format_time(phase_elapsed)})")
+        self.step_status.markdown(f"*{result_summary}*")
+        self.progress_bar.progress(1.0)
+
+    def show_summary(self):
+        """Affiche le résumé final avec tous les temps"""
+        total_time = time.time() - self.start_time
+
+        self.header.markdown(f"""
+        ### ✅ Recherche terminée
+        **Temps total:** {self.format_time(total_time)}
+        """)
+
+        # Tableau récapitulatif
+        summary_data = []
+        for p in self.phases_completed:
+            summary_data.append({
+                "Phase": f"{p['num']}. {p['name']}",
+                "Durée": self.format_time(p['time']),
+                "Résultat": p['result']
+            })
+
+        self.details.dataframe(
+            pd.DataFrame(summary_data),
+            hide_index=True,
+            use_container_width=True
+        )
+
+        return total_time
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # FONCTIONS UTILITAIRES
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1258,9 +1393,13 @@ def render_preview_results():
 
 
 def run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode=False):
-    """Exécute le processus de recherche complet"""
+    """Exécute le processus de recherche complet avec tracking détaillé"""
     client = MetaAdsClient(token)
     db = get_database()
+
+    # Créer le tracker de progression
+    progress_container = st.container()
+    tracker = SearchProgressTracker(progress_container)
 
     # Récupérer la blacklist
     blacklist_ids = set()
@@ -1269,14 +1408,13 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
         if blacklist_ids:
             st.info(f"🚫 {len(blacklist_ids)} pages en blacklist seront ignorées")
 
-    # Phase 1: Recherche
-    st.subheader("🔍 Phase 1: Recherche par mots-clés")
+    # ═══ PHASE 1: Recherche par mots-clés ═══
+    tracker.start_phase(1, "🔍 Recherche par mots-clés", total_phases=8)
     all_ads = []
     seen_ad_ids = set()
-    progress = st.progress(0)
 
     for i, kw in enumerate(keywords):
-        st.text(f"Recherche: '{kw}'...")
+        tracker.update_step("Recherche", i + 1, len(keywords), f"Mot-clé: {kw}")
         ads = client.search_ads(kw, countries, languages)
         for ad in ads:
             ad_id = ad.get("id")
@@ -1284,17 +1422,19 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
                 ad["_keyword"] = kw
                 all_ads.append(ad)
                 seen_ad_ids.add(ad_id)
-        progress.progress((i + 1) / len(keywords))
 
-    st.success(f"✓ {len(all_ads)} annonces trouvées")
+    tracker.complete_phase(f"{len(all_ads)} annonces trouvées")
 
-    # Phase 2: Regroupement
-    st.subheader("📋 Phase 2: Regroupement par page")
+    # ═══ PHASE 2: Regroupement par page ═══
+    tracker.start_phase(2, "📋 Regroupement par page", total_phases=8)
     pages = {}
     page_ads = defaultdict(list)
     name_counter = defaultdict(Counter)
 
-    for ad in all_ads:
+    for i, ad in enumerate(all_ads):
+        if i % 100 == 0:
+            tracker.update_step("Regroupement", i + 1, len(all_ads))
+
         pid = ad.get("page_id")
         if not pid:
             continue
@@ -1332,32 +1472,32 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
         data["ads_found_search"] = len(data["_ad_ids"])
 
     pages_filtered = {pid: data for pid, data in pages.items() if data["ads_found_search"] >= min_ads}
-    st.success(f"✓ {len(pages_filtered)} pages avec ≥{min_ads} ads")
+    tracker.complete_phase(f"{len(pages_filtered)} pages avec ≥{min_ads} ads")
 
     if not pages_filtered:
         st.warning("Aucune page trouvée avec assez d'ads")
         return
 
-    # Phase 3: Extraction sites
-    st.subheader("🌐 Phase 3: Extraction des sites web")
-    progress = st.progress(0)
+    # ═══ PHASE 3: Extraction sites web ═══
+    tracker.start_phase(3, "🌐 Extraction des sites web", total_phases=8)
     for i, (pid, data) in enumerate(pages_filtered.items()):
+        page_name = data.get("page_name", pid)[:30]
+        tracker.update_step("Extraction URL", i + 1, len(pages_filtered), f"Page: {page_name}")
         data["website"] = extract_website_from_ads(page_ads.get(pid, []))
-        progress.progress((i + 1) / len(pages_filtered))
 
     sites_found = sum(1 for d in pages_filtered.values() if d["website"])
-    st.success(f"✓ {sites_found} sites extraits")
+    tracker.complete_phase(f"{sites_found} sites extraits")
 
-    # Phase 4: Détection CMS
-    st.subheader("🔍 Phase 4: Détection CMS")
+    # ═══ PHASE 4: Détection CMS ═══
+    tracker.start_phase(4, "🔍 Détection CMS", total_phases=8)
     pages_with_sites = {pid: data for pid, data in pages_filtered.items() if data["website"]}
-    progress = st.progress(0)
 
     for i, (pid, data) in enumerate(pages_with_sites.items()):
+        site_url = data["website"][:40]
+        tracker.update_step("Analyse CMS", i + 1, len(pages_with_sites), f"Site: {site_url}")
         cms_result = detect_cms_from_url(data["website"])
         data["cms"] = cms_result["cms"]
         data["is_shopify"] = cms_result["is_shopify"]
-        progress.progress((i + 1) / len(pages_with_sites))
         time.sleep(0.1)
 
     # Filter by CMS
@@ -1369,22 +1509,21 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
         return False
 
     pages_with_cms = {pid: data for pid, data in pages_with_sites.items() if cms_matches(data.get("cms", "Unknown"))}
-    st.success(f"✓ {len(pages_with_cms)} pages avec CMS sélectionnés")
+    tracker.complete_phase(f"{len(pages_with_cms)} pages avec CMS sélectionnés")
 
-    # Phase 5: Comptage (optimisé par batch de 10)
-    st.subheader("📊 Phase 5: Comptage des annonces")
-    progress = st.progress(0)
+    # ═══ PHASE 5: Comptage des annonces ═══
+    tracker.start_phase(5, "📊 Comptage des annonces (batch)", total_phases=8)
 
     # Traiter par batch de 10 pages pour économiser les requêtes API
     page_ids_list = list(pages_with_cms.keys())
     batch_size = 10
     total_batches = (len(page_ids_list) + batch_size - 1) // batch_size
 
-    st.caption(f"⚡ Optimisation: {len(page_ids_list)} pages en {total_batches} requêtes (batch de {batch_size})")
-
     processed = 0
     for batch_idx in range(0, len(page_ids_list), batch_size):
         batch_pids = page_ids_list[batch_idx:batch_idx + batch_size]
+        batch_num = (batch_idx // batch_size) + 1
+        tracker.update_step("Batch API", batch_num, total_batches, f"Batch {batch_num}/{total_batches} ({len(batch_pids)} pages)")
 
         # Fetch batch
         batch_results = client.fetch_ads_for_pages_batch(batch_pids, countries, languages)
@@ -1402,37 +1541,43 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
                 data["ads_active_total"] = data["ads_found_search"]
 
             processed += 1
-            progress.progress(processed / len(page_ids_list))
 
         time.sleep(0.2)  # Pause entre les batches
 
     pages_final = {pid: data for pid, data in pages_with_cms.items() if data["ads_active_total"] >= min_ads}
-    st.success(f"✓ {len(pages_final)} pages finales")
+    tracker.complete_phase(f"{len(pages_final)} pages finales")
 
-    # Phase 6: Analyse web
-    st.subheader("🔬 Phase 6: Analyse des sites web")
+    if not pages_final:
+        st.warning("Aucune page finale trouvée")
+        return
+
+    # ═══ PHASE 6: Analyse des sites web ═══
+    tracker.start_phase(6, "🔬 Analyse des sites web", total_phases=8)
     web_results = {}
-    progress = st.progress(0)
 
     for i, (pid, data) in enumerate(pages_final.items()):
+        site_url = data.get("website", "")[:40]
+        tracker.update_step("Analyse web", i + 1, len(pages_final), f"Site: {site_url}")
         if data["website"]:
             result = analyze_website_complete(data["website"], countries[0])
             web_results[pid] = result
             if not data["currency"] and result.get("currency_from_site"):
                 data["currency"] = result["currency_from_site"]
-        progress.progress((i + 1) / len(pages_final))
         time.sleep(0.2)
 
-    # Phase 7: Détection des Winning Ads
-    st.subheader("🏆 Phase 7: Détection des Winning Ads")
+    tracker.complete_phase(f"{len(web_results)} sites analysés")
+
+    # ═══ PHASE 7: Détection des Winning Ads ═══
+    tracker.start_phase(7, "🏆 Détection des Winning Ads", total_phases=8)
     scan_date = datetime.now()
     winning_ads_data = []
     winning_ads_by_page = {}  # {page_id: count}
-
-    progress = st.progress(0)
     total_ads_checked = 0
 
     for i, (pid, data) in enumerate(pages_final.items()):
+        page_name = data.get("page_name", pid)[:30]
+        tracker.update_step("Analyse winning", i + 1, len(pages_final), f"Page: {page_name}")
+
         page_winning_count = 0
         for ad in page_ads.get(pid, []):
             is_winning, age_days, reach, matched_criteria = is_winning_ad(ad, scan_date, WINNING_AD_CRITERIA)
@@ -1451,9 +1596,7 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
             winning_ads_by_page[pid] = page_winning_count
             data["winning_ads_count"] = page_winning_count
 
-        progress.progress((i + 1) / len(pages_final))
-
-    st.success(f"✓ {len(winning_ads_data)} winning ads détectées sur {len(winning_ads_by_page)} pages")
+    tracker.complete_phase(f"{len(winning_ads_data)} winning ads sur {len(winning_ads_by_page)} pages")
 
     # Save to session first (needed for preview mode)
     st.session_state.pages_final = pages_final
@@ -1465,31 +1608,44 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
     st.session_state.preview_mode = preview_mode
 
     if preview_mode:
-        # Mode aperçu - rediriger vers la page d'aperçu
+        # Mode aperçu - afficher le résumé
+        tracker.show_summary()
         st.success(f"✓ Recherche terminée ! {len(pages_final)} pages trouvées")
         st.session_state.show_preview_results = True
         st.rerun()
     else:
-        # Mode normal - sauvegarder directement
-        st.subheader("💾 Phase 8: Sauvegarde en base de données")
+        # ═══ PHASE 8: Sauvegarde en base de données ═══
+        tracker.start_phase(8, "💾 Sauvegarde en base de données", total_phases=8)
 
         if db:
             try:
+                tracker.update_step("Sauvegarde pages", 1, 4)
                 thresholds = st.session_state.get("state_thresholds", None)
                 pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds)
+
+                tracker.update_step("Sauvegarde suivi", 2, 4)
                 det = st.session_state.get("detection_thresholds", {})
                 suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI))
+
+                tracker.update_step("Sauvegarde annonces", 3, 4)
                 ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, det.get("min_ads_liste", MIN_ADS_LISTE))
+
+                tracker.update_step("Sauvegarde winning ads", 4, 4)
                 winning_saved = save_winning_ads(db, winning_ads_data, pages_final)
 
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Pages", pages_saved)
-                col2.metric("Suivi", suivi_saved)
-                col3.metric("Annonces", ads_saved)
-                col4.metric("🏆 Winning", winning_saved)
-                st.success("✓ Données sauvegardées !")
+                tracker.complete_phase(f"{pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads, {winning_saved} winning")
+
             except Exception as e:
                 st.error(f"Erreur sauvegarde: {e}")
+
+        # Afficher le résumé final
+        tracker.show_summary()
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Pages", pages_saved)
+        col2.metric("Suivi", suivi_saved)
+        col3.metric("Annonces", ads_saved)
+        col4.metric("🏆 Winning", winning_saved)
 
         st.balloons()
         st.success("🎉 Recherche terminée !")
