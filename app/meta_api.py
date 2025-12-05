@@ -9,6 +9,10 @@ from collections import Counter
 from typing import List, Dict, Tuple, Optional, Callable
 from threading import Lock
 
+# Supprimer les warnings SSL pour Railway
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 try:
     from app.config import (
         ADS_ARCHIVE, TIMEOUT, LIMIT_SEARCH, LIMIT_COUNT, LIMIT_MIN,
@@ -333,7 +337,8 @@ class MetaAdsClient:
 
             start_time = time.time()
             try:
-                r = requests.get(url, params=params, timeout=TIMEOUT, proxies=proxies)
+                # verify=False pour éviter les erreurs SSL sur Railway
+                r = requests.get(url, params=params, timeout=TIMEOUT, proxies=proxies, verify=False)
                 response_time = (time.time() - start_time) * 1000
 
                 # Parse response
