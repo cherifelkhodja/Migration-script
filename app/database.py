@@ -577,6 +577,8 @@ def _run_migrations(db: DatabaseManager):
         ("liste_page_recherche", "classified_at", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS classified_at TIMESTAMP"),
         # Extension du champ pays pour multi-valeurs
         ("liste_page_recherche", "pays_resize", "ALTER TABLE liste_page_recherche ALTER COLUMN pays TYPE VARCHAR(255)"),
+        # Proxy URL pour tokens Meta
+        ("meta_tokens", "proxy_url", "ALTER TABLE meta_tokens ADD COLUMN IF NOT EXISTS proxy_url VARCHAR(255)"),
     ]
 
     # Index migrations (CREATE INDEX IF NOT EXISTS)
