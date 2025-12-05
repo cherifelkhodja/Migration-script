@@ -38,16 +38,18 @@ class TokenRotator:
     Thread-safe.
     """
 
-    def __init__(self, tokens: List[str]):
+    def __init__(self, tokens: List[str], db=None):
         """
         Args:
             tokens: Liste de tokens Meta API (filtre les vides)
+            db: DatabaseManager pour enregistrer les stats (optionnel)
         """
         self.tokens = [t.strip() for t in tokens if t and t.strip()]
         self._current_index = 0
         self._lock = Lock()
         self._rate_limited = {}  # {token: timestamp_until_available}
         self._call_counts = {t: 0 for t in self.tokens}  # Compteur par token
+        self._db = db  # Pour enregistrer les stats en BDD
 
     @property
     def token_count(self) -> int:
@@ -99,12 +101,13 @@ class TokenRotator:
             print(f"🔄 Token rotation ({reason}): #{old_idx + 1} → #{self._current_index + 1}")
             return True
 
-    def mark_rate_limited(self, cooldown_seconds: int = 60) -> bool:
+    def mark_rate_limited(self, cooldown_seconds: int = 60, error_message: str = None) -> bool:
         """
         Marque le token courant comme rate-limited et tourne.
 
         Args:
             cooldown_seconds: Temps avant que le token soit réutilisable
+            error_message: Message d'erreur à enregistrer
 
         Returns:
             True si un autre token est disponible
@@ -112,6 +115,10 @@ class TokenRotator:
         with self._lock:
             current = self.tokens[self._current_index]
             self._rate_limited[current] = time.time() + cooldown_seconds
+
+            # Enregistrer en BDD
+            self._record_to_db(current, success=False, is_rate_limit=True,
+                              error_message=error_message, rate_limit_seconds=cooldown_seconds)
 
             # Chercher un token non rate-limited
             now = time.time()
@@ -128,16 +135,38 @@ class TokenRotator:
             print("⚠️ Tous les tokens sont rate-limited!")
             return False
 
-    def record_call(self):
+    def record_call(self, success: bool = True, error_message: str = None):
         """Enregistre un appel pour le token courant"""
         with self._lock:
             token = self.tokens[self._current_index] if self.tokens else ""
             if token:
                 self._call_counts[token] = self._call_counts.get(token, 0) + 1
+                # Enregistrer en BDD (seulement succès, les erreurs sont gérées par mark_rate_limited)
+                if success:
+                    self._record_to_db(token, success=True)
+
+    def _record_to_db(self, token: str, success: bool = True, is_rate_limit: bool = False,
+                      error_message: str = None, rate_limit_seconds: int = 60):
+        """Enregistre l'utilisation d'un token en base de données"""
+        if not self._db:
+            return
+        try:
+            from app.database import record_token_usage
+            record_token_usage(
+                self._db,
+                token=token,
+                success=success,
+                error_message=error_message,
+                is_rate_limit=is_rate_limit,
+                rate_limit_seconds=rate_limit_seconds
+            )
+        except Exception as e:
+            print(f"Erreur enregistrement token usage: {e}")
 
 
 # Singleton global pour le rotator
 _token_rotator: Optional[TokenRotator] = None
+_token_db = None  # DatabaseManager pour les stats
 
 
 def get_token_rotator() -> Optional[TokenRotator]:
@@ -146,18 +175,20 @@ def get_token_rotator() -> Optional[TokenRotator]:
     return _token_rotator
 
 
-def init_token_rotator(tokens: List[str]) -> TokenRotator:
+def init_token_rotator(tokens: List[str], db=None) -> TokenRotator:
     """Initialise le rotator global avec les tokens"""
-    global _token_rotator
-    _token_rotator = TokenRotator(tokens)
+    global _token_rotator, _token_db
+    _token_db = db
+    _token_rotator = TokenRotator(tokens, db=db)
     print(f"✅ TokenRotator initialisé avec {_token_rotator.token_count} token(s)")
     return _token_rotator
 
 
 def clear_token_rotator():
     """Efface le rotator global"""
-    global _token_rotator
+    global _token_rotator, _token_db
     _token_rotator = None
+    _token_db = None
 
 
 class MetaAdsClient:
@@ -186,9 +217,6 @@ class MetaAdsClient:
             # Utiliser le token du rotator si disponible
             current_token = self._get_current_token()
             params["access_token"] = current_token
-
-            if rotator:
-                rotator.record_call()
 
             start_time = time.time()
             try:
@@ -223,7 +251,7 @@ class MetaAdsClient:
 
                         # Essayer de switcher de token si possible
                         if rotator and rotator.token_count > 1:
-                            switched = rotator.mark_rate_limited(cooldown_seconds=60)
+                            switched = rotator.mark_rate_limited(cooldown_seconds=60, error_message=error_msg)
                             if switched:
                                 # Retry immédiatement avec le nouveau token
                                 continue
@@ -262,6 +290,9 @@ class MetaAdsClient:
                             response_size=response_size,
                             items_returned=items_count
                         )
+                    # Enregistrer le succès dans le rotator
+                    if rotator:
+                        rotator.record_call(success=True)
                     return data
 
                 if r.status_code in (429, 500, 502, 503):

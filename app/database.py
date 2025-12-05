@@ -244,6 +244,35 @@ class UserSettings(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class MetaToken(Base):
+    """Table meta_tokens - Gestion des tokens Meta API"""
+    __tablename__ = "meta_tokens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100))  # Nom descriptif (ex: "Token Principal", "Token Backup 1")
+    token = Column(Text, nullable=False)  # Le token Meta API (crypté en prod)
+    is_active = Column(Boolean, default=True)  # Token actif ou désactivé
+
+    # Statistiques d'utilisation
+    total_calls = Column(Integer, default=0)  # Nombre total d'appels
+    total_errors = Column(Integer, default=0)  # Nombre total d'erreurs
+    rate_limit_hits = Column(Integer, default=0)  # Nombre de rate limits
+
+    # État actuel
+    last_used_at = Column(DateTime)  # Dernière utilisation
+    last_error_at = Column(DateTime)  # Dernière erreur
+    last_error_message = Column(Text)  # Dernier message d'erreur
+    rate_limited_until = Column(DateTime)  # Rate limit jusqu'à cette date
+
+    # Métadonnées
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_meta_token_active', 'is_active'),
+    )
+
+
 class SearchLog(Base):
     """Table search_logs - Historique complet des recherches"""
     __tablename__ = "search_logs"
@@ -2248,3 +2277,193 @@ def get_search_logs_stats(db: DatabaseManager, days: int = 30) -> Dict:
             "total_rate_limit_hits": api_stats[6] or 0,
             "total_scraper_api_cost": api_stats[7] or 0
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# META TOKENS - Gestion des tokens Meta API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def add_meta_token(
+    db: DatabaseManager,
+    token: str,
+    name: str = None
+) -> int:
+    """
+    Ajoute un nouveau token Meta API
+
+    Args:
+        db: Instance DatabaseManager
+        token: Le token Meta API
+        name: Nom descriptif (optionnel)
+
+    Returns:
+        ID du token créé
+    """
+    with db.get_session() as session:
+        # Vérifier si le token existe déjà
+        existing = session.query(MetaToken).filter(MetaToken.token == token).first()
+        if existing:
+            return existing.id
+
+        # Générer un nom si non fourni
+        if not name:
+            count = session.query(MetaToken).count()
+            name = f"Token #{count + 1}"
+
+        meta_token = MetaToken(
+            token=token,
+            name=name,
+            is_active=True
+        )
+        session.add(meta_token)
+        session.flush()
+        return meta_token.id
+
+
+def get_all_meta_tokens(db: DatabaseManager, active_only: bool = False) -> List[Dict]:
+    """
+    Récupère tous les tokens Meta API
+
+    Args:
+        db: Instance DatabaseManager
+        active_only: Si True, ne retourne que les tokens actifs
+
+    Returns:
+        Liste des tokens avec leurs stats
+    """
+    with db.get_session() as session:
+        query = session.query(MetaToken).order_by(MetaToken.id)
+
+        if active_only:
+            query = query.filter(MetaToken.is_active == True)
+
+        tokens = query.all()
+
+        now = datetime.utcnow()
+        return [{
+            "id": t.id,
+            "name": t.name,
+            "token_masked": f"{t.token[:8]}...{t.token[-4:]}" if len(t.token) > 12 else "***",
+            "token": t.token,  # Inclus pour utilisation interne
+            "is_active": t.is_active,
+            "total_calls": t.total_calls or 0,
+            "total_errors": t.total_errors or 0,
+            "rate_limit_hits": t.rate_limit_hits or 0,
+            "last_used_at": t.last_used_at,
+            "last_error_at": t.last_error_at,
+            "last_error_message": t.last_error_message,
+            "rate_limited_until": t.rate_limited_until,
+            "is_rate_limited": t.rate_limited_until and t.rate_limited_until > now,
+            "created_at": t.created_at
+        } for t in tokens]
+
+
+def get_active_meta_tokens(db: DatabaseManager) -> List[str]:
+    """
+    Récupère uniquement les tokens actifs (pour le TokenRotator)
+
+    Returns:
+        Liste des tokens (strings)
+    """
+    with db.get_session() as session:
+        now = datetime.utcnow()
+        tokens = session.query(MetaToken).filter(
+            MetaToken.is_active == True
+        ).order_by(MetaToken.id).all()
+
+        # Filtrer les tokens rate-limited
+        return [t.token for t in tokens
+                if not t.rate_limited_until or t.rate_limited_until <= now]
+
+
+def update_meta_token(
+    db: DatabaseManager,
+    token_id: int,
+    name: str = None,
+    is_active: bool = None
+) -> bool:
+    """Met à jour un token"""
+    with db.get_session() as session:
+        token = session.query(MetaToken).filter(MetaToken.id == token_id).first()
+        if not token:
+            return False
+
+        if name is not None:
+            token.name = name
+        if is_active is not None:
+            token.is_active = is_active
+
+        return True
+
+
+def delete_meta_token(db: DatabaseManager, token_id: int) -> bool:
+    """Supprime un token"""
+    with db.get_session() as session:
+        deleted = session.query(MetaToken).filter(MetaToken.id == token_id).delete()
+        return deleted > 0
+
+
+def record_token_usage(
+    db: DatabaseManager,
+    token: str,
+    success: bool = True,
+    error_message: str = None,
+    is_rate_limit: bool = False,
+    rate_limit_seconds: int = 60
+):
+    """
+    Enregistre une utilisation de token
+
+    Args:
+        db: Instance DatabaseManager
+        token: Le token utilisé
+        success: Si l'appel a réussi
+        error_message: Message d'erreur si échec
+        is_rate_limit: Si c'est une erreur de rate limit
+        rate_limit_seconds: Durée du rate limit en secondes
+    """
+    from datetime import timedelta
+
+    with db.get_session() as session:
+        meta_token = session.query(MetaToken).filter(MetaToken.token == token).first()
+        if not meta_token:
+            return
+
+        meta_token.total_calls = (meta_token.total_calls or 0) + 1
+        meta_token.last_used_at = datetime.utcnow()
+
+        if not success:
+            meta_token.total_errors = (meta_token.total_errors or 0) + 1
+            meta_token.last_error_at = datetime.utcnow()
+            meta_token.last_error_message = error_message[:500] if error_message else None
+
+            if is_rate_limit:
+                meta_token.rate_limit_hits = (meta_token.rate_limit_hits or 0) + 1
+                meta_token.rate_limited_until = datetime.utcnow() + timedelta(seconds=rate_limit_seconds)
+
+
+def clear_rate_limit(db: DatabaseManager, token_id: int) -> bool:
+    """Efface le rate limit d'un token"""
+    with db.get_session() as session:
+        token = session.query(MetaToken).filter(MetaToken.id == token_id).first()
+        if not token:
+            return False
+        token.rate_limited_until = None
+        return True
+
+
+def reset_token_stats(db: DatabaseManager, token_id: int) -> bool:
+    """Réinitialise les statistiques d'un token"""
+    with db.get_session() as session:
+        token = session.query(MetaToken).filter(MetaToken.id == token_id).first()
+        if not token:
+            return False
+
+        token.total_calls = 0
+        token.total_errors = 0
+        token.rate_limit_hits = 0
+        token.last_used_at = None
+        token.last_error_at = None
+        token.last_error_message = None
+        token.rate_limited_until = None
+        return True

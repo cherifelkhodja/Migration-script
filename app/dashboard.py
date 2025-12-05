@@ -1546,17 +1546,40 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
     from app.api_tracker import APITracker, set_current_tracker, clear_current_tracker
     from app.meta_api import init_token_rotator, clear_token_rotator
 
-    # Initialiser le TokenRotator avec les tokens disponibles
-    tokens = [token]
-    if token2 and token2.strip():
-        tokens.append(token2.strip())
-    rotator = init_token_rotator(tokens)
+    db = get_database()
+
+    # Charger les tokens depuis la base de données en priorité
+    db_tokens = []
+    if db:
+        try:
+            from app.database import get_active_meta_tokens
+            db_tokens = get_active_meta_tokens(db)
+        except Exception as e:
+            st.warning(f"⚠️ Impossible de charger les tokens depuis la DB: {e}")
+
+    # Si pas de tokens en DB, utiliser les tokens passés en paramètre
+    if db_tokens:
+        tokens = db_tokens
+        st.info(f"🔄 {len(tokens)} token(s) chargé(s) depuis la base de données")
+    else:
+        tokens = [token] if token else []
+        if token2 and token2.strip():
+            tokens.append(token2.strip())
+        if tokens:
+            st.info(f"📝 Utilisation de {len(tokens)} token(s) saisi(s) manuellement")
+
+    if not tokens:
+        st.error("❌ Aucun token Meta API disponible. Configurez vos tokens dans Settings.")
+        return
+
+    # Initialiser le TokenRotator avec le db pour enregistrer les stats
+    rotator = init_token_rotator(tokens, db=db)
 
     if rotator.token_count > 1:
-        st.info(f"🔄 {rotator.token_count} tokens Meta configurés - Rotation automatique activée")
+        st.success(f"🔄 Rotation automatique activée ({rotator.token_count} tokens)")
 
-    client = MetaAdsClient(token)
-    db = get_database()
+    # Utiliser le premier token actif
+    client = MetaAdsClient(rotator.get_current_token())
 
     # Créer le log de recherche en base de données
     log_id = None
@@ -3284,20 +3307,126 @@ def render_settings():
     st.title("⚙️ Settings")
     st.markdown("Configuration de l'application")
 
-    # API Settings
-    st.subheader("🔑 API Configuration")
+    # ═══════════════════════════════════════════════════════════════════════════
+    # GESTION DES TOKENS META API
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.subheader("🔑 Tokens Meta API")
+    st.markdown("Gérez vos tokens Meta API pour la rotation automatique anti-ban.")
 
-    token = st.text_input(
-        "Meta API Token",
-        type="password",
-        value=os.getenv("META_ACCESS_TOKEN", ""),
-        help="Token d'accès Meta Ads API"
-    )
+    db = get_database()
 
-    if token:
-        st.success("✓ Token configuré")
+    if db:
+        from app.database import (
+            get_all_meta_tokens, add_meta_token, delete_meta_token,
+            update_meta_token, reset_token_stats, clear_rate_limit, ensure_tables_exist
+        )
+
+        # S'assurer que les tables existent
+        ensure_tables_exist(db)
+
+        # Récupérer tous les tokens
+        tokens = get_all_meta_tokens(db)
+
+        # Stats globales
+        total_tokens = len(tokens)
+        active_tokens = len([t for t in tokens if t["is_active"]])
+        rate_limited = len([t for t in tokens if t.get("is_rate_limited")])
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total tokens", total_tokens)
+        col2.metric("Tokens actifs", active_tokens)
+        col3.metric("Rate-limited", rate_limited, delta=None if rate_limited == 0 else f"-{rate_limited}", delta_color="inverse")
+
+        # Ajouter un nouveau token
+        with st.expander("➕ Ajouter un nouveau token", expanded=len(tokens) == 0):
+            new_token_name = st.text_input("Nom du token (optionnel)", placeholder="Token Principal", key="new_token_name")
+            new_token_value = st.text_input("Token Meta API", type="password", key="new_token_value",
+                                            help="Collez votre token Meta Ads API ici")
+
+            if st.button("Ajouter le token", type="primary", key="btn_add_token"):
+                if new_token_value and new_token_value.strip():
+                    token_id = add_meta_token(db, new_token_value.strip(), new_token_name.strip() or None)
+                    if token_id:
+                        st.success(f"✅ Token ajouté avec succès (ID: {token_id})")
+                        st.rerun()
+                else:
+                    st.error("Veuillez entrer un token valide")
+
+        # Liste des tokens existants
+        if tokens:
+            st.markdown("##### Tokens configurés")
+
+            for t in tokens:
+                status_icon = "🟢" if t["is_active"] and not t.get("is_rate_limited") else "🔴" if t.get("is_rate_limited") else "⚫"
+                rate_info = " ⏱️ Rate-limited" if t.get("is_rate_limited") else ""
+
+                with st.expander(f"{status_icon} **{t['name']}** - {t['token_masked']}{rate_info}"):
+                    # Stats
+                    stat_cols = st.columns(4)
+                    stat_cols[0].metric("Appels", t["total_calls"])
+                    stat_cols[1].metric("Erreurs", t["total_errors"])
+                    stat_cols[2].metric("Rate limits", t["rate_limit_hits"])
+                    stat_cols[3].metric("Statut", "Actif" if t["is_active"] else "Inactif")
+
+                    # Dernière utilisation
+                    if t["last_used_at"]:
+                        st.caption(f"📅 Dernière utilisation: {t['last_used_at'].strftime('%d/%m/%Y %H:%M')}")
+                    if t["last_error_message"]:
+                        st.caption(f"❌ Dernière erreur: {t['last_error_message'][:100]}")
+                    if t.get("is_rate_limited") and t["rate_limited_until"]:
+                        st.warning(f"⏱️ Rate-limited jusqu'à: {t['rate_limited_until'].strftime('%H:%M:%S')}")
+
+                    # Actions
+                    action_cols = st.columns(4)
+
+                    with action_cols[0]:
+                        new_active = not t["is_active"]
+                        if st.button("🔄 Activer" if not t["is_active"] else "⏸️ Désactiver", key=f"toggle_{t['id']}"):
+                            update_meta_token(db, t["id"], is_active=new_active)
+                            st.rerun()
+
+                    with action_cols[1]:
+                        if t.get("is_rate_limited"):
+                            if st.button("🔓 Débloquer", key=f"unblock_{t['id']}"):
+                                clear_rate_limit(db, t["id"])
+                                st.rerun()
+
+                    with action_cols[2]:
+                        if st.button("📊 Reset stats", key=f"reset_{t['id']}"):
+                            reset_token_stats(db, t["id"])
+                            st.rerun()
+
+                    with action_cols[3]:
+                        if st.button("🗑️ Supprimer", key=f"delete_{t['id']}"):
+                            delete_meta_token(db, t["id"])
+                            st.success("Token supprimé")
+                            st.rerun()
+        else:
+            st.info("Aucun token configuré. Ajoutez votre premier token Meta API ci-dessus.")
+
+            # Migration depuis variable d'environnement
+            env_token = os.getenv("META_ACCESS_TOKEN", "")
+            if env_token:
+                st.markdown("---")
+                st.markdown("**💡 Token trouvé dans les variables d'environnement**")
+                if st.button("Importer depuis META_ACCESS_TOKEN", key="import_env_token"):
+                    add_meta_token(db, env_token, "Token Principal (importé)")
+                    st.success("Token importé avec succès!")
+                    st.rerun()
+
     else:
-        st.warning("⚠️ Token non configuré")
+        st.warning("Base de données non connectée. Configurez la connexion pour gérer les tokens.")
+        # Fallback sur l'ancien système
+        token = st.text_input(
+            "Meta API Token (fallback)",
+            type="password",
+            value=os.getenv("META_ACCESS_TOKEN", ""),
+            help="Token d'accès Meta Ads API"
+        )
+        if token:
+            st.success("✓ Token configuré")
+        else:
+            st.warning("⚠️ Token non configuré")
 
     st.markdown("---")
 
