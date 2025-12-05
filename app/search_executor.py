@@ -171,11 +171,11 @@ def execute_background_search(
     Returns:
         Dict avec les résultats et search_log_id
     """
-    from app.meta_api import MetaAdsClient, init_token_rotator, extract_currency_from_ads
+    from app.meta_api import MetaAdsClient, init_token_rotator, get_token_rotator, extract_currency_from_ads
     from app.shopify_detector import detect_cms_from_url
     from app.web_analyzer import analyze_website_complete
     from app.database import (
-        get_active_meta_tokens, get_blacklist_ids, get_cached_pages_info,
+        get_active_meta_tokens_with_proxies, get_blacklist_ids, get_cached_pages_info,
         create_search_log, update_search_log, save_pages_recherche,
         save_suivi_page, save_ads_recherche, save_winning_ads,
         ensure_tables_exist, is_winning_ad
@@ -192,18 +192,19 @@ def execute_background_search(
     # S'assurer que les tables existent
     ensure_tables_exist(db)
 
-    # Charger les tokens
-    tokens = get_active_meta_tokens(db)
-    if not tokens:
+    # Charger les tokens avec leurs proxies
+    tokens_data = get_active_meta_tokens_with_proxies(db)
+    if not tokens_data:
+        # Fallback sur variable d'environnement
         env_token = os.getenv("META_ACCESS_TOKEN", "")
         if env_token:
-            tokens = [env_token]
+            tokens_data = [{"token": env_token, "proxy": None, "name": "ENV Token"}]
 
-    if not tokens:
+    if not tokens_data:
         raise ValueError("Aucun token Meta API disponible")
 
-    # Initialiser le client Meta
-    rotator = init_token_rotator(tokens, db=db)
+    # Initialiser le client Meta avec rotation par proxy
+    rotator = init_token_rotator(tokens_with_proxies=tokens_data, db=db)
     client = MetaAdsClient(rotator.get_current_token())
 
     # Créer le log de recherche
@@ -245,6 +246,9 @@ def execute_background_search(
                     seen_ad_ids.add(ad_id)
         except Exception as e:
             print(f"[Search #{search_id}] Erreur mot-clé '{kw}': {e}")
+
+        # Rotation vers le prochain token+proxy pour le prochain keyword
+        rotator.rotate_to_next(reason=f"keyword_{i+1}_done")
 
     phase1_stats = {
         "Mots-clés recherchés": len(keywords),

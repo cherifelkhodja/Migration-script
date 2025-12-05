@@ -292,6 +292,7 @@ class MetaToken(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100))  # Nom descriptif (ex: "Token Principal", "Token Backup 1")
     token = Column(Text, nullable=False)  # Le token Meta API (crypté en prod)
+    proxy_url = Column(String(255), nullable=True)  # Proxy associé (ex: "http://user:pass@ip:port")
     is_active = Column(Boolean, default=True)  # Token actif ou désactivé
 
     # Statistiques d'utilisation
@@ -3146,7 +3147,8 @@ def get_search_logs_stats(db: DatabaseManager, days: int = 30) -> Dict:
 def add_meta_token(
     db: DatabaseManager,
     token: str,
-    name: str = None
+    name: str = None,
+    proxy_url: str = None
 ) -> int:
     """
     Ajoute un nouveau token Meta API
@@ -3155,6 +3157,7 @@ def add_meta_token(
         db: Instance DatabaseManager
         token: Le token Meta API
         name: Nom descriptif (optionnel)
+        proxy_url: URL du proxy associé (optionnel, ex: "http://user:pass@ip:port")
 
     Returns:
         ID du token créé
@@ -3173,6 +3176,7 @@ def add_meta_token(
         meta_token = MetaToken(
             token=token,
             name=name,
+            proxy_url=proxy_url,
             is_active=True
         )
         session.add(meta_token)
@@ -3205,6 +3209,7 @@ def get_all_meta_tokens(db: DatabaseManager, active_only: bool = False) -> List[
             "name": t.name,
             "token_masked": f"{t.token[:8]}...{t.token[-4:]}" if len(t.token) > 12 else "***",
             "token": t.token,  # Inclus pour utilisation interne
+            "proxy_url": t.proxy_url,  # Proxy associé
             "is_active": t.is_active,
             "total_calls": t.total_calls or 0,
             "total_errors": t.total_errors or 0,
@@ -3236,13 +3241,39 @@ def get_active_meta_tokens(db: DatabaseManager) -> List[str]:
                 if not t.rate_limited_until or t.rate_limited_until <= now]
 
 
+def get_active_meta_tokens_with_proxies(db: DatabaseManager) -> List[Dict]:
+    """
+    Récupère les tokens actifs avec leurs proxies associés.
+
+    Returns:
+        Liste de dicts: [{"token": "...", "proxy": "http://..."}]
+    """
+    with db.get_session() as session:
+        now = datetime.utcnow()
+        tokens = session.query(MetaToken).filter(
+            MetaToken.is_active == True
+        ).order_by(MetaToken.id).all()
+
+        # Filtrer les tokens rate-limited et retourner token + proxy
+        result = []
+        for t in tokens:
+            if not t.rate_limited_until or t.rate_limited_until <= now:
+                result.append({
+                    "token": t.token,
+                    "proxy": t.proxy_url,
+                    "name": t.name or f"Token #{t.id}"
+                })
+        return result
+
+
 def update_meta_token(
     db: DatabaseManager,
     token_id: int,
     name: str = None,
-    is_active: bool = None
+    is_active: bool = None,
+    proxy_url: str = None
 ) -> bool:
-    """Met à jour un token"""
+    """Met à jour un token (nom, statut actif, proxy)"""
     with db.get_session() as session:
         token = session.query(MetaToken).filter(MetaToken.id == token_id).first()
         if not token:
@@ -3252,6 +3283,8 @@ def update_meta_token(
             token.name = name
         if is_active is not None:
             token.is_active = is_active
+        if proxy_url is not None:
+            token.proxy_url = proxy_url if proxy_url.strip() else None
 
         return True
 

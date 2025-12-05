@@ -36,45 +36,95 @@ except ImportError:
 
 class TokenRotator:
     """
-    Gère la rotation entre plusieurs tokens Meta API.
-    Permet de switcher automatiquement quand un token hit rate limit.
+    Gère la rotation entre plusieurs tokens Meta API avec leurs proxies.
+    - Chaque token a son proxy associé
+    - Un token fait toute la pagination d'une recherche
+    - Rotation entre les recherches (keywords)
     Thread-safe.
     """
 
-    def __init__(self, tokens: List[str], db=None):
+    def __init__(self, tokens_with_proxies: List[Dict] = None, tokens: List[str] = None, db=None):
         """
         Args:
-            tokens: Liste de tokens Meta API (filtre les vides)
+            tokens_with_proxies: Liste de dicts [{"token": "...", "proxy": "http://...", "name": "..."}]
+            tokens: Liste de tokens (fallback si tokens_with_proxies non fourni)
             db: DatabaseManager pour enregistrer les stats (optionnel)
         """
-        self.tokens = [t.strip() for t in tokens if t and t.strip()]
-        self._current_index = 0
         self._lock = Lock()
+        self._db = db
+
+        # Initialiser les tokens avec proxies
+        if tokens_with_proxies:
+            self._token_data = [
+                {
+                    "token": t["token"].strip(),
+                    "proxy": t.get("proxy") or None,
+                    "name": t.get("name", f"Token #{i+1}")
+                }
+                for i, t in enumerate(tokens_with_proxies)
+                if t.get("token") and t["token"].strip()
+            ]
+        elif tokens:
+            # Fallback: tokens sans proxies
+            self._token_data = [
+                {"token": t.strip(), "proxy": None, "name": f"Token #{i+1}"}
+                for i, t in enumerate(tokens)
+                if t and t.strip()
+            ]
+        else:
+            self._token_data = []
+
+        self._current_index = 0
         self._rate_limited = {}  # {token: timestamp_until_available}
-        self._call_counts = {t: 0 for t in self.tokens}  # Compteur par token
-        self._db = db  # Pour enregistrer les stats en BDD
+        self._call_counts = {t["token"]: 0 for t in self._token_data}
 
     @property
     def token_count(self) -> int:
         """Nombre de tokens disponibles"""
-        return len(self.tokens)
+        return len(self._token_data)
+
+    @property
+    def tokens(self) -> List[str]:
+        """Liste des tokens (pour compatibilité)"""
+        return [t["token"] for t in self._token_data]
 
     def get_current_token(self) -> str:
         """Retourne le token courant"""
         with self._lock:
-            if not self.tokens:
+            if not self._token_data:
                 return ""
-            return self.tokens[self._current_index]
+            return self._token_data[self._current_index]["token"]
+
+    def get_current_proxy(self) -> Optional[str]:
+        """Retourne le proxy associé au token courant"""
+        with self._lock:
+            if not self._token_data:
+                return None
+            return self._token_data[self._current_index].get("proxy")
+
+    def get_current_token_and_proxy(self) -> Tuple[str, Optional[str]]:
+        """Retourne le token et son proxy"""
+        with self._lock:
+            if not self._token_data:
+                return "", None
+            data = self._token_data[self._current_index]
+            return data["token"], data.get("proxy")
 
     def get_token_info(self) -> Dict:
         """Retourne les infos sur l'état des tokens"""
         with self._lock:
             now = time.time()
+            current_data = self._token_data[self._current_index] if self._token_data else {}
             return {
-                "total_tokens": len(self.tokens),
+                "total_tokens": len(self._token_data),
                 "current_index": self._current_index + 1,
-                "current_token_masked": self._mask_token(self.get_current_token()),
-                "call_counts": {self._mask_token(t): c for t, c in self._call_counts.items()},
+                "current_token_masked": self._mask_token(current_data.get("token", "")),
+                "current_proxy": current_data.get("proxy", "Aucun"),
+                "current_name": current_data.get("name", ""),
+                "call_counts": {
+                    self._mask_token(t["token"]): self._call_counts.get(t["token"], 0)
+                    for t in self._token_data
+                },
                 "rate_limited": {
                     self._mask_token(t): round(ts - now, 1)
                     for t, ts in self._rate_limited.items()
@@ -84,25 +134,41 @@ class TokenRotator:
 
     def _mask_token(self, token: str) -> str:
         """Masque un token pour l'affichage"""
-        if len(token) <= 10:
+        if not token or len(token) <= 10:
             return "***"
         return f"{token[:6]}...{token[-4:]}"
 
-    def rotate(self, reason: str = "manual") -> bool:
+    def rotate_to_next(self, reason: str = "new_search") -> bool:
         """
-        Passe au token suivant.
+        Passe au prochain token disponible (non rate-limited).
+        Appelé entre les recherches (keywords), pas pendant la pagination.
 
         Returns:
-            True si rotation effectuée, False si un seul token
+            True si rotation effectuée, False si un seul token ou tous rate-limited
         """
         with self._lock:
-            if len(self.tokens) <= 1:
+            if len(self._token_data) <= 1:
                 return False
 
+            now = time.time()
             old_idx = self._current_index
-            self._current_index = (self._current_index + 1) % len(self.tokens)
-            print(f"🔄 Token rotation ({reason}): #{old_idx + 1} → #{self._current_index + 1}")
-            return True
+
+            # Chercher le prochain token non rate-limited
+            for i in range(1, len(self._token_data) + 1):
+                next_idx = (self._current_index + i) % len(self._token_data)
+                next_token = self._token_data[next_idx]["token"]
+                if next_token not in self._rate_limited or self._rate_limited[next_token] <= now:
+                    self._current_index = next_idx
+                    new_name = self._token_data[next_idx].get("name", f"#{next_idx + 1}")
+                    print(f"🔄 Token rotation ({reason}): #{old_idx + 1} → #{next_idx + 1} ({new_name})")
+                    return True
+
+            print("⚠️ Tous les tokens sont rate-limited, conserve le token actuel")
+            return False
+
+    def rotate(self, reason: str = "manual") -> bool:
+        """Alias pour rotate_to_next (compatibilité)"""
+        return self.rotate_to_next(reason)
 
     def mark_rate_limited(self, cooldown_seconds: int = 60, error_message: str = None) -> bool:
         """
@@ -116,7 +182,10 @@ class TokenRotator:
             True si un autre token est disponible
         """
         with self._lock:
-            current = self.tokens[self._current_index]
+            if not self._token_data:
+                return False
+
+            current = self._token_data[self._current_index]["token"]
             self._rate_limited[current] = time.time() + cooldown_seconds
 
             # Enregistrer en BDD
@@ -125,47 +194,39 @@ class TokenRotator:
 
             # Chercher un token non rate-limited
             now = time.time()
-            for i in range(len(self.tokens)):
-                idx = (self._current_index + i + 1) % len(self.tokens)
-                token = self.tokens[idx]
+            for i in range(1, len(self._token_data) + 1):
+                idx = (self._current_index + i) % len(self._token_data)
+                token = self._token_data[idx]["token"]
                 if token not in self._rate_limited or self._rate_limited[token] <= now:
                     old_idx = self._current_index
                     self._current_index = idx
-                    print(f"🔄 Token #{old_idx + 1} rate-limited, switch vers #{idx + 1}")
+                    new_name = self._token_data[idx].get("name", f"#{idx + 1}")
+                    print(f"🔄 Token #{old_idx + 1} rate-limited, switch vers #{idx + 1} ({new_name})")
                     return True
 
             # Tous les tokens sont rate-limited
             print("⚠️ Tous les tokens sont rate-limited!")
             return False
 
-    def record_call(self, success: bool = True, error_message: str = None, rotate_after: bool = True):
+    def record_call(self, success: bool = True, error_message: str = None):
         """
-        Enregistre un appel pour le token courant et fait une rotation proactive.
+        Enregistre un appel pour le token courant.
+        NE FAIT PAS de rotation - le même token doit faire toute la pagination.
 
         Args:
             success: Si l'appel a réussi
             error_message: Message d'erreur éventuel
-            rotate_after: Si True, tourne vers le token suivant après l'appel (round-robin)
         """
         with self._lock:
-            token = self.tokens[self._current_index] if self.tokens else ""
-            if token:
-                self._call_counts[token] = self._call_counts.get(token, 0) + 1
-                # Enregistrer en BDD (seulement succès, les erreurs sont gérées par mark_rate_limited)
-                if success:
-                    self._record_to_db(token, success=True)
+            if not self._token_data:
+                return
 
-                # Rotation proactive round-robin après chaque appel réussi
-                if success and rotate_after and len(self.tokens) > 1:
-                    now = time.time()
-                    # Chercher le prochain token non rate-limited
-                    for i in range(1, len(self.tokens) + 1):
-                        next_idx = (self._current_index + i) % len(self.tokens)
-                        next_token = self.tokens[next_idx]
-                        # Vérifier si ce token n'est pas rate-limited
-                        if next_token not in self._rate_limited or self._rate_limited[next_token] <= now:
-                            self._current_index = next_idx
-                            break
+            token = self._token_data[self._current_index]["token"]
+            self._call_counts[token] = self._call_counts.get(token, 0) + 1
+
+            # Enregistrer en BDD (seulement succès, les erreurs sont gérées par mark_rate_limited)
+            if success:
+                self._record_to_db(token, success=True)
 
     def _record_to_db(self, token: str, success: bool = True, is_rate_limit: bool = False,
                       error_message: str = None, rate_limit_seconds: int = 60):
@@ -197,12 +258,25 @@ def get_token_rotator() -> Optional[TokenRotator]:
     return _token_rotator
 
 
-def init_token_rotator(tokens: List[str], db=None) -> TokenRotator:
-    """Initialise le rotator global avec les tokens"""
+def init_token_rotator(tokens: List[str] = None, tokens_with_proxies: List[Dict] = None, db=None) -> TokenRotator:
+    """
+    Initialise le rotator global avec les tokens.
+
+    Args:
+        tokens: Liste simple de tokens (sans proxy)
+        tokens_with_proxies: Liste de dicts [{"token": "...", "proxy": "http://...", "name": "..."}]
+        db: DatabaseManager pour les stats
+    """
     global _token_rotator, _token_db
     _token_db = db
-    _token_rotator = TokenRotator(tokens, db=db)
-    print(f"✅ TokenRotator initialisé avec {_token_rotator.token_count} token(s)")
+
+    if tokens_with_proxies:
+        _token_rotator = TokenRotator(tokens_with_proxies=tokens_with_proxies, db=db)
+        print(f"✅ TokenRotator initialisé avec {_token_rotator.token_count} token(s) + proxies")
+    else:
+        _token_rotator = TokenRotator(tokens=tokens or [], db=db)
+        print(f"✅ TokenRotator initialisé avec {_token_rotator.token_count} token(s)")
+
     return _token_rotator
 
 
@@ -228,7 +302,7 @@ class MetaAdsClient:
         return self.access_token
 
     def _get_api(self, url: str, params: dict) -> dict:
-        """Appel API avec retry automatique et gestion du rate limiting"""
+        """Appel API avec retry automatique, gestion du rate limiting et proxy"""
         params = params.copy()
 
         tracker = get_current_tracker()
@@ -236,13 +310,20 @@ class MetaAdsClient:
         max_retries = 5
 
         for attempt in range(max_retries):
-            # Utiliser le token du rotator si disponible
+            # Utiliser le token et proxy du rotator si disponible
             current_token = self._get_current_token()
             params["access_token"] = current_token
 
+            # Récupérer le proxy associé au token
+            proxies = None
+            if rotator:
+                proxy_url = rotator.get_current_proxy()
+                if proxy_url:
+                    proxies = {"http": proxy_url, "https": proxy_url}
+
             start_time = time.time()
             try:
-                r = requests.get(url, params=params, timeout=TIMEOUT)
+                r = requests.get(url, params=params, timeout=TIMEOUT, proxies=proxies)
                 response_time = (time.time() - start_time) * 1000
 
                 # Parse response

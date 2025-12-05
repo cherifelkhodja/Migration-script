@@ -4560,10 +4560,17 @@ def render_settings():
             new_token_name = st.text_input("Nom du token (optionnel)", placeholder="Token Principal", key="new_token_name")
             new_token_value = st.text_input("Token Meta API", type="password", key="new_token_value",
                                             help="Collez votre token Meta Ads API ici")
+            new_proxy_url = st.text_input("Proxy URL (optionnel)", placeholder="http://user:pass@ip:port", key="new_proxy_url",
+                                          help="Proxy associé à ce token pour éviter les bans IP")
 
             if st.button("Ajouter le token", type="primary", key="btn_add_token"):
                 if new_token_value and new_token_value.strip():
-                    token_id = add_meta_token(db, new_token_value.strip(), new_token_name.strip() or None)
+                    token_id = add_meta_token(
+                        db,
+                        new_token_value.strip(),
+                        new_token_name.strip() or None,
+                        new_proxy_url.strip() or None
+                    )
                     if token_id:
                         st.success(f"✅ Token ajouté avec succès (ID: {token_id})")
                         st.rerun()
@@ -4577,14 +4584,47 @@ def render_settings():
             for t in tokens:
                 status_icon = "🟢" if t["is_active"] and not t.get("is_rate_limited") else "🔴" if t.get("is_rate_limited") else "⚫"
                 rate_info = " ⏱️ Rate-limited" if t.get("is_rate_limited") else ""
+                proxy_info = " 🌐" if t.get("proxy_url") else ""
 
-                with st.expander(f"{status_icon} **{t['name']}** - {t['token_masked']}{rate_info}"):
+                with st.expander(f"{status_icon} **{t['name']}** - {t['token_masked']}{proxy_info}{rate_info}"):
                     # Stats
                     stat_cols = st.columns(4)
                     stat_cols[0].metric("Appels", t["total_calls"])
                     stat_cols[1].metric("Erreurs", t["total_errors"])
                     stat_cols[2].metric("Rate limits", t["rate_limit_hits"])
                     stat_cols[3].metric("Statut", "Actif" if t["is_active"] else "Inactif")
+
+                    # Proxy info
+                    current_proxy = t.get("proxy_url") or ""
+                    if current_proxy:
+                        # Masquer le mot de passe dans l'affichage
+                        try:
+                            from urllib.parse import urlparse
+                            parsed = urlparse(current_proxy)
+                            if parsed.password:
+                                masked = current_proxy.replace(parsed.password, "****")
+                            else:
+                                masked = current_proxy
+                        except:
+                            masked = current_proxy[:30] + "..."
+                        st.caption(f"🌐 Proxy: {masked}")
+                    else:
+                        st.caption("🌐 Proxy: Non configuré")
+
+                    # Modifier le proxy
+                    new_proxy = st.text_input(
+                        "Modifier le proxy",
+                        value=current_proxy,
+                        placeholder="http://user:pass@ip:port",
+                        key=f"proxy_{t['id']}",
+                        help="Laissez vide pour supprimer le proxy"
+                    )
+                    if st.button("💾 Sauvegarder proxy", key=f"save_proxy_{t['id']}"):
+                        update_meta_token(db, t["id"], proxy_url=new_proxy)
+                        st.success("Proxy mis à jour!")
+                        st.rerun()
+
+                    st.markdown("---")
 
                     # Dernière utilisation
                     if t["last_used_at"]:
