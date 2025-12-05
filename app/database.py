@@ -503,15 +503,38 @@ def _run_migrations(db: DatabaseManager):
         ("search_logs", "web_avg_time", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS web_avg_time FLOAT DEFAULT 0"),
         ("search_logs", "scraper_api_cost", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS scraper_api_cost FLOAT DEFAULT 0"),
         ("search_logs", "api_details", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS api_details TEXT"),
+        # Colonne date_creation pour PageRecherche (pour les tendances)
+        ("liste_page_recherche", "date_creation", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS date_creation TIMESTAMP DEFAULT NOW()"),
+    ]
+
+    # Index migrations (CREATE INDEX IF NOT EXISTS)
+    index_migrations = [
+        "CREATE INDEX IF NOT EXISTS idx_page_cms_etat ON liste_page_recherche (cms, etat)",
+        "CREATE INDEX IF NOT EXISTS idx_page_etat_ads ON liste_page_recherche (etat, nombre_ads_active)",
+        "CREATE INDEX IF NOT EXISTS idx_page_created ON liste_page_recherche (created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_winning_ads_page_date ON winning_ads (page_id, date_scan)",
+        "CREATE INDEX IF NOT EXISTS idx_winning_ads_reach ON winning_ads (eu_total_reach)",
+        "CREATE INDEX IF NOT EXISTS idx_search_log_status_date ON search_logs (status, started_at)",
     ]
 
     with db.get_session() as session:
+        # Run column migrations
         for table, column, sql in migrations:
             try:
                 session.execute(text(sql))
                 session.commit()
             except Exception as e:
                 # Colonne existe déjà ou autre erreur non critique
+                session.rollback()
+                pass
+
+        # Run index migrations
+        for sql in index_migrations:
+            try:
+                session.execute(text(sql))
+                session.commit()
+            except Exception as e:
+                # Index existe déjà ou autre erreur non critique
                 session.rollback()
                 pass
 
