@@ -3218,13 +3218,14 @@ def render_winning_ads():
                     page_name, page_id = group_key.split("||")
                     total_reach = sum(ad.get('eu_total_reach', 0) or 0 for ad in ads)
 
-                    with st.expander(f"📄 **{page_name}** - {len(ads)} winning ads (Total reach: {total_reach:,})"):
+                    with st.expander(f"📄 **{page_name}** - {len(ads)} winning ads (Total reach: {total_reach:,}".replace(",", " ") + ")"):
                         # Tableau des ads de cette page
                         table_data = []
                         for ad in sorted(ads, key=lambda x: x.get('eu_total_reach', 0) or 0, reverse=True):
+                            reach_val = ad.get('eu_total_reach', 0) or 0
                             table_data.append({
                                 "Ad ID": ad.get('ad_id', '')[:15],
-                                "Reach": ad.get('eu_total_reach', 0) or 0,
+                                "Reach": f"{reach_val:,}".replace(",", " "),
                                 "Âge (j)": ad.get('ad_age_days', 0) or 0,
                                 "Critère": ad.get('matched_criteria', 'N/A'),
                                 "Texte": (ad.get('ad_creative_bodies', '') or '')[:60] + "...",
@@ -3268,12 +3269,13 @@ def render_winning_ads():
                     total_reach = sum(ad.get('eu_total_reach', 0) or 0 for ad in ads)
                     avg_reach = total_reach // len(ads) if ads else 0
 
-                    with st.expander(f"📅 **{label}** - {len(ads)} ads (Reach moyen: {avg_reach:,})"):
+                    with st.expander(f"📅 **{label}** - {len(ads)} ads (Reach moyen: {avg_reach:,}".replace(",", " ") + ")"):
                         table_data = []
                         for ad in sorted(ads, key=lambda x: x.get('eu_total_reach', 0) or 0, reverse=True):
+                            reach_val = ad.get('eu_total_reach', 0) or 0
                             table_data.append({
                                 "Page": ad.get('page_name', 'N/A')[:30],
-                                "Reach": ad.get('eu_total_reach', 0) or 0,
+                                "Reach": f"{reach_val:,}".replace(",", " "),
                                 "Âge": f"{ad.get('ad_age_days', 0)}j",
                                 "Critère": ad.get('matched_criteria', 'N/A'),
                                 "Site": ad.get('lien_site', ''),
@@ -3290,9 +3292,10 @@ def render_winning_ads():
             else:
                 table_data = []
                 for ad in winning_ads:
+                    reach_val = ad.get('eu_total_reach', 0) or 0
                     table_data.append({
                         "Page": ad.get('page_name', 'N/A')[:40],
-                        "Reach": ad.get('eu_total_reach', 0) or 0,
+                        "Reach": f"{reach_val:,}".replace(",", " "),
                         "Âge (j)": ad.get('ad_age_days', 0) or 0,
                         "Critère": ad.get('matched_criteria', 'N/A'),
                         "Texte": (ad.get('ad_creative_bodies', '') or '')[:80] + "..." if len(ad.get('ad_creative_bodies', '') or '') > 80 else (ad.get('ad_creative_bodies', '') or ''),
@@ -3307,7 +3310,6 @@ def render_winning_ads():
 
                 # Configuration des colonnes pour les liens cliquables
                 column_config = {
-                    "Reach": st.column_config.NumberColumn("Reach", format="%d"),
                     "Site": st.column_config.LinkColumn("Site"),
                     "Ad URL": st.column_config.LinkColumn("Voir Ad"),
                 }
