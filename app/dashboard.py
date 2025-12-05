@@ -1949,8 +1949,8 @@ def render_pages_shops():
 
         if results:
             # Enrichir avec scores et winning ads
-            winning_by_page = get_winning_ads_by_page(db, limit=1000)
-            winning_counts = {str(w["page_id"]): w["count"] for w in winning_by_page}
+            winning_by_page = get_winning_ads_by_page(db, days=30)
+            winning_counts = {str(k): v for k, v in winning_by_page.items()}
 
             for page in results:
                 pid = str(page.get("page_id", ""))
