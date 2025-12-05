@@ -170,14 +170,19 @@ class SearchProgressTracker:
     """
     Gestionnaire de progression pour les recherches avec timers détaillés.
     Affiche le temps écoulé par phase et sous-étape avec interface visuelle.
+    Enregistre également l'historique complet en base de données.
     """
 
-    def __init__(self, container):
+    def __init__(self, container, db=None, log_id: int = None):
         """
         Args:
             container: Streamlit container pour l'affichage
+            db: DatabaseManager pour le logging (optionnel)
+            log_id: ID du log de recherche créé
         """
         self.container = container
+        self.db = db
+        self.log_id = log_id
         self.start_time = time.time()
         self.phase_start = None
         self.step_start = None
@@ -185,6 +190,19 @@ class SearchProgressTracker:
         self.current_phase = 0
         self.current_phase_name = ""
         self.total_phases = 8
+
+        # Métriques globales pour le log
+        self.metrics = {
+            "total_ads_found": 0,
+            "total_pages_found": 0,
+            "pages_after_filter": 0,
+            "pages_shopify": 0,
+            "pages_other_cms": 0,
+            "winning_ads_count": 0,
+            "blacklisted_ads_skipped": 0,
+            "pages_saved": 0,
+            "ads_saved": 0
+        }
 
         # Placeholders pour mise à jour dynamique
         with self.container:
@@ -269,21 +287,61 @@ class SearchProgressTracker:
         step_info = f"{step_name}: {current}/{total} ({int(progress * 100)}%)"
         self._render_status_box(step_info, extra_info or "", eta_str)
 
-    def complete_phase(self, result_summary: str):
+    def complete_phase(self, result_summary: str, details: dict = None):
         """Marque une phase comme terminée"""
         phase_elapsed = time.time() - self.phase_start
-        self.phases_completed.append({
+        phase_data = {
             "num": self.current_phase,
             "name": self.current_phase_name,
             "time": phase_elapsed,
-            "result": result_summary
-        })
+            "time_formatted": self.format_time(phase_elapsed),
+            "result": result_summary,
+            "details": details or {}
+        }
+        self.phases_completed.append(phase_data)
 
         self.progress_bar.progress(1.0)
 
         # Afficher phase terminée
         with self.status_box.container():
             st.success(f"✅ **Phase {self.current_phase}:** {self.current_phase_name} — {result_summary} ({self.format_time(phase_elapsed)})")
+
+        # Sauvegarder en base de données
+        self._save_phases_to_db()
+
+    def update_metric(self, key: str, value: int):
+        """Met à jour une métrique globale"""
+        if key in self.metrics:
+            self.metrics[key] = value
+
+    def add_to_metric(self, key: str, value: int):
+        """Ajoute à une métrique globale"""
+        if key in self.metrics:
+            self.metrics[key] += value
+
+    def _save_phases_to_db(self):
+        """Sauvegarde les phases en base de données"""
+        if self.db and self.log_id:
+            try:
+                from app.database import update_search_log_phases
+                update_search_log_phases(self.db, self.log_id, self.phases_completed)
+            except Exception:
+                pass  # Ne pas bloquer si erreur de sauvegarde
+
+    def finalize_log(self, status: str = "completed", error_message: str = None):
+        """Finalise le log de recherche en base de données"""
+        if self.db and self.log_id:
+            try:
+                from app.database import complete_search_log
+                complete_search_log(
+                    self.db,
+                    self.log_id,
+                    status=status,
+                    error_message=error_message,
+                    metrics=self.metrics
+                )
+            except Exception:
+                pass  # Ne pas bloquer si erreur
 
     def show_summary(self):
         """Affiche le résumé final avec tous les temps"""
@@ -967,6 +1025,11 @@ def render_sidebar():
             st.session_state.current_page = "Scheduled Scans"
             st.rerun()
 
+        if st.button("📜 Historique Recherches", use_container_width=True,
+                     type="primary" if st.session_state.current_page == "Search Logs" else "secondary"):
+            st.session_state.current_page = "Search Logs"
+            st.rerun()
+
         st.markdown("---")
         st.markdown("### Config")
 
@@ -1409,13 +1472,29 @@ def render_preview_results():
 
 
 def run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode=False):
-    """Exécute le processus de recherche complet avec tracking détaillé"""
+    """Exécute le processus de recherche complet avec tracking détaillé et logging"""
     client = MetaAdsClient(token)
     db = get_database()
 
-    # Créer le tracker de progression
+    # Créer le log de recherche en base de données
+    log_id = None
+    if db:
+        try:
+            from app.database import create_search_log
+            log_id = create_search_log(
+                db,
+                keywords=keywords,
+                countries=countries,
+                languages=languages,
+                min_ads=min_ads,
+                selected_cms=selected_cms if selected_cms else []
+            )
+        except Exception:
+            pass  # Continuer même si le log échoue
+
+    # Créer le tracker de progression avec logging
     progress_container = st.container()
-    tracker = SearchProgressTracker(progress_container)
+    tracker = SearchProgressTracker(progress_container, db=db, log_id=log_id)
 
     # Récupérer la blacklist
     blacklist_ids = set()
@@ -1439,7 +1518,11 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
                 all_ads.append(ad)
                 seen_ad_ids.add(ad_id)
 
-    tracker.complete_phase(f"{len(all_ads)} annonces trouvées")
+    tracker.complete_phase(f"{len(all_ads)} annonces trouvées", details={
+        "keywords_searched": len(keywords),
+        "ads_found": len(all_ads)
+    })
+    tracker.update_metric("total_ads_found", len(all_ads))
 
     # ═══ PHASE 2: Regroupement par page ═══
     tracker.start_phase(2, "📋 Regroupement par page", total_phases=8)
@@ -1497,7 +1580,15 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
     phase2_details = f"{len(pages_filtered)} pages avec ≥{min_ads} ads"
     if blacklisted_ads_count > 0:
         phase2_details += f" ({blacklisted_ads_count} ads de {len(blacklisted_pages_found)} page(s) blacklistée(s) ignorées)"
-    tracker.complete_phase(phase2_details)
+    tracker.complete_phase(phase2_details, details={
+        "total_pages_before_filter": len(pages),
+        "pages_after_filter": len(pages_filtered),
+        "blacklisted_ads": blacklisted_ads_count,
+        "blacklisted_pages": len(blacklisted_pages_found)
+    })
+    tracker.update_metric("total_pages_found", len(pages))
+    tracker.update_metric("pages_after_filter", len(pages_filtered))
+    tracker.update_metric("blacklisted_ads_skipped", blacklisted_ads_count)
 
     if not pages_filtered:
         if blacklisted_ads_count > 0 and len(pages) == 0:
@@ -1506,6 +1597,8 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
             st.warning("⚠️ Aucune annonce trouvée pour ces mots-clés. Essayez d'autres termes de recherche.")
         else:
             st.warning(f"⚠️ {len(pages)} pages trouvées mais aucune avec ≥{min_ads} ads (après filtrage blacklist)")
+        # Finaliser le log avec statut "no_results"
+        tracker.finalize_log(status="no_results")
         return
 
     # ═══ PHASE 3: Vérification cache + Extraction sites web ═══
@@ -1713,7 +1806,12 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
             winning_ads_by_page[pid] = page_winning_count
             data["winning_ads_count"] = page_winning_count
 
-    tracker.complete_phase(f"{len(winning_ads_data)} winning ads sur {len(winning_ads_by_page)} pages")
+    tracker.complete_phase(f"{len(winning_ads_data)} winning ads sur {len(winning_ads_by_page)} pages", details={
+        "winning_ads_count": len(winning_ads_data),
+        "pages_with_winning": len(winning_ads_by_page),
+        "total_ads_checked": total_ads_checked
+    })
+    tracker.update_metric("winning_ads_count", len(winning_ads_data))
 
     # Save to session first (needed for preview mode)
     st.session_state.pages_final = pages_final
@@ -1725,14 +1823,20 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
     st.session_state.preview_mode = preview_mode
 
     if preview_mode:
-        # Mode aperçu - afficher le résumé
+        # Mode aperçu - afficher le résumé et finaliser le log
         tracker.show_summary()
+        tracker.finalize_log(status="preview")
         st.success(f"✓ Recherche terminée ! {len(pages_final)} pages trouvées")
         st.session_state.show_preview_results = True
         st.rerun()
     else:
         # ═══ PHASE 8: Sauvegarde en base de données ═══
         tracker.start_phase(8, "💾 Sauvegarde en base de données", total_phases=8)
+
+        pages_saved = 0
+        suivi_saved = 0
+        ads_saved = 0
+        winning_saved = 0
 
         if db:
             try:
@@ -1750,13 +1854,22 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
                 tracker.update_step("Sauvegarde winning ads", 4, 4)
                 winning_saved = save_winning_ads(db, winning_ads_data, pages_final)
 
-                tracker.complete_phase(f"{pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads, {winning_saved} winning")
+                tracker.complete_phase(f"{pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads, {winning_saved} winning", details={
+                    "pages_saved": pages_saved,
+                    "suivi_saved": suivi_saved,
+                    "ads_saved": ads_saved,
+                    "winning_saved": winning_saved
+                })
+                tracker.update_metric("pages_saved", pages_saved)
+                tracker.update_metric("ads_saved", ads_saved)
 
             except Exception as e:
                 st.error(f"Erreur sauvegarde: {e}")
+                tracker.finalize_log(status="failed", error_message=str(e))
 
         # Afficher le résumé final
         tracker.show_summary()
+        tracker.finalize_log(status="completed")
 
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Pages", pages_saved)
@@ -3776,6 +3889,152 @@ def render_scheduled_scans():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PAGE: SEARCH LOGS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def render_search_logs():
+    """Page Historique des Recherches - Logs détaillés de toutes les recherches"""
+    st.title("📜 Historique des Recherches")
+    st.markdown("Consultez l'historique complet de vos recherches avec les métriques détaillées.")
+
+    db = get_database()
+    if not db:
+        st.error("Base de données non connectée")
+        return
+
+    # Import des fonctions de log
+    from app.database import get_search_logs, get_search_log_detail, get_search_logs_stats, delete_search_log
+
+    # Stats globales
+    stats = get_search_logs_stats(db, days=30)
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Recherches (30j)", stats.get("total_searches", 0))
+    with col2:
+        completed = stats.get("by_status", {}).get("completed", 0)
+        st.metric("Complétées", completed)
+    with col3:
+        avg_duration = stats.get("avg_duration_seconds", 0)
+        if avg_duration > 60:
+            st.metric("Durée moyenne", f"{avg_duration/60:.1f}m")
+        else:
+            st.metric("Durée moyenne", f"{avg_duration:.1f}s")
+    with col4:
+        st.metric("Total pages trouvées", stats.get("total_pages_found", 0))
+
+    st.markdown("---")
+
+    # Filtres
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        status_filter = st.selectbox(
+            "Filtrer par statut",
+            options=["Tous", "completed", "preview", "no_results", "failed", "running"],
+            index=0
+        )
+    with col2:
+        limit = st.selectbox("Nombre de résultats", options=[20, 50, 100], index=0)
+
+    # Récupérer les logs
+    status_param = None if status_filter == "Tous" else status_filter
+    logs = get_search_logs(db, limit=limit, status=status_param)
+
+    if not logs:
+        st.info("Aucun historique de recherche disponible.")
+        return
+
+    st.markdown(f"### {len(logs)} recherche(s)")
+
+    for log in logs:
+        log_id = log["id"]
+        started = log["started_at"]
+        status = log["status"]
+        keywords = log["keywords"] or "-"
+        duration = log.get("duration_seconds", 0)
+
+        # Status badge
+        status_emoji = {
+            "completed": "✅",
+            "preview": "👁️",
+            "failed": "❌",
+            "running": "🔄",
+            "no_results": "⚠️"
+        }.get(status, "❓")
+
+        # Format duration
+        if duration:
+            if duration > 60:
+                duration_str = f"{duration/60:.1f}m"
+            else:
+                duration_str = f"{duration:.1f}s"
+        else:
+            duration_str = "-"
+
+        # Format date
+        if started:
+            date_str = started.strftime("%d/%m/%Y %H:%M")
+        else:
+            date_str = "-"
+
+        with st.expander(f"{status_emoji} **{date_str}** - {keywords[:50]}{'...' if len(keywords) > 50 else ''} ({duration_str})"):
+            # Métriques principales
+            m1, m2, m3, m4 = st.columns(4)
+            with m1:
+                st.metric("Ads trouvées", log.get("total_ads_found", 0))
+            with m2:
+                st.metric("Pages trouvées", log.get("total_pages_found", 0))
+            with m3:
+                st.metric("Pages filtrées", log.get("pages_after_filter", 0))
+            with m4:
+                st.metric("Winning Ads", log.get("winning_ads_count", 0))
+
+            # Paramètres de recherche
+            st.markdown("**Paramètres:**")
+            param_cols = st.columns(4)
+            with param_cols[0]:
+                st.caption(f"📍 Pays: {log.get('countries', '-')}")
+            with param_cols[1]:
+                st.caption(f"🌐 Langues: {log.get('languages', '-')}")
+            with param_cols[2]:
+                st.caption(f"📊 Min ads: {log.get('min_ads', '-')}")
+            with param_cols[3]:
+                st.caption(f"🛍️ CMS: {log.get('selected_cms', '-') or 'Tous'}")
+
+            # Mots-clés complets
+            st.markdown("**Mots-clés:**")
+            st.code(keywords)
+
+            # Détails des phases
+            phases_data = log.get("phases_data", [])
+            if phases_data:
+                st.markdown("**Phases d'exécution:**")
+
+                phase_table = []
+                for p in phases_data:
+                    phase_table.append({
+                        "Phase": f"{p.get('num', '?')}. {p.get('name', 'N/A')}",
+                        "Durée": p.get("time_formatted", "-"),
+                        "Résultat": p.get("result", "-")
+                    })
+
+                if phase_table:
+                    df_phases = pd.DataFrame(phase_table)
+                    st.dataframe(df_phases, hide_index=True, use_container_width=True)
+
+            # Message d'erreur si failed
+            if status == "failed" and log.get("error_message"):
+                st.error(f"Erreur: {log.get('error_message')}")
+
+            # Détails supplémentaires
+            with st.columns([3, 1])[1]:
+                if st.button("🗑️ Supprimer", key=f"del_log_{log_id}"):
+                    delete_search_log(db, log_id)
+                    st.success("Log supprimé")
+                    st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -3826,6 +4085,8 @@ def main():
         render_creative_analysis()
     elif page == "Scheduled Scans":
         render_scheduled_scans()
+    elif page == "Search Logs":
+        render_search_logs()
     else:
         render_dashboard()
 

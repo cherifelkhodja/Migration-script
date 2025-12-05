@@ -244,6 +244,49 @@ class UserSettings(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class SearchLog(Base):
+    """Table search_logs - Historique complet des recherches"""
+    __tablename__ = "search_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # Paramètres de recherche
+    keywords = Column(Text)  # Mots-clés séparés par |
+    countries = Column(String(100))
+    languages = Column(String(100))
+    min_ads = Column(Integer, default=1)
+    selected_cms = Column(String(200))  # CMS filtrés
+
+    # Timing global
+    started_at = Column(DateTime, default=datetime.utcnow)
+    ended_at = Column(DateTime)
+    duration_seconds = Column(Float)
+
+    # Résultats globaux
+    status = Column(String(20), default="running")  # running, completed, failed, cancelled
+    error_message = Column(Text)
+
+    # Métriques par phase (JSON)
+    phases_data = Column(Text)  # JSON avec détails de chaque phase
+
+    # Résumé final
+    total_ads_found = Column(Integer, default=0)
+    total_pages_found = Column(Integer, default=0)
+    pages_after_filter = Column(Integer, default=0)
+    pages_shopify = Column(Integer, default=0)
+    pages_other_cms = Column(Integer, default=0)
+    winning_ads_count = Column(Integer, default=0)
+    blacklisted_ads_skipped = Column(Integer, default=0)
+
+    # Détails sauvegarde
+    pages_saved = Column(Integer, default=0)
+    ads_saved = Column(Integer, default=0)
+
+    __table_args__ = (
+        Index('idx_search_log_date', 'started_at'),
+        Index('idx_search_log_status', 'status'),
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # GESTION DE LA CONNEXION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1768,3 +1811,242 @@ def bulk_add_to_favorites(db: DatabaseManager, page_ids: List[str]) -> int:
         if add_favorite(db, pid):
             count += 1
     return count
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SEARCH LOGS - Historique des recherches
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def create_search_log(
+    db: DatabaseManager,
+    keywords: List[str],
+    countries: List[str],
+    languages: List[str],
+    min_ads: int = 1,
+    selected_cms: List[str] = None
+) -> int:
+    """
+    Crée un nouveau log de recherche
+
+    Returns:
+        ID du log créé
+    """
+    with db.get_session() as session:
+        log = SearchLog(
+            keywords=" | ".join(keywords) if keywords else "",
+            countries=",".join(countries) if countries else "",
+            languages=",".join(languages) if languages else "",
+            min_ads=min_ads,
+            selected_cms=",".join(selected_cms) if selected_cms else "",
+            started_at=datetime.utcnow(),
+            status="running",
+            phases_data="[]"
+        )
+        session.add(log)
+        session.flush()
+        return log.id
+
+
+def update_search_log_phases(
+    db: DatabaseManager,
+    log_id: int,
+    phases_data: List[Dict]
+) -> bool:
+    """Met à jour les données de phases d'un log"""
+    import json
+
+    with db.get_session() as session:
+        log = session.query(SearchLog).filter(SearchLog.id == log_id).first()
+        if not log:
+            return False
+        log.phases_data = json.dumps(phases_data, ensure_ascii=False, default=str)
+        return True
+
+
+def complete_search_log(
+    db: DatabaseManager,
+    log_id: int,
+    status: str = "completed",
+    error_message: str = None,
+    metrics: Dict = None
+) -> bool:
+    """
+    Finalise un log de recherche
+
+    Args:
+        db: Instance DatabaseManager
+        log_id: ID du log
+        status: completed, failed, cancelled
+        error_message: Message d'erreur si failed
+        metrics: Dictionnaire avec les métriques finales
+    """
+    with db.get_session() as session:
+        log = session.query(SearchLog).filter(SearchLog.id == log_id).first()
+        if not log:
+            return False
+
+        log.ended_at = datetime.utcnow()
+        log.duration_seconds = (log.ended_at - log.started_at).total_seconds()
+        log.status = status
+
+        if error_message:
+            log.error_message = error_message
+
+        if metrics:
+            log.total_ads_found = metrics.get("total_ads_found", 0)
+            log.total_pages_found = metrics.get("total_pages_found", 0)
+            log.pages_after_filter = metrics.get("pages_after_filter", 0)
+            log.pages_shopify = metrics.get("pages_shopify", 0)
+            log.pages_other_cms = metrics.get("pages_other_cms", 0)
+            log.winning_ads_count = metrics.get("winning_ads_count", 0)
+            log.blacklisted_ads_skipped = metrics.get("blacklisted_ads_skipped", 0)
+            log.pages_saved = metrics.get("pages_saved", 0)
+            log.ads_saved = metrics.get("ads_saved", 0)
+
+        return True
+
+
+def get_search_logs(
+    db: DatabaseManager,
+    limit: int = 50,
+    status: str = None
+) -> List[Dict]:
+    """
+    Récupère les logs de recherche
+
+    Args:
+        db: Instance DatabaseManager
+        limit: Nombre max de résultats
+        status: Filtrer par statut (running, completed, failed)
+
+    Returns:
+        Liste des logs
+    """
+    import json
+
+    with db.get_session() as session:
+        query = session.query(SearchLog).order_by(SearchLog.started_at.desc())
+
+        if status:
+            query = query.filter(SearchLog.status == status)
+
+        logs = query.limit(limit).all()
+
+        return [{
+            "id": l.id,
+            "keywords": l.keywords,
+            "countries": l.countries,
+            "languages": l.languages,
+            "min_ads": l.min_ads,
+            "selected_cms": l.selected_cms,
+            "started_at": l.started_at,
+            "ended_at": l.ended_at,
+            "duration_seconds": l.duration_seconds,
+            "status": l.status,
+            "error_message": l.error_message,
+            "phases_data": json.loads(l.phases_data) if l.phases_data else [],
+            "total_ads_found": l.total_ads_found,
+            "total_pages_found": l.total_pages_found,
+            "pages_after_filter": l.pages_after_filter,
+            "pages_shopify": l.pages_shopify,
+            "pages_other_cms": l.pages_other_cms,
+            "winning_ads_count": l.winning_ads_count,
+            "blacklisted_ads_skipped": l.blacklisted_ads_skipped,
+            "pages_saved": l.pages_saved,
+            "ads_saved": l.ads_saved
+        } for l in logs]
+
+
+def get_search_log_detail(db: DatabaseManager, log_id: int) -> Optional[Dict]:
+    """Récupère les détails complets d'un log"""
+    import json
+
+    with db.get_session() as session:
+        log = session.query(SearchLog).filter(SearchLog.id == log_id).first()
+        if not log:
+            return None
+
+        return {
+            "id": log.id,
+            "keywords": log.keywords,
+            "countries": log.countries,
+            "languages": log.languages,
+            "min_ads": log.min_ads,
+            "selected_cms": log.selected_cms,
+            "started_at": log.started_at,
+            "ended_at": log.ended_at,
+            "duration_seconds": log.duration_seconds,
+            "status": log.status,
+            "error_message": log.error_message,
+            "phases_data": json.loads(log.phases_data) if log.phases_data else [],
+            "total_ads_found": log.total_ads_found,
+            "total_pages_found": log.total_pages_found,
+            "pages_after_filter": log.pages_after_filter,
+            "pages_shopify": log.pages_shopify,
+            "pages_other_cms": log.pages_other_cms,
+            "winning_ads_count": log.winning_ads_count,
+            "blacklisted_ads_skipped": log.blacklisted_ads_skipped,
+            "pages_saved": log.pages_saved,
+            "ads_saved": log.ads_saved
+        }
+
+
+def delete_search_log(db: DatabaseManager, log_id: int) -> bool:
+    """Supprime un log de recherche"""
+    with db.get_session() as session:
+        deleted = session.query(SearchLog).filter(SearchLog.id == log_id).delete()
+        return deleted > 0
+
+
+def get_search_logs_stats(db: DatabaseManager, days: int = 30) -> Dict:
+    """
+    Récupère les statistiques des recherches
+
+    Returns:
+        Dict avec stats globales
+    """
+    from datetime import timedelta
+    from sqlalchemy import func
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    with db.get_session() as session:
+        # Total de recherches
+        total = session.query(SearchLog).filter(
+            SearchLog.started_at >= cutoff
+        ).count()
+
+        # Par statut
+        by_status = session.query(
+            SearchLog.status,
+            func.count(SearchLog.id)
+        ).filter(
+            SearchLog.started_at >= cutoff
+        ).group_by(SearchLog.status).all()
+
+        # Durée moyenne
+        avg_duration = session.query(
+            func.avg(SearchLog.duration_seconds)
+        ).filter(
+            SearchLog.started_at >= cutoff,
+            SearchLog.status == "completed"
+        ).scalar()
+
+        # Total pages/ads trouvés
+        totals = session.query(
+            func.sum(SearchLog.total_ads_found),
+            func.sum(SearchLog.total_pages_found),
+            func.sum(SearchLog.winning_ads_count)
+        ).filter(
+            SearchLog.started_at >= cutoff,
+            SearchLog.status == "completed"
+        ).first()
+
+        return {
+            "total_searches": total,
+            "by_status": {s[0]: s[1] for s in by_status},
+            "avg_duration_seconds": round(avg_duration, 1) if avg_duration else 0,
+            "total_ads_found": totals[0] or 0,
+            "total_pages_found": totals[1] or 0,
+            "total_winning_ads": totals[2] or 0
+        }
