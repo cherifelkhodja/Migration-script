@@ -3273,9 +3273,10 @@ def update_meta_token(
     token_id: int,
     name: str = None,
     is_active: bool = None,
-    proxy_url: str = None
+    proxy_url: str = None,
+    token_value: str = None
 ) -> bool:
-    """Met à jour un token (nom, statut actif, proxy)"""
+    """Met à jour un token (nom, statut actif, proxy, valeur du token)"""
     with db.get_session() as session:
         token = session.query(MetaToken).filter(MetaToken.id == token_id).first()
         if not token:
@@ -3287,6 +3288,8 @@ def update_meta_token(
             token.is_active = is_active
         if proxy_url is not None:
             token.proxy_url = proxy_url if proxy_url.strip() else None
+        if token_value is not None and token_value.strip():
+            token.token = token_value.strip()
 
         return True
 

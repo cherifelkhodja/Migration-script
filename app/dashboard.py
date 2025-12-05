@@ -4611,6 +4611,23 @@ def render_settings():
                     else:
                         st.caption("🌐 Proxy: Non configuré")
 
+                    # Modifier le token
+                    new_token_value = st.text_input(
+                        "Modifier le token",
+                        value="",
+                        placeholder="Nouveau token Meta API (laissez vide pour ne pas modifier)",
+                        key=f"token_value_{t['id']}",
+                        type="password",
+                        help="Entrez le nouveau token pour le remplacer"
+                    )
+                    if st.button("💾 Sauvegarder token", key=f"save_token_{t['id']}"):
+                        if new_token_value.strip():
+                            update_meta_token(db, t["id"], token_value=new_token_value)
+                            st.success("Token mis à jour!")
+                            st.rerun()
+                        else:
+                            st.warning("Veuillez entrer un token valide")
+
                     # Modifier le proxy
                     new_proxy = st.text_input(
                         "Modifier le proxy",
