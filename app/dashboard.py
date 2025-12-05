@@ -552,7 +552,7 @@ class SearchProgressTracker:
         self.phases_completed = []
         self.current_phase = 0
         self.current_phase_name = ""
-        self.total_phases = 8
+        self.total_phases = 9
 
         # Métriques globales pour le log
         self.metrics = {
