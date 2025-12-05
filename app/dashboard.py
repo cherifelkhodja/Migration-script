@@ -3081,11 +3081,11 @@ def render_winning_ads():
         )
 
     with col4:
-        dedup_mode = st.selectbox(
-            "Dédupliquer",
-            options=["Aucune", "Par Ad ID", "Par Page"],
+        group_by = st.selectbox(
+            "Grouper par",
+            options=["Aucun", "Par Page", "Par Âge"],
             index=0,
-            help="Par Ad ID: 1 seule entrée par ad. Par Page: 1 meilleure ad par page."
+            help="Grouper les winning ads par page ou par âge"
         )
 
     # Mode d'affichage
@@ -3171,35 +3171,12 @@ def render_winning_ads():
         winning_ads = get_winning_ads(db, limit=actual_limit, days=period)
 
         if winning_ads:
-            # Appliquer la déduplication AVANT l'export
-            if dedup_mode == "Par Ad ID":
-                seen_ids = set()
-                deduped = []
-                for ad in winning_ads:
-                    ad_id = ad.get("ad_id")
-                    if ad_id not in seen_ids:
-                        seen_ids.add(ad_id)
-                        deduped.append(ad)
-                winning_ads = deduped
-
-            elif dedup_mode == "Par Page":
-                # Garder la meilleure ad par page (plus haut reach)
-                best_by_page = {}
-                for ad in winning_ads:
-                    pid = ad.get("page_id")
-                    reach = ad.get("eu_total_reach", 0) or 0
-                    if pid not in best_by_page or reach > (best_by_page[pid].get("eu_total_reach", 0) or 0):
-                        best_by_page[pid] = ad
-                winning_ads = list(best_by_page.values())
-                # Re-trier par reach
-                winning_ads = sorted(winning_ads, key=lambda x: x.get("eu_total_reach", 0) or 0, reverse=True)
-
             # Header avec export
             col1, col2 = st.columns([3, 1])
             with col1:
                 st.subheader("📋 Liste des Winning Ads")
             with col2:
-                # Préparer données pour export (déjà dédupliquées)
+                # Préparer données pour export
                 export_data = []
                 for ad in winning_ads:
                     export_data.append({
@@ -3215,103 +3192,192 @@ def render_winning_ads():
                         "scan_date": ad.get("date_scan").strftime("%Y-%m-%d") if ad.get("date_scan") else ""
                     })
                 csv_data = export_to_csv(export_data)
-                dedup_suffix = f"_{dedup_mode.lower().replace(' ', '_')}" if dedup_mode != "Aucune" else ""
+                group_suffix = f"_{group_by.lower().replace(' ', '_')}" if group_by != "Aucun" else ""
                 st.download_button(
                     "📥 Export CSV",
                     csv_data,
-                    f"winning_ads_{period}j{dedup_suffix}.csv",
+                    f"winning_ads_{period}j{group_suffix}.csv",
                     "text/csv",
                     key="export_winning"
                 )
 
-            dedup_info = f" (dédupliqué: {dedup_mode})" if dedup_mode != "Aucune" else ""
-            st.info(f"🏆 {len(winning_ads)} winning ads trouvées{dedup_info}")
+            group_info = f" (groupé: {group_by})" if group_by != "Aucun" else ""
+            st.info(f"🏆 {len(winning_ads)} winning ads trouvées{group_info}")
 
-            # Mode Tableau
-            if view_mode == "📋 Tableau":
-                table_data = []
+            # ═══ AFFICHAGE GROUPÉ ═══
+            if group_by == "Par Page":
+                # Grouper par page
+                groups = {}
                 for ad in winning_ads:
-                    table_data.append({
-                        "Page": ad.get('page_name', 'N/A')[:40],
-                        "Reach": ad.get('eu_total_reach', 0) or 0,
-                        "Âge (j)": ad.get('ad_age_days', 0) or 0,
-                        "Critère": ad.get('matched_criteria', 'N/A'),
-                        "Texte": (ad.get('ad_creative_bodies', '') or '')[:80] + "..." if len(ad.get('ad_creative_bodies', '') or '') > 80 else (ad.get('ad_creative_bodies', '') or ''),
-                        "Site": ad.get('lien_site', ''),
-                        "Ad URL": ad.get('ad_snapshot_url', ''),
-                        "Page ID": ad.get('page_id', ''),
-                        "Ad ID": ad.get('ad_id', ''),
-                        "Scan": ad.get('date_scan').strftime('%Y-%m-%d') if ad.get('date_scan') else ''
-                    })
+                    page_name = ad.get('page_name', 'N/A')
+                    page_id = ad.get('page_id', '')
+                    key = f"{page_name}||{page_id}"
+                    if key not in groups:
+                        groups[key] = []
+                    groups[key].append(ad)
 
-                df_winning = pd.DataFrame(table_data)
+                # Trier les groupes par nombre d'ads (décroissant)
+                sorted_groups = sorted(groups.items(), key=lambda x: len(x[1]), reverse=True)
 
-                # Configuration des colonnes pour les liens cliquables
-                column_config = {
-                    "Reach": st.column_config.NumberColumn("Reach", format="%d"),
-                    "Site": st.column_config.LinkColumn("Site"),
-                    "Ad URL": st.column_config.LinkColumn("Voir Ad"),
-                }
+                for group_key, ads in sorted_groups:
+                    page_name, page_id = group_key.split("||")
+                    total_reach = sum(ad.get('eu_total_reach', 0) or 0 for ad in ads)
 
-                st.dataframe(
-                    df_winning,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config=column_config,
-                    height=600
-                )
+                    with st.expander(f"📄 **{page_name}** - {len(ads)} winning ads (Total reach: {total_reach:,})"):
+                        # Tableau des ads de cette page
+                        table_data = []
+                        for ad in sorted(ads, key=lambda x: x.get('eu_total_reach', 0) or 0, reverse=True):
+                            table_data.append({
+                                "Ad ID": ad.get('ad_id', '')[:15],
+                                "Reach": ad.get('eu_total_reach', 0) or 0,
+                                "Âge (j)": ad.get('ad_age_days', 0) or 0,
+                                "Critère": ad.get('matched_criteria', 'N/A'),
+                                "Texte": (ad.get('ad_creative_bodies', '') or '')[:60] + "...",
+                                "Ad URL": ad.get('ad_snapshot_url', '')
+                            })
+                        df = pd.DataFrame(table_data)
+                        st.dataframe(df, use_container_width=True, hide_index=True,
+                                   column_config={"Ad URL": st.column_config.LinkColumn("Voir")})
 
-            # Mode Cartes (ancien affichage)
+                        # Lien vers le site
+                        site = ads[0].get('lien_site', '')
+                        if site:
+                            st.link_button("🌐 Voir le site", site)
+                        st.code(page_id, language=None)
+
+            elif group_by == "Par Âge":
+                # Grouper par tranches d'âge
+                age_ranges = [
+                    (0, 4, "0-4 jours (très récent)"),
+                    (5, 7, "5-7 jours"),
+                    (8, 14, "8-14 jours"),
+                    (15, 21, "15-21 jours"),
+                    (22, 30, "22-30 jours"),
+                    (31, 999, "30+ jours")
+                ]
+
+                groups = {label: [] for _, _, label in age_ranges}
+
+                for ad in winning_ads:
+                    age = ad.get('ad_age_days', 0) or 0
+                    for min_age, max_age, label in age_ranges:
+                        if min_age <= age <= max_age:
+                            groups[label].append(ad)
+                            break
+
+                for _, _, label in age_ranges:
+                    ads = groups[label]
+                    if not ads:
+                        continue
+
+                    total_reach = sum(ad.get('eu_total_reach', 0) or 0 for ad in ads)
+                    avg_reach = total_reach // len(ads) if ads else 0
+
+                    with st.expander(f"📅 **{label}** - {len(ads)} ads (Reach moyen: {avg_reach:,})"):
+                        table_data = []
+                        for ad in sorted(ads, key=lambda x: x.get('eu_total_reach', 0) or 0, reverse=True):
+                            table_data.append({
+                                "Page": ad.get('page_name', 'N/A')[:30],
+                                "Reach": ad.get('eu_total_reach', 0) or 0,
+                                "Âge": f"{ad.get('ad_age_days', 0)}j",
+                                "Critère": ad.get('matched_criteria', 'N/A'),
+                                "Site": ad.get('lien_site', ''),
+                                "Ad URL": ad.get('ad_snapshot_url', '')
+                            })
+                        df = pd.DataFrame(table_data)
+                        st.dataframe(df, use_container_width=True, hide_index=True,
+                                   column_config={
+                                       "Site": st.column_config.LinkColumn("Site"),
+                                       "Ad URL": st.column_config.LinkColumn("Voir")
+                                   }, height=min(400, 50 + len(ads) * 35))
+
+            # ═══ AFFICHAGE NORMAL (pas de groupement) ═══
             else:
-                for ad in winning_ads:
-                    reach_formatted = f"{ad.get('eu_total_reach', 0):,}" if ad.get('eu_total_reach') else "N/A"
-                    age = ad.get('ad_age_days', 'N/A')
-                    criteria = ad.get('matched_criteria', 'N/A')
+                # Mode Tableau
+                if view_mode == "📋 Tableau":
+                    table_data = []
+                    for ad in winning_ads:
+                        table_data.append({
+                            "Page": ad.get('page_name', 'N/A')[:40],
+                            "Reach": ad.get('eu_total_reach', 0) or 0,
+                            "Âge (j)": ad.get('ad_age_days', 0) or 0,
+                            "Critère": ad.get('matched_criteria', 'N/A'),
+                            "Texte": (ad.get('ad_creative_bodies', '') or '')[:80] + "..." if len(ad.get('ad_creative_bodies', '') or '') > 80 else (ad.get('ad_creative_bodies', '') or ''),
+                            "Site": ad.get('lien_site', ''),
+                            "Ad URL": ad.get('ad_snapshot_url', ''),
+                            "Page ID": ad.get('page_id', ''),
+                            "Ad ID": ad.get('ad_id', ''),
+                            "Scan": ad.get('date_scan').strftime('%Y-%m-%d') if ad.get('date_scan') else ''
+                        })
 
-                    with st.expander(f"🏆 **{ad.get('page_name', 'N/A')}** - {reach_formatted} reach ({criteria})"):
-                        col1, col2 = st.columns([2, 1])
+                    df_winning = pd.DataFrame(table_data)
 
-                        with col1:
-                            # Texte de l'annonce
-                            bodies = ad.get('ad_creative_bodies', '')
-                            if bodies:
-                                st.markdown("**Texte de l'annonce:**")
-                                st.text(bodies[:500] + "..." if len(bodies) > 500 else bodies)
+                    # Configuration des colonnes pour les liens cliquables
+                    column_config = {
+                        "Reach": st.column_config.NumberColumn("Reach", format="%d"),
+                        "Site": st.column_config.LinkColumn("Site"),
+                        "Ad URL": st.column_config.LinkColumn("Voir Ad"),
+                    }
 
-                            # Liens
-                            captions = ad.get('ad_creative_link_captions', '')
-                            if captions:
-                                st.markdown(f"**Caption:** {captions}")
+                    st.dataframe(
+                        df_winning,
+                        use_container_width=True,
+                        hide_index=True,
+                        column_config=column_config,
+                        height=600
+                    )
 
-                            titles = ad.get('ad_creative_link_titles', '')
-                            if titles:
-                                st.markdown(f"**Titre:** {titles}")
+                # Mode Cartes (ancien affichage)
+                else:
+                    for ad in winning_ads:
+                        reach_formatted = f"{ad.get('eu_total_reach', 0):,}" if ad.get('eu_total_reach') else "N/A"
+                        age = ad.get('ad_age_days', 'N/A')
+                        criteria = ad.get('matched_criteria', 'N/A')
 
-                        with col2:
-                            st.metric("📈 Reach", reach_formatted)
-                            st.metric("📅 Âge", f"{age} jours" if age else "N/A")
-                            st.metric("🎯 Critère", criteria)
+                        with st.expander(f"🏆 **{ad.get('page_name', 'N/A')}** - {reach_formatted} reach ({criteria})"):
+                            col1, col2 = st.columns([2, 1])
 
-                            # Date de création
-                            creation = ad.get('ad_creation_time')
-                            if creation:
-                                st.caption(f"Créé: {creation.strftime('%Y-%m-%d')}")
+                            with col1:
+                                # Texte de l'annonce
+                                bodies = ad.get('ad_creative_bodies', '')
+                                if bodies:
+                                    st.markdown("**Texte de l'annonce:**")
+                                    st.text(bodies[:500] + "..." if len(bodies) > 500 else bodies)
 
-                            # Date de scan
-                            scan = ad.get('date_scan')
-                            if scan:
-                                st.caption(f"Scanné: {scan.strftime('%Y-%m-%d %H:%M')}")
+                                # Liens
+                                captions = ad.get('ad_creative_link_captions', '')
+                                if captions:
+                                    st.markdown(f"**Caption:** {captions}")
 
-                            # Liens
-                            if ad.get('ad_snapshot_url'):
-                                st.link_button("🔗 Voir l'annonce", ad['ad_snapshot_url'])
+                                titles = ad.get('ad_creative_link_titles', '')
+                                if titles:
+                                    st.markdown(f"**Titre:** {titles}")
 
-                            if ad.get('lien_site'):
-                                st.link_button("🌐 Site", ad['lien_site'])
+                            with col2:
+                                st.metric("📈 Reach", reach_formatted)
+                                st.metric("📅 Âge", f"{age} jours" if age else "N/A")
+                                st.metric("🎯 Critère", criteria)
 
-                            # Copie rapide (code box avec bouton copie intégré)
-                            st.caption("📋 Page ID:")
-                            st.code(ad.get('page_id', ''), language=None)
+                                # Date de création
+                                creation = ad.get('ad_creation_time')
+                                if creation:
+                                    st.caption(f"Créé: {creation.strftime('%Y-%m-%d')}")
+
+                                # Date de scan
+                                scan = ad.get('date_scan')
+                                if scan:
+                                    st.caption(f"Scanné: {scan.strftime('%Y-%m-%d %H:%M')}")
+
+                                # Liens
+                                if ad.get('ad_snapshot_url'):
+                                    st.link_button("🔗 Voir l'annonce", ad['ad_snapshot_url'])
+
+                                if ad.get('lien_site'):
+                                    st.link_button("🌐 Site", ad['lien_site'])
+
+                                # Copie rapide (code box avec bouton copie intégré)
+                                st.caption("📋 Page ID:")
+                                st.code(ad.get('page_id', ''), language=None)
 
         else:
             st.info("Aucune winning ad trouvée pour cette période. Lancez une recherche pour en détecter.")
