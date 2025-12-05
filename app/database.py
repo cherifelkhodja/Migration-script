@@ -45,7 +45,7 @@ class PageRecherche(Base):
     classified_at = Column(DateTime)  # Date de dernière classification
     type_produits = Column(Text)
     moyens_paiements = Column(Text)
-    pays = Column(String(50))
+    pays = Column(String(255))  # Multi-valeurs: "FR,DE,ES" (pays des recherches où la page apparaît)
     langue = Column(String(50))
     cms = Column(String(50))
     template = Column(String(100))
@@ -574,6 +574,8 @@ def _run_migrations(db: DatabaseManager):
         ("liste_page_recherche", "subcategory", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS subcategory VARCHAR(100)"),
         ("liste_page_recherche", "classification_confidence", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS classification_confidence FLOAT"),
         ("liste_page_recherche", "classified_at", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS classified_at TIMESTAMP"),
+        # Extension du champ pays pour multi-valeurs
+        ("liste_page_recherche", "pays_resize", "ALTER TABLE liste_page_recherche ALTER COLUMN pays TYPE VARCHAR(255)"),
     ]
 
     # Index migrations (CREATE INDEX IF NOT EXISTS)
@@ -718,6 +720,23 @@ def save_pages_recherche(
 
                 merged_keywords = " | ".join(existing_keywords_list)
 
+                # Merge des pays (ajouter les nouveaux sans supprimer les anciens)
+                existing_pays_str = existing_page.pays or ""
+                existing_pays_list = [c.strip().upper() for c in existing_pays_str.split(",") if c.strip()]
+                for c in countries:
+                    c_upper = c.upper().strip()
+                    if c_upper and c_upper not in existing_pays_list:
+                        existing_pays_list.append(c_upper)
+                merged_pays = ",".join(existing_pays_list)
+
+                # Merge des langues (ajouter les nouvelles sans supprimer les anciennes)
+                existing_lang_str = existing_page.langue or ""
+                existing_lang_list = [l.strip() for l in existing_lang_str.split(",") if l.strip()]
+                for lang in languages:
+                    if lang and lang not in existing_lang_list:
+                        existing_lang_list.append(lang)
+                merged_langues = ",".join(existing_lang_list)
+
                 # Mise à jour des champs
                 existing_page.page_name = data.get("page_name", "") or existing_page.page_name
                 existing_page.lien_site = data.get("website", "") or existing_page.lien_site
@@ -726,8 +745,8 @@ def save_pages_recherche(
                 existing_page.thematique = web.get("thematique", "") or existing_page.thematique
                 existing_page.type_produits = web.get("type_produits", "") or existing_page.type_produits
                 existing_page.moyens_paiements = web.get("payments", "") or existing_page.moyens_paiements
-                existing_page.pays = ",".join(countries)
-                existing_page.langue = ",".join(languages)
+                existing_page.pays = merged_pays
+                existing_page.langue = merged_langues
                 existing_page.cms = data.get("cms") or web.get("cms", "") or existing_page.cms
                 existing_page.template = web.get("theme", "") or existing_page.template
                 existing_page.devise = data.get("currency", "") or existing_page.devise
@@ -739,6 +758,7 @@ def save_pages_recherche(
             else:
                 # Nouvelle page - insertion
                 keywords_str = " | ".join(new_keywords) if new_keywords else ""
+                pays_str = ",".join([c.upper().strip() for c in countries if c])
 
                 new_page = PageRecherche(
                     page_id=str(pid),
@@ -749,7 +769,7 @@ def save_pages_recherche(
                     thematique=web.get("thematique", ""),
                     type_produits=web.get("type_produits", ""),
                     moyens_paiements=web.get("payments", ""),
-                    pays=",".join(countries),
+                    pays=pays_str,
                     langue=",".join(languages),
                     cms=data.get("cms") or web.get("cms", "Unknown"),
                     template=web.get("theme", ""),
@@ -949,6 +969,74 @@ def get_suivi_stats(db: DatabaseManager) -> Dict:
         }
 
 
+def get_suivi_stats_filtered(
+    db: DatabaseManager,
+    thematique: str = None,
+    subcategory: str = None,
+    pays: str = None
+) -> Dict:
+    """
+    Récupère les statistiques de suivi avec filtres de classification.
+
+    Args:
+        db: DatabaseManager
+        thematique: Filtrer par catégorie principale
+        subcategory: Filtrer par sous-catégorie
+        pays: Filtrer par pays (recherche dans champ multi-valeurs)
+
+    Returns:
+        Dict avec total_pages, etats, cms
+    """
+    from sqlalchemy import func
+
+    with db.get_session() as session:
+        # Base query
+        query = session.query(PageRecherche)
+
+        # Appliquer les filtres
+        if thematique:
+            query = query.filter(PageRecherche.thematique == thematique)
+        if subcategory:
+            query = query.filter(PageRecherche.subcategory == subcategory)
+        if pays:
+            query = query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+
+        # Nombre total de pages filtrées
+        total_pages = query.count()
+
+        # Répartition par état (avec filtres)
+        etat_query = session.query(
+            PageRecherche.etat,
+            func.count(PageRecherche.id)
+        )
+        if thematique:
+            etat_query = etat_query.filter(PageRecherche.thematique == thematique)
+        if subcategory:
+            etat_query = etat_query.filter(PageRecherche.subcategory == subcategory)
+        if pays:
+            etat_query = etat_query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+        etats = etat_query.group_by(PageRecherche.etat).all()
+
+        # Répartition par CMS (avec filtres)
+        cms_query = session.query(
+            PageRecherche.cms,
+            func.count(PageRecherche.id)
+        )
+        if thematique:
+            cms_query = cms_query.filter(PageRecherche.thematique == thematique)
+        if subcategory:
+            cms_query = cms_query.filter(PageRecherche.subcategory == subcategory)
+        if pays:
+            cms_query = cms_query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+        cms_stats = cms_query.group_by(PageRecherche.cms).all()
+
+        return {
+            "total_pages": total_pages,
+            "etats": {e[0]: e[1] for e in etats if e[0]},
+            "cms": {c[0]: c[1] for c in cms_stats if c[0]}
+        }
+
+
 @cached(ttl=60, key_prefix="trends_")
 def get_dashboard_trends(db: DatabaseManager, days: int = 7) -> Dict:
     """
@@ -1106,9 +1194,23 @@ def search_pages(
     etat: str = None,
     search_term: str = None,
     thematique: str = None,
+    subcategory: str = None,
+    pays: str = None,
     limit: int = 100
 ) -> List[Dict]:
-    """Recherche des pages avec filtres"""
+    """
+    Recherche des pages avec filtres.
+
+    Args:
+        db: DatabaseManager
+        cms: Filtre par CMS
+        etat: Filtre par état (XS, S, M, L, XL, XXL)
+        search_term: Recherche dans nom/site
+        thematique: Filtre par catégorie principale
+        subcategory: Filtre par sous-catégorie
+        pays: Filtre par pays (ex: "FR", recherche dans le champ multi-valeurs)
+        limit: Nombre max de résultats
+    """
     with db.get_session() as session:
         query = session.query(PageRecherche)
 
@@ -1129,6 +1231,11 @@ def search_pages(
                 )
             else:
                 query = query.filter(PageRecherche.thematique == thematique)
+        if subcategory:
+            query = query.filter(PageRecherche.subcategory == subcategory)
+        if pays:
+            # Le champ pays est multi-valeurs "FR,DE,ES", on cherche avec LIKE
+            query = query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
 
         pages = query.order_by(
             PageRecherche.nombre_ads_active.desc()
@@ -1148,12 +1255,141 @@ def search_pages(
                 "thematique": p.thematique,
                 "subcategory": p.subcategory,
                 "classification_confidence": p.classification_confidence,
+                "pays": p.pays,
                 "template": p.template,
                 "devise": p.devise,
                 "dernier_scan": p.dernier_scan
             }
             for p in pages
         ]
+
+
+def add_country_to_page(db: DatabaseManager, page_id: str, country: str) -> bool:
+    """
+    Ajoute un pays à une page (si pas déjà présent).
+
+    Args:
+        db: DatabaseManager
+        page_id: ID de la page
+        country: Code pays (ex: "FR", "DE")
+
+    Returns:
+        True si ajouté, False si déjà présent ou erreur
+    """
+    if not country:
+        return False
+
+    country = country.upper().strip()
+
+    with db.get_session() as session:
+        page = session.query(PageRecherche).filter(
+            PageRecherche.page_id == page_id
+        ).first()
+
+        if not page:
+            return False
+
+        # Parser les pays existants
+        existing_countries = []
+        if page.pays:
+            existing_countries = [c.strip() for c in page.pays.split(",") if c.strip()]
+
+        # Vérifier si déjà présent
+        if country in existing_countries:
+            return False
+
+        # Ajouter le nouveau pays
+        existing_countries.append(country)
+        page.pays = ",".join(existing_countries)
+
+        return True
+
+
+def add_countries_to_pages_batch(
+    db: DatabaseManager,
+    page_ids: List[str],
+    country: str
+) -> int:
+    """
+    Ajoute un pays à plusieurs pages en batch.
+
+    Args:
+        db: DatabaseManager
+        page_ids: Liste des IDs de pages
+        country: Code pays à ajouter
+
+    Returns:
+        Nombre de pages mises à jour
+    """
+    if not country or not page_ids:
+        return 0
+
+    country = country.upper().strip()
+    updated = 0
+
+    with db.get_session() as session:
+        pages = session.query(PageRecherche).filter(
+            PageRecherche.page_id.in_(page_ids)
+        ).all()
+
+        for page in pages:
+            existing_countries = []
+            if page.pays:
+                existing_countries = [c.strip() for c in page.pays.split(",") if c.strip()]
+
+            if country not in existing_countries:
+                existing_countries.append(country)
+                page.pays = ",".join(existing_countries)
+                updated += 1
+
+    return updated
+
+
+def get_all_countries(db: DatabaseManager) -> List[str]:
+    """
+    Récupère tous les pays uniques présents dans la base.
+
+    Returns:
+        Liste de codes pays triés (ex: ["DE", "ES", "FR"])
+    """
+    with db.get_session() as session:
+        pages = session.query(PageRecherche.pays).filter(
+            PageRecherche.pays != None,
+            PageRecherche.pays != ""
+        ).distinct().all()
+
+        all_countries = set()
+        for (pays_str,) in pages:
+            if pays_str:
+                for c in pays_str.split(","):
+                    c = c.strip().upper()
+                    if c:
+                        all_countries.add(c)
+
+        return sorted(list(all_countries))
+
+
+def get_all_subcategories(db: DatabaseManager, category: str = None) -> List[str]:
+    """
+    Récupère toutes les sous-catégories de la taxonomie.
+
+    Args:
+        db: DatabaseManager
+        category: Filtrer par catégorie parente (optionnel)
+
+    Returns:
+        Liste de sous-catégories triées
+    """
+    with db.get_session() as session:
+        query = session.query(ClassificationTaxonomy.subcategory).filter(
+            ClassificationTaxonomy.is_active == True
+        )
+
+        if category:
+            query = query.filter(ClassificationTaxonomy.category == category)
+
+        results = query.distinct().order_by(ClassificationTaxonomy.subcategory).all()
+        return [r[0] for r in results]
 
 
 def get_cached_pages_info(
@@ -1633,6 +1869,182 @@ def get_winning_ads(
             }
             for e in entries
         ]
+
+
+def get_winning_ads_filtered(
+    db: DatabaseManager,
+    page_id: str = None,
+    limit: int = 100,
+    days: int = None,
+    thematique: str = None,
+    subcategory: str = None,
+    pays: str = None
+) -> List[Dict]:
+    """
+    Récupère les winning ads avec filtres de classification.
+
+    Args:
+        db: Instance DatabaseManager
+        page_id: Filtrer par page (optionnel)
+        limit: Nombre max de résultats
+        days: Filtrer par période en jours (optionnel)
+        thematique: Filtrer par catégorie de la page
+        subcategory: Filtrer par sous-catégorie de la page
+        pays: Filtrer par pays de la page
+
+    Returns:
+        Liste des winning ads filtrées
+    """
+    from datetime import timedelta
+
+    with db.get_session() as session:
+        # Si des filtres de classification sont actifs, joindre avec PageRecherche
+        if thematique or subcategory or pays:
+            query = session.query(WinningAds).join(
+                PageRecherche,
+                WinningAds.page_id == PageRecherche.page_id
+            )
+
+            if thematique:
+                query = query.filter(PageRecherche.thematique == thematique)
+            if subcategory:
+                query = query.filter(PageRecherche.subcategory == subcategory)
+            if pays:
+                query = query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+        else:
+            query = session.query(WinningAds)
+
+        query = query.order_by(
+            WinningAds.date_scan.desc(),
+            WinningAds.eu_total_reach.desc()
+        )
+
+        if page_id:
+            query = query.filter(WinningAds.page_id == page_id)
+
+        if days:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            query = query.filter(WinningAds.date_scan >= cutoff)
+
+        entries = query.limit(limit).all()
+
+        return [
+            {
+                "ad_id": e.ad_id,
+                "page_id": e.page_id,
+                "page_name": e.page_name,
+                "ad_creation_time": e.ad_creation_time,
+                "ad_age_days": e.ad_age_days,
+                "eu_total_reach": e.eu_total_reach,
+                "matched_criteria": e.matched_criteria,
+                "ad_creative_bodies": e.ad_creative_bodies,
+                "ad_creative_link_captions": e.ad_creative_link_captions,
+                "ad_creative_link_titles": e.ad_creative_link_titles,
+                "ad_snapshot_url": e.ad_snapshot_url,
+                "lien_site": e.lien_site,
+                "date_scan": e.date_scan
+            }
+            for e in entries
+        ]
+
+
+def get_winning_ads_stats_filtered(
+    db: DatabaseManager,
+    days: int = 30,
+    thematique: str = None,
+    subcategory: str = None,
+    pays: str = None
+) -> Dict:
+    """
+    Récupère les statistiques des winning ads avec filtres.
+
+    Args:
+        db: DatabaseManager
+        days: Période en jours
+        thematique: Filtrer par catégorie
+        subcategory: Filtrer par sous-catégorie
+        pays: Filtrer par pays
+
+    Returns:
+        Dict avec les statistiques
+    """
+    from sqlalchemy import func
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    with db.get_session() as session:
+        # Base query avec ou sans jointure
+        if thematique or subcategory or pays:
+            base_query = session.query(WinningAds).join(
+                PageRecherche,
+                WinningAds.page_id == PageRecherche.page_id
+            ).filter(WinningAds.date_scan >= cutoff)
+
+            if thematique:
+                base_query = base_query.filter(PageRecherche.thematique == thematique)
+            if subcategory:
+                base_query = base_query.filter(PageRecherche.subcategory == subcategory)
+            if pays:
+                base_query = base_query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+
+            total = base_query.count()
+
+            # Unique pages
+            unique_pages_count = session.query(
+                func.count(func.distinct(WinningAds.page_id))
+            ).join(
+                PageRecherche,
+                WinningAds.page_id == PageRecherche.page_id
+            ).filter(WinningAds.date_scan >= cutoff)
+
+            if thematique:
+                unique_pages_count = unique_pages_count.filter(PageRecherche.thematique == thematique)
+            if subcategory:
+                unique_pages_count = unique_pages_count.filter(PageRecherche.subcategory == subcategory)
+            if pays:
+                unique_pages_count = unique_pages_count.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+
+            unique_pages_count = unique_pages_count.scalar() or 0
+
+            # Average reach
+            avg_reach = session.query(
+                func.avg(WinningAds.eu_total_reach)
+            ).join(
+                PageRecherche,
+                WinningAds.page_id == PageRecherche.page_id
+            ).filter(WinningAds.date_scan >= cutoff)
+
+            if thematique:
+                avg_reach = avg_reach.filter(PageRecherche.thematique == thematique)
+            if subcategory:
+                avg_reach = avg_reach.filter(PageRecherche.subcategory == subcategory)
+            if pays:
+                avg_reach = avg_reach.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+
+            avg_reach = avg_reach.scalar() or 0
+        else:
+            # Sans filtres - utiliser la requête simple
+            total = session.query(WinningAds).filter(
+                WinningAds.date_scan >= cutoff
+            ).count()
+
+            unique_pages_count = session.query(
+                func.count(func.distinct(WinningAds.page_id))
+            ).filter(
+                WinningAds.date_scan >= cutoff
+            ).scalar() or 0
+
+            avg_reach = session.query(
+                func.avg(WinningAds.eu_total_reach)
+            ).filter(
+                WinningAds.date_scan >= cutoff
+            ).scalar() or 0
+
+        return {
+            "total": total,
+            "unique_pages": unique_pages_count,
+            "avg_reach": int(avg_reach)
+        }
 
 
 @cached(ttl=30, key_prefix="winning_stats_")

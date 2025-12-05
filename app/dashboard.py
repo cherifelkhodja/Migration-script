@@ -41,10 +41,11 @@ from app.web_analyzer import analyze_website_complete
 from app.utils import load_blacklist, is_blacklisted
 from app.database import (
     DatabaseManager, save_pages_recherche, save_suivi_page,
-    save_ads_recherche, get_suivi_stats, search_pages, get_suivi_history,
+    save_ads_recherche, get_suivi_stats, get_suivi_stats_filtered, search_pages, get_suivi_history,
     get_evolution_stats, get_page_evolution_history, get_etat_from_ads_count,
     add_to_blacklist, remove_from_blacklist, get_blacklist, get_blacklist_ids,
     is_winning_ad, save_winning_ads, get_winning_ads, get_winning_ads_stats,
+    get_winning_ads_filtered, get_winning_ads_stats_filtered,
     get_all_pages, get_winning_ads_by_page, get_cached_pages_info, get_dashboard_trends,
     # Tags
     get_all_tags, create_tag, delete_tag, add_tag_to_page, remove_tag_from_page,
@@ -64,7 +65,9 @@ from app.database import (
     # Settings
     get_setting, set_setting, get_all_settings,
     # Bulk actions
-    bulk_add_to_blacklist, bulk_add_to_collection, bulk_add_tag, bulk_add_to_favorites
+    bulk_add_to_blacklist, bulk_add_to_collection, bulk_add_tag, bulk_add_to_favorites,
+    # Classification & Filtering
+    get_taxonomy_categories, get_all_subcategories, get_all_countries
 )
 
 
@@ -366,6 +369,157 @@ def render_search_history_selector(key_prefix: str = ""):
         return history[idx]
 
     return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMPOSANT FILTRES RÉUTILISABLE (Thématique, Sous-thématique, Pays)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def render_classification_filters(
+    db,
+    key_prefix: str = "",
+    show_thematique: bool = True,
+    show_subcategory: bool = True,
+    show_pays: bool = True,
+    columns: int = 3
+) -> dict:
+    """
+    Affiche les filtres de classification réutilisables.
+
+    Args:
+        db: DatabaseManager
+        key_prefix: Préfixe pour les clés Streamlit (éviter conflits)
+        show_thematique: Afficher le filtre thématique
+        show_subcategory: Afficher le filtre sous-thématique
+        show_pays: Afficher le filtre pays
+        columns: Nombre de colonnes pour l'affichage
+
+    Returns:
+        Dict avec les valeurs sélectionnées:
+        {
+            "thematique": str or None,
+            "subcategory": str or None,
+            "pays": str or None
+        }
+    """
+    result = {
+        "thematique": None,
+        "subcategory": None,
+        "pays": None
+    }
+
+    # Déterminer les colonnes actives
+    active_filters = []
+    if show_thematique:
+        active_filters.append("thematique")
+    if show_subcategory:
+        active_filters.append("subcategory")
+    if show_pays:
+        active_filters.append("pays")
+
+    if not active_filters:
+        return result
+
+    # Créer les colonnes
+    cols = st.columns(min(len(active_filters), columns))
+    col_idx = 0
+
+    # Récupérer les options
+    categories = get_taxonomy_categories(db) if show_thematique else []
+    countries = get_all_countries(db) if show_pays else []
+
+    # Filtre Thématique (catégorie principale)
+    if show_thematique:
+        with cols[col_idx % len(cols)]:
+            thematique_options = ["Toutes"] + categories
+            selected_thematique = st.selectbox(
+                "🏷️ Thématique",
+                thematique_options,
+                index=0,
+                key=f"{key_prefix}_thematique"
+            )
+            if selected_thematique != "Toutes":
+                result["thematique"] = selected_thematique
+        col_idx += 1
+
+    # Filtre Sous-thématique
+    if show_subcategory:
+        with cols[col_idx % len(cols)]:
+            # Les sous-catégories dépendent de la thématique sélectionnée
+            if result["thematique"]:
+                subcategories = get_all_subcategories(db, category=result["thematique"])
+            else:
+                subcategories = get_all_subcategories(db)
+
+            subcategory_options = ["Toutes"] + subcategories
+            selected_subcategory = st.selectbox(
+                "📂 Sous-thématique",
+                subcategory_options,
+                index=0,
+                key=f"{key_prefix}_subcategory"
+            )
+            if selected_subcategory != "Toutes":
+                result["subcategory"] = selected_subcategory
+        col_idx += 1
+
+    # Filtre Pays
+    if show_pays:
+        with cols[col_idx % len(cols)]:
+            # Noms lisibles pour les pays
+            country_names = {
+                "FR": "🇫🇷 France",
+                "DE": "🇩🇪 Allemagne",
+                "ES": "🇪🇸 Espagne",
+                "IT": "🇮🇹 Italie",
+                "GB": "🇬🇧 Royaume-Uni",
+                "US": "🇺🇸 États-Unis",
+                "BE": "🇧🇪 Belgique",
+                "CH": "🇨🇭 Suisse",
+                "NL": "🇳🇱 Pays-Bas",
+                "PT": "🇵🇹 Portugal",
+                "AT": "🇦🇹 Autriche",
+                "CA": "🇨🇦 Canada",
+                "AU": "🇦🇺 Australie",
+            }
+            pays_display = ["Tous"] + [country_names.get(c, c) for c in countries]
+            pays_values = [None] + countries
+
+            selected_pays_idx = st.selectbox(
+                "🌍 Pays",
+                range(len(pays_display)),
+                format_func=lambda i: pays_display[i],
+                index=0,
+                key=f"{key_prefix}_pays"
+            )
+            if selected_pays_idx > 0:
+                result["pays"] = pays_values[selected_pays_idx]
+
+    return result
+
+
+def apply_classification_filters(query, filters: dict, model_class):
+    """
+    Applique les filtres de classification à une requête SQLAlchemy.
+
+    Args:
+        query: Requête SQLAlchemy
+        filters: Dict retourné par render_classification_filters
+        model_class: Classe du modèle (PageRecherche)
+
+    Returns:
+        Requête filtrée
+    """
+    if filters.get("thematique"):
+        query = query.filter(model_class.thematique == filters["thematique"])
+
+    if filters.get("subcategory"):
+        query = query.filter(model_class.subcategory == filters["subcategory"])
+
+    if filters.get("pays"):
+        # Le champ pays est multi-valeurs "FR,DE,ES"
+        query = query.filter(model_class.pays.ilike(f"%{filters['pays']}%"))
+
+    return query
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -883,9 +1037,20 @@ def detect_trends(db: DatabaseManager, days: int = 7) -> dict:
     }
 
 
-def generate_alerts(db: DatabaseManager) -> list:
+def generate_alerts(
+    db: DatabaseManager,
+    thematique: str = None,
+    subcategory: str = None,
+    pays: str = None
+) -> list:
     """
     Génère des alertes basées sur les données
+
+    Args:
+        db: DatabaseManager
+        thematique: Filtre par catégorie
+        subcategory: Filtre par sous-catégorie
+        pays: Filtre par pays
 
     Returns:
         Liste d'alertes avec type, message, data
@@ -894,7 +1059,10 @@ def generate_alerts(db: DatabaseManager) -> list:
 
     try:
         # Alerte: Nouvelles pages XXL
-        xxl_pages = search_pages(db, etat="XXL", limit=50)
+        xxl_pages = search_pages(
+            db, etat="XXL", limit=50,
+            thematique=thematique, subcategory=subcategory, pays=pays
+        )
         recent_xxl = [p for p in xxl_pages if p.get("dernier_scan") and
                       (datetime.utcnow() - p["dernier_scan"]).days <= 1]
         if recent_xxl:
@@ -908,6 +1076,18 @@ def generate_alerts(db: DatabaseManager) -> list:
 
         # Alerte: Tendances à la hausse
         trends = detect_trends(db, days=7)
+        # Filter trends if classification filters are active
+        if thematique or subcategory or pays:
+            # Get page IDs matching the filter
+            filtered_pages = search_pages(
+                db, limit=1000,
+                thematique=thematique, subcategory=subcategory, pays=pays
+            )
+            filtered_ids = {p["page_id"] for p in filtered_pages}
+
+            trends["rising"] = [t for t in trends.get("rising", []) if t.get("page_id") in filtered_ids]
+            trends["falling"] = [t for t in trends.get("falling", []) if t.get("page_id") in filtered_ids]
+
         if trends["rising"]:
             alerts.append({
                 "type": "info",
@@ -927,8 +1107,15 @@ def generate_alerts(db: DatabaseManager) -> list:
                 "data": trends["falling"][:5]
             })
 
-        # Alerte: Winning ads récentes
-        winning_stats = get_winning_ads_stats(db, days=1)
+        # Alerte: Winning ads récentes (avec filtres si actifs)
+        if thematique or subcategory or pays:
+            winning_stats = get_winning_ads_stats_filtered(
+                db, days=1,
+                thematique=thematique, subcategory=subcategory, pays=pays
+            )
+        else:
+            winning_stats = get_winning_ads_stats(db, days=1)
+
         if winning_stats.get("total", 0) > 0:
             alerts.append({
                 "type": "success",
@@ -1460,8 +1647,36 @@ def render_dashboard():
         st.warning("Base de données non connectée")
         return
 
+    # Filtres de classification
+    st.markdown("#### 🔍 Filtres")
+    filters = render_classification_filters(db, key_prefix="dashboard", columns=3)
+
+    # Afficher les filtres actifs
+    active_filters = []
+    if filters.get("thematique"):
+        active_filters.append(f"🏷️ {filters['thematique']}")
+    if filters.get("subcategory"):
+        active_filters.append(f"📂 {filters['subcategory']}")
+    if filters.get("pays"):
+        active_filters.append(f"🌍 {filters['pays']}")
+
+    if active_filters:
+        st.caption(f"Filtres actifs: {' • '.join(active_filters)}")
+
+    st.markdown("---")
+
     try:
-        stats = get_suivi_stats(db)
+        # Utiliser les stats filtrées si des filtres sont actifs
+        if any(filters.values()):
+            stats = get_suivi_stats_filtered(
+                db,
+                thematique=filters.get("thematique"),
+                subcategory=filters.get("subcategory"),
+                pays=filters.get("pays")
+            )
+        else:
+            stats = get_suivi_stats(db)
+
         winning_stats = get_winning_ads_stats(db, days=7)
         winning_by_page = get_winning_ads_by_page(db, days=30)
 
@@ -2841,7 +3056,10 @@ def render_pages_shops():
                 break
 
     # ═══ FILTRES ═══
-    col1, col2, col3, col4, col5 = st.columns(5)
+    st.markdown("#### 🔍 Filtres")
+
+    # Ligne 1: Recherche, CMS, État
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         default_search = loaded_filter.get("search_term", "") if loaded_filter else ""
@@ -2859,13 +3077,42 @@ def render_pages_shops():
         etat_idx = etat_options.index(default_etat) if default_etat in etat_options else 0
         etat_filter = st.selectbox("État", etat_options, index=etat_idx)
 
+    # Ligne 2: Classification (Thématique, Sous-thématique, Pays, Limite)
+    col4, col5, col6, col7 = st.columns(4)
+
     with col4:
         # Filtre par thématique/catégorie
-        from app.database import get_taxonomy_categories
         thematique_options = ["Toutes", "Non classifiées"] + get_taxonomy_categories(db)
-        thematique_filter = st.selectbox("🏷️ Catégorie", thematique_options, index=0)
+        thematique_filter = st.selectbox("🏷️ Thématique", thematique_options, index=0, key="pages_thematique")
 
     with col5:
+        # Filtre par sous-thématique (dépend de thématique)
+        if thematique_filter not in ["Toutes", "Non classifiées"]:
+            subcategory_options = ["Toutes"] + get_all_subcategories(db, category=thematique_filter)
+        else:
+            subcategory_options = ["Toutes"] + get_all_subcategories(db)
+        subcategory_filter = st.selectbox("📂 Sous-thématique", subcategory_options, index=0, key="pages_subcategory")
+
+    with col6:
+        # Filtre par pays
+        countries = get_all_countries(db)
+        country_names = {
+            "FR": "🇫🇷 France", "DE": "🇩🇪 Allemagne", "ES": "🇪🇸 Espagne",
+            "IT": "🇮🇹 Italie", "GB": "🇬🇧 UK", "US": "🇺🇸 USA",
+            "BE": "🇧🇪 Belgique", "CH": "🇨🇭 Suisse", "NL": "🇳🇱 Pays-Bas",
+        }
+        pays_display = ["Tous"] + [country_names.get(c, c) for c in countries]
+        pays_values = [None] + countries
+        pays_idx = st.selectbox(
+            "🌍 Pays",
+            range(len(pays_display)),
+            format_func=lambda i: pays_display[i],
+            index=0,
+            key="pages_pays"
+        )
+        pays_filter = pays_values[pays_idx]
+
+    with col7:
         limit = st.selectbox("Limite", [50, 100, 200, 500], index=1)
 
     # Sauvegarder le filtre actuel
@@ -2910,12 +3157,19 @@ def render_pages_shops():
         elif thematique_filter != "Toutes":
             thematique_param = thematique_filter
 
+        # Déterminer le filtre sous-thématique
+        subcategory_param = None
+        if subcategory_filter != "Toutes":
+            subcategory_param = subcategory_filter
+
         results = search_pages(
             db,
             cms=cms_filter if cms_filter != "Tous" else None,
             etat=etat_filter if etat_filter != "Tous" else None,
             search_term=search_term if search_term else None,
             thematique=thematique_param,
+            subcategory=subcategory_param,
+            pays=pays_filter,
             limit=limit
         )
 
@@ -3257,15 +3511,43 @@ def render_watchlists():
         st.warning("Base de données non connectée")
         return
 
+    # Filtres de classification
+    st.markdown("#### 🔍 Filtres")
+    filters = render_classification_filters(db, key_prefix="watchlists", columns=3)
+
+    # Afficher les filtres actifs
+    active_filters = []
+    if filters.get("thematique"):
+        active_filters.append(f"🏷️ {filters['thematique']}")
+    if filters.get("subcategory"):
+        active_filters.append(f"📂 {filters['subcategory']}")
+    if filters.get("pays"):
+        active_filters.append(f"🌍 {filters['pays']}")
+
+    if active_filters:
+        st.caption(f"Filtres actifs: {' • '.join(active_filters)}")
+
+    st.markdown("---")
+
     # Suivi des pages performantes
     st.subheader("🌟 Top Performers (≥80 ads)")
     try:
-        top_pages = search_pages(db, etat="XXL", limit=20)
-        top_pages.extend(search_pages(db, etat="XL", limit=20))
+        top_pages = search_pages(
+            db, etat="XXL", limit=20,
+            thematique=filters.get("thematique"),
+            subcategory=filters.get("subcategory"),
+            pays=filters.get("pays")
+        )
+        top_pages.extend(search_pages(
+            db, etat="XL", limit=20,
+            thematique=filters.get("thematique"),
+            subcategory=filters.get("subcategory"),
+            pays=filters.get("pays")
+        ))
 
         if top_pages:
             df = pd.DataFrame(top_pages)
-            cols = ["page_name", "lien_site", "cms", "etat", "nombre_ads_active"]
+            cols = ["page_name", "lien_site", "cms", "etat", "nombre_ads_active", "subcategory", "pays"]
             df_display = df[[c for c in cols if c in df.columns]].head(20)
             st.dataframe(df_display, use_container_width=True, hide_index=True)
         else:
@@ -3278,10 +3560,15 @@ def render_watchlists():
     # Shopify uniquement
     st.subheader("🛒 Shopify Stores")
     try:
-        shopify_pages = search_pages(db, cms="Shopify", limit=30)
+        shopify_pages = search_pages(
+            db, cms="Shopify", limit=30,
+            thematique=filters.get("thematique"),
+            subcategory=filters.get("subcategory"),
+            pays=filters.get("pays")
+        )
         if shopify_pages:
             df = pd.DataFrame(shopify_pages)
-            cols = ["page_name", "lien_site", "etat", "nombre_ads_active", "nombre_produits"]
+            cols = ["page_name", "lien_site", "etat", "nombre_ads_active", "nombre_produits", "subcategory", "pays"]
             df_display = df[[c for c in cols if c in df.columns]]
             st.dataframe(df_display, use_container_width=True, hide_index=True)
         else:
@@ -3304,8 +3591,31 @@ def render_alerts():
         st.warning("Base de données non connectée")
         return
 
+    # Filtres de classification
+    st.markdown("#### 🔍 Filtres")
+    filters = render_classification_filters(db, key_prefix="alerts", columns=3)
+
+    # Afficher les filtres actifs
+    active_filters = []
+    if filters.get("thematique"):
+        active_filters.append(f"🏷️ {filters['thematique']}")
+    if filters.get("subcategory"):
+        active_filters.append(f"📂 {filters['subcategory']}")
+    if filters.get("pays"):
+        active_filters.append(f"🌍 {filters['pays']}")
+
+    if active_filters:
+        st.caption(f"Filtres actifs: {' • '.join(active_filters)}")
+
+    st.markdown("---")
+
     try:
-        alerts = generate_alerts(db)
+        alerts = generate_alerts(
+            db,
+            thematique=filters.get("thematique"),
+            subcategory=filters.get("subcategory"),
+            pays=filters.get("pays")
+        )
 
         if alerts:
             st.success(f"📬 {len(alerts)} alerte(s) active(s)")
@@ -3689,7 +3999,25 @@ def render_winning_ads():
         Plus une annonce est récente avec un reach élevé, plus elle est performante.
         """)
 
-    # Filtres
+    # Filtres de classification
+    st.markdown("#### 🔍 Filtres")
+    class_filters = render_classification_filters(db, key_prefix="winning", columns=3)
+
+    # Afficher les filtres actifs
+    active_filters = []
+    if class_filters.get("thematique"):
+        active_filters.append(f"🏷️ {class_filters['thematique']}")
+    if class_filters.get("subcategory"):
+        active_filters.append(f"📂 {class_filters['subcategory']}")
+    if class_filters.get("pays"):
+        active_filters.append(f"🌍 {class_filters['pays']}")
+
+    if active_filters:
+        st.caption(f"Filtres actifs: {' • '.join(active_filters)}")
+
+    st.markdown("---")
+
+    # Filtres existants
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
@@ -3725,8 +4053,16 @@ def render_winning_ads():
         )
 
     try:
-        # Statistiques globales
-        stats = get_winning_ads_stats(db, days=period)
+        # Statistiques globales (avec filtres si actifs)
+        if any(class_filters.values()):
+            stats = get_winning_ads_stats_filtered(
+                db, days=period,
+                thematique=class_filters.get("thematique"),
+                subcategory=class_filters.get("subcategory"),
+                pays=class_filters.get("pays")
+            )
+        else:
+            stats = get_winning_ads_stats(db, days=period)
 
         st.markdown("---")
         st.subheader("📊 Statistiques")
@@ -3799,7 +4135,17 @@ def render_winning_ads():
 
         # limit=0 signifie "Toutes" -> on utilise une très grande limite
         actual_limit = limit if limit > 0 else 100000
-        winning_ads = get_winning_ads(db, limit=actual_limit, days=period)
+
+        # Utiliser la fonction filtrée si des filtres sont actifs
+        if any(class_filters.values()):
+            winning_ads = get_winning_ads_filtered(
+                db, limit=actual_limit, days=period,
+                thematique=class_filters.get("thematique"),
+                subcategory=class_filters.get("subcategory"),
+                pays=class_filters.get("pays")
+            )
+        else:
+            winning_ads = get_winning_ads(db, limit=actual_limit, days=period)
 
         if winning_ads:
             # Header avec export personnalisé

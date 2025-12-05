@@ -26,6 +26,7 @@ MAX_CONTENT_LENGTH = 2000  # Max caractères par site
 BATCH_SIZE = 20  # Nombre de sites par requête Gemini
 REQUEST_TIMEOUT = 30  # Timeout pour le scraping
 GEMINI_TIMEOUT = 60  # Timeout pour Gemini
+RATE_LIMIT_DELAY = 4.5  # Délai entre appels Gemini (15 RPM max = 4s minimum, 4.5s pour sécurité)
 
 
 @dataclass
@@ -320,7 +321,7 @@ class GeminiClassifier:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY non configurée")
 
-        self.model = "gemini-1.5-flash"
+        self.model = "gemini-2.5-flash-lite"
         self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
 
     def _build_system_prompt(self, taxonomy_text: str) -> str:
@@ -585,6 +586,11 @@ async def classify_pages_async(
 
         batch_results = await classifier.classify_batch_async(batch, taxonomy_text)
         all_results.extend(batch_results)
+
+        # Rate limiting: attendre 4.5s entre chaque appel Gemini (15 RPM max)
+        if i + batch_size < len(valid_contents):
+            logger.info(f"Rate limit: attente de {RATE_LIMIT_DELAY}s avant le prochain batch...")
+            await asyncio.sleep(RATE_LIMIT_DELAY)
 
     # Ajouter les erreurs de scraping comme résultats par défaut
     scraped_ids = {c.page_id for c in valid_contents}
