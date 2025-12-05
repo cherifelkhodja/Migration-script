@@ -5736,7 +5736,7 @@ def render_background_searches():
 
             col1, col2, col3 = st.columns([4, 1, 1])
             with col1:
-                st.write(f"**{search.created_at:%d/%m %H:%M}** - Phase {search.current_phase}/8")
+                st.write(f"**{search.created_at:%d/%m %H:%M}** - Phase {search.current_phase}/9")
                 st.caption(f"Mots-clés: {keywords_display}")
             with col2:
                 if st.button("🔄 Reprendre", key=f"resume_{search.id}"):
@@ -5765,7 +5765,7 @@ def render_background_searches():
                 with col1:
                     # Status badge
                     if search["status"] == "running":
-                        st.markdown(f"**🟢 En cours** - Phase {search['phase']}/8: {search.get('phase_name', '')}")
+                        st.markdown(f"**🟢 En cours** - Phase {search['phase']}/9: {search.get('phase_name', '')}")
                         st.progress(search["progress"] / 100)
                         st.caption(search.get("message", ""))
                     else:

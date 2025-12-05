@@ -34,12 +34,12 @@ class BackgroundProgressTracker:
         self.db = db
         self.search_id = search_id
         self.current_phase = 0
-        self.total_phases = 8
+        self.total_phases = 9
         self.phases_data = []
         self.phase_start_time = None
         self.metrics = {}
 
-    def start_phase(self, phase_num: int, phase_name: str, total_phases: int = 8):
+    def start_phase(self, phase_num: int, phase_name: str, total_phases: int = 9):
         """Démarre une nouvelle phase"""
         self.current_phase = phase_num
         self.total_phases = total_phases
@@ -226,7 +226,7 @@ def execute_background_search(
     print(f"[Search #{search_id}] {len(blacklist_ids)} pages en blacklist")
 
     # ═══ PHASE 1: Recherche par mots-clés ═══
-    tracker.start_phase(1, "Recherche par mots-clés", total_phases=8)
+    tracker.start_phase(1, "Recherche par mots-clés", total_phases=9)
     all_ads = []
     seen_ad_ids = set()
 
@@ -256,7 +256,7 @@ def execute_background_search(
     tracker.update_metric("total_ads_found", len(all_ads))
 
     # ═══ PHASE 2: Regroupement par page ═══
-    tracker.start_phase(2, "Regroupement par page", total_phases=8)
+    tracker.start_phase(2, "Regroupement par page", total_phases=9)
     pages = {}
     page_ads = defaultdict(list)
     name_counter = defaultdict(Counter)
@@ -323,7 +323,7 @@ def execute_background_search(
         return {"search_log_id": log_id, "status": "no_results", "pages": 0}
 
     # ═══ PHASE 3: Extraction sites web (avec cache) ═══
-    tracker.start_phase(3, "Extraction sites web", total_phases=8)
+    tracker.start_phase(3, "Extraction sites web", total_phases=9)
 
     cached_pages = get_cached_pages_info(db, list(pages_filtered.keys()), cache_days=4)
 
@@ -364,7 +364,7 @@ def execute_background_search(
     tracker.complete_phase(f"{sites_found} sites ({cached_sites} en cache)", stats=phase3_stats)
 
     # ═══ PHASE 4: Détection CMS (parallèle) ═══
-    tracker.start_phase(4, "Détection CMS", total_phases=8)
+    tracker.start_phase(4, "Détection CMS", total_phases=9)
     pages_with_sites = {pid: data for pid, data in pages_filtered.items() if data["website"]}
 
     pages_need_cms = []
@@ -425,7 +425,7 @@ def execute_background_search(
     tracker.complete_phase(f"{len(pages_with_cms)} pages avec CMS sélectionnés", stats=phase4_stats)
 
     # ═══ PHASE 5: Comptage des annonces ═══
-    tracker.start_phase(5, "Comptage des annonces", total_phases=8)
+    tracker.start_phase(5, "Comptage des annonces", total_phases=9)
 
     page_ids_list = list(pages_with_cms.keys())
     batch_size = 10
@@ -491,7 +491,7 @@ def execute_background_search(
         return {"search_log_id": log_id, "status": "no_results", "pages": 0}
 
     # ═══ PHASE 6: Analyse sites web (parallèle) ═══
-    tracker.start_phase(6, "Analyse sites web", total_phases=8)
+    tracker.start_phase(6, "Analyse sites web", total_phases=9)
     web_results = {}
 
     pages_need_analysis = []
@@ -542,7 +542,7 @@ def execute_background_search(
     tracker.complete_phase(f"{len(web_results)} sites analysés", stats=phase6_stats)
 
     # ═══ PHASE 7: Détection des Winning Ads ═══
-    tracker.start_phase(7, "Détection Winning Ads", total_phases=8)
+    tracker.start_phase(7, "Détection Winning Ads", total_phases=9)
     scan_date = datetime.now()
     winning_ads_data = []
     winning_ads_by_page = {}
@@ -584,7 +584,7 @@ def execute_background_search(
     tracker.update_metric("winning_ads_count", len(winning_ads_data))
 
     # ═══ PHASE 8: Sauvegarde ═══
-    tracker.start_phase(8, "Sauvegarde", total_phases=8)
+    tracker.start_phase(8, "Sauvegarde", total_phases=9)
 
     pages_saved = 0
     suivi_saved = 0
@@ -618,6 +618,53 @@ def execute_background_search(
         update_search_log(db, log_id, status="failed", error_message=str(e))
         raise
 
+    # ═══ PHASE 9: Classification automatique (Gemini) ═══
+    classified_count = 0
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+
+    if gemini_key and pages_saved > 0:
+        tracker.start_phase(9, "Classification automatique (Gemini)", total_phases=9)
+
+        try:
+            from app.gemini_classifier import classify_and_save
+            from app.database import build_taxonomy_prompt, init_default_taxonomy
+
+            # Initialiser la taxonomie si nécessaire
+            init_default_taxonomy(db)
+
+            # Préparer les pages à classifier
+            pages_to_classify = [
+                {"page_id": pid, "url": data.get("website", "")}
+                for pid, data in pages_final.items()
+                if data.get("website")
+            ]
+
+            if pages_to_classify:
+                tracker.update_step("Classification", 1, 1, f"{len(pages_to_classify)} pages")
+
+                # Classifier
+                result = classify_and_save(db, pages=pages_to_classify)
+
+                classified_count = result.get("classified", 0)
+                errors_count = result.get("errors", 0)
+
+                phase9_stats = {
+                    "Pages à classifier": len(pages_to_classify),
+                    "Pages classifiées": classified_count,
+                    "Erreurs": errors_count,
+                }
+                tracker.complete_phase(f"{classified_count} pages classifiées", stats=phase9_stats)
+                print(f"[Search #{search_id}] Classification: {classified_count}/{len(pages_to_classify)} pages")
+            else:
+                tracker.complete_phase("Aucune page avec URL à classifier", stats={"Pages": 0})
+
+        except Exception as e:
+            print(f"[Search #{search_id}] Erreur classification: {e}")
+            tracker.complete_phase(f"Erreur: {str(e)[:50]}", stats={"Erreur": str(e)[:100]})
+    elif not gemini_key:
+        # Pas de clé Gemini configurée - on skip silencieusement
+        print(f"[Search #{search_id}] Classification skippée (pas de clé GEMINI_API_KEY)")
+
     # Finaliser le log
     api_metrics = api_tracker.get_api_metrics_for_log()
     update_search_log(
@@ -633,7 +680,7 @@ def execute_background_search(
         **api_metrics
     )
 
-    print(f"[Search #{search_id}] Terminée: {pages_saved} pages, {ads_saved} ads, {winning_saved} winning")
+    print(f"[Search #{search_id}] Terminée: {pages_saved} pages, {ads_saved} ads, {winning_saved} winning, {classified_count} classifiées")
 
     return {
         "search_log_id": log_id,
@@ -641,5 +688,6 @@ def execute_background_search(
         "pages": pages_saved,
         "ads": ads_saved,
         "winning": winning_saved,
+        "classified": classified_count,
         "phases_data": tracker.get_phases_data()
     }
