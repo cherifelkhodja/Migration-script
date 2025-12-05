@@ -174,12 +174,11 @@ def execute_background_search(
     from app.meta_api import MetaAdsClient, init_token_rotator, extract_currency_from_ads
     from app.shopify_detector import detect_cms_from_url
     from app.web_analyzer import analyze_website_complete
-    from app.winning_detector import is_winning_ad
     from app.database import (
         get_active_meta_tokens, get_blacklist_ids, get_cached_pages_info,
         create_search_log, update_search_log, save_pages_recherche,
         save_suivi_page, save_ads_recherche, save_winning_ads,
-        ensure_tables_exist
+        ensure_tables_exist, is_winning_ad
     )
     from app.api_tracker import APITracker, set_current_tracker
 
