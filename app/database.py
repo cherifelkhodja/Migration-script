@@ -695,6 +695,55 @@ def search_pages(
         ]
 
 
+def get_cached_pages_info(
+    db: DatabaseManager,
+    page_ids: List[str],
+    cache_days: int = 4
+) -> Dict[str, Dict]:
+    """
+    Récupère les infos en cache pour les pages récemment scannées.
+
+    Args:
+        db: Instance DatabaseManager
+        page_ids: Liste des page_ids à vérifier
+        cache_days: Nombre de jours avant expiration du cache
+
+    Returns:
+        Dict {page_id: {cms, lien_site, nombre_produits, dernier_scan, needs_rescan}}
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.utcnow() - timedelta(days=cache_days)
+
+    with db.get_session() as session:
+        pages = session.query(PageRecherche).filter(
+            PageRecherche.page_id.in_(page_ids)
+        ).all()
+
+        result = {}
+        for p in pages:
+            # Vérifier si le scan est encore valide
+            needs_rescan = True
+            if p.dernier_scan and p.dernier_scan > cutoff:
+                needs_rescan = False
+
+            result[str(p.page_id)] = {
+                "page_id": p.page_id,
+                "page_name": p.page_name,
+                "lien_site": p.lien_site,
+                "cms": p.cms,
+                "template": p.template,
+                "nombre_produits": p.nombre_produits,
+                "thematique": p.thematique,
+                "devise": p.devise,
+                "dernier_scan": p.dernier_scan,
+                "needs_rescan": needs_rescan,
+                "needs_cms_detection": not p.cms or p.cms in ("Unknown", "Inconnu", "")
+            }
+
+        return result
+
+
 def get_evolution_stats(
     db: DatabaseManager,
     period_days: int = 7

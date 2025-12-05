@@ -11,13 +11,13 @@ try:
     from app.config import (
         REQUEST_TIMEOUT, HEADERS, DEFAULT_PAYMENTS, TAXONOMY, KEYWORD_OVERRIDES,
         THEME_ASSET_CANDIDATES, REQUEST_SNIPPET, INLINE_NAME_PATTERNS,
-        ASSET_HEADER_PATTERNS, TIMEOUT_WEB
+        ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_random_headers
     )
 except ImportError:
     from config import (
         REQUEST_TIMEOUT, HEADERS, DEFAULT_PAYMENTS, TAXONOMY, KEYWORD_OVERRIDES,
         THEME_ASSET_CANDIDATES, REQUEST_SNIPPET, INLINE_NAME_PATTERNS,
-        ASSET_HEADER_PATTERNS, TIMEOUT_WEB
+        ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_random_headers
     )
 
 
@@ -27,9 +27,9 @@ def ensure_url(url: str) -> str:
 
 
 def get_web(url: str, timeout: int = REQUEST_TIMEOUT) -> Optional[requests.Response]:
-    """Requête HTTP avec gestion d'erreurs"""
+    """Requête HTTP avec gestion d'erreurs et User-Agent aléatoire"""
     try:
-        return requests.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
+        return requests.get(url, headers=get_random_headers(), timeout=timeout, allow_redirects=True)
     except:
         return None
 
@@ -63,9 +63,9 @@ def _origin(url: str) -> str:
 
 
 def _get_text(url: str) -> Optional[str]:
-    """Récupère le contenu texte d'une URL"""
+    """Récupère le contenu texte d'une URL avec User-Agent aléatoire"""
     try:
-        r = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT, allow_redirects=True)
+        r = requests.get(url, headers=get_random_headers(), timeout=REQUEST_TIMEOUT, allow_redirects=True)
         if r.status_code == 200 and r.text:
             return r.text
     except:

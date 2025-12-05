@@ -10,6 +10,7 @@ import os
 import sys
 import time
 from collections import defaultdict, Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -42,7 +43,7 @@ from app.database import (
     get_evolution_stats, get_page_evolution_history, get_etat_from_ads_count,
     add_to_blacklist, remove_from_blacklist, get_blacklist, get_blacklist_ids,
     is_winning_ad, save_winning_ads, get_winning_ads, get_winning_ads_stats,
-    get_all_pages, get_winning_ads_by_page,
+    get_all_pages, get_winning_ads_by_page, get_cached_pages_info,
     # Tags
     get_all_tags, create_tag, delete_tag, add_tag_to_page, remove_tag_from_page,
     get_page_tags, get_pages_by_tag,
@@ -1493,27 +1494,78 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
         st.warning("Aucune page trouvée avec assez d'ads")
         return
 
-    # ═══ PHASE 3: Extraction sites web ═══
-    tracker.start_phase(3, "🌐 Extraction des sites web", total_phases=8)
+    # ═══ PHASE 3: Vérification cache + Extraction sites web ═══
+    tracker.start_phase(3, "🌐 Extraction sites web (avec cache)", total_phases=8)
+
+    # Récupérer les infos en cache pour toutes les pages
+    cached_pages = {}
+    if db:
+        cached_pages = get_cached_pages_info(db, list(pages_filtered.keys()), cache_days=4)
+        cached_count = sum(1 for c in cached_pages.values() if not c.get("needs_rescan"))
+        if cached_count > 0:
+            st.info(f"💾 {cached_count} pages en cache (scan < 4 jours)")
+
+    # Extraire les URLs pour les pages non cachées ou sans site
     for i, (pid, data) in enumerate(pages_filtered.items()):
-        page_name = data.get("page_name", pid)[:30]
-        tracker.update_step("Extraction URL", i + 1, len(pages_filtered), f"Page: {page_name}")
-        data["website"] = extract_website_from_ads(page_ads.get(pid, []))
+        cached = cached_pages.get(str(pid), {})
+
+        # Utiliser le site en cache si disponible
+        if cached.get("lien_site") and not cached.get("needs_rescan"):
+            data["website"] = cached["lien_site"]
+            data["_from_cache"] = True
+        else:
+            data["website"] = extract_website_from_ads(page_ads.get(pid, []))
+            data["_from_cache"] = False
+
+        if i % 10 == 0:
+            tracker.update_step("Extraction URL", i + 1, len(pages_filtered))
 
     sites_found = sum(1 for d in pages_filtered.values() if d["website"])
-    tracker.complete_phase(f"{sites_found} sites extraits")
+    cached_sites = sum(1 for d in pages_filtered.values() if d.get("_from_cache"))
+    tracker.complete_phase(f"{sites_found} sites ({cached_sites} en cache)")
 
-    # ═══ PHASE 4: Détection CMS ═══
-    tracker.start_phase(4, "🔍 Détection CMS", total_phases=8)
+    # ═══ PHASE 4: Détection CMS (multithreaded + cache) ═══
+    tracker.start_phase(4, "🔍 Détection CMS (parallèle)", total_phases=8)
     pages_with_sites = {pid: data for pid, data in pages_filtered.items() if data["website"]}
 
-    for i, (pid, data) in enumerate(pages_with_sites.items()):
-        site_url = data["website"][:40]
-        tracker.update_step("Analyse CMS", i + 1, len(pages_with_sites), f"Site: {site_url}")
-        cms_result = detect_cms_from_url(data["website"])
-        data["cms"] = cms_result["cms"]
-        data["is_shopify"] = cms_result["is_shopify"]
-        time.sleep(0.1)
+    # Séparer les pages avec CMS connu vs à détecter
+    pages_need_cms = []
+    for pid, data in pages_with_sites.items():
+        cached = cached_pages.get(str(pid), {})
+        # Utiliser le CMS en cache si valide
+        if cached.get("cms") and cached["cms"] not in ("Unknown", "Inconnu", "") and not cached.get("needs_rescan"):
+            data["cms"] = cached["cms"]
+            data["is_shopify"] = cached["cms"] == "Shopify"
+            data["_cms_cached"] = True
+        else:
+            pages_need_cms.append((pid, data))
+            data["_cms_cached"] = False
+
+    cms_cached_count = len(pages_with_sites) - len(pages_need_cms)
+    st.info(f"🔍 {len(pages_need_cms)} sites à analyser ({cms_cached_count} CMS en cache)")
+
+    # Fonction pour détection CMS parallèle
+    def detect_cms_worker(pid_data):
+        pid, data = pid_data
+        try:
+            cms_result = detect_cms_from_url(data["website"])
+            return pid, cms_result
+        except Exception as e:
+            return pid, {"cms": "Unknown", "is_shopify": False}
+
+    # Multithreading pour la détection CMS (8 workers)
+    if pages_need_cms:
+        completed = 0
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(detect_cms_worker, item): item[0] for item in pages_need_cms}
+
+            for future in as_completed(futures):
+                pid, cms_result = future.result()
+                pages_with_sites[pid]["cms"] = cms_result["cms"]
+                pages_with_sites[pid]["is_shopify"] = cms_result.get("is_shopify", False)
+                completed += 1
+                if completed % 5 == 0:
+                    tracker.update_step("Analyse CMS", completed, len(pages_need_cms))
 
     # Filter by CMS
     def cms_matches(cms_name):
@@ -1566,21 +1618,57 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
         st.warning("Aucune page finale trouvée")
         return
 
-    # ═══ PHASE 6: Analyse des sites web ═══
-    tracker.start_phase(6, "🔬 Analyse des sites web", total_phases=8)
+    # ═══ PHASE 6: Analyse des sites web (multithreaded + cache) ═══
+    tracker.start_phase(6, "🔬 Analyse sites web (parallèle)", total_phases=8)
     web_results = {}
 
-    for i, (pid, data) in enumerate(pages_final.items()):
-        site_url = data.get("website", "")[:40]
-        tracker.update_step("Analyse web", i + 1, len(pages_final), f"Site: {site_url}")
-        if data["website"]:
-            result = analyze_website_complete(data["website"], countries[0])
-            web_results[pid] = result
-            if not data["currency"] and result.get("currency_from_site"):
-                data["currency"] = result["currency_from_site"]
-        time.sleep(0.2)
+    # Séparer les pages à analyser vs celles en cache
+    pages_need_analysis = []
+    for pid, data in pages_final.items():
+        cached = cached_pages.get(str(pid), {})
+        # Utiliser les infos en cache si le scan est récent
+        if not cached.get("needs_rescan") and cached.get("nombre_produits") is not None:
+            web_results[pid] = {
+                "product_count": cached.get("nombre_produits", 0),
+                "theme": cached.get("template", ""),
+                "category": cached.get("thematique", ""),
+                "currency_from_site": cached.get("devise", ""),
+                "_from_cache": True
+            }
+            if cached.get("devise") and not data.get("currency"):
+                data["currency"] = cached["devise"]
+        elif data.get("website"):
+            pages_need_analysis.append((pid, data))
 
-    tracker.complete_phase(f"{len(web_results)} sites analysés")
+    cached_analysis = len(web_results)
+    st.info(f"🔬 {len(pages_need_analysis)} sites à analyser ({cached_analysis} en cache)")
+
+    # Fonction worker pour analyse parallèle
+    def analyze_web_worker(pid_data):
+        pid, data = pid_data
+        try:
+            result = analyze_website_complete(data["website"], countries[0])
+            return pid, result
+        except Exception as e:
+            return pid, {"product_count": 0, "error": str(e)}
+
+    # Multithreading pour l'analyse web (8 workers)
+    if pages_need_analysis:
+        completed = 0
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(analyze_web_worker, item): item[0] for item in pages_need_analysis}
+
+            for future in as_completed(futures):
+                pid, result = future.result()
+                web_results[pid] = result
+                data = pages_final[pid]
+                if not data.get("currency") and result.get("currency_from_site"):
+                    data["currency"] = result["currency_from_site"]
+                completed += 1
+                if completed % 5 == 0:
+                    tracker.update_step("Analyse web", completed, len(pages_need_analysis))
+
+    tracker.complete_phase(f"{len(web_results)} sites analysés ({cached_analysis} cache)")
 
     # ═══ PHASE 7: Détection des Winning Ads ═══
     tracker.start_phase(7, "🏆 Détection des Winning Ads", total_phases=8)

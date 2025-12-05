@@ -9,9 +9,9 @@ from typing import Optional, Dict
 from urllib.parse import urlparse
 
 try:
-    from app.config import HEADERS, TIMEOUT_SHOPIFY_CHECK
+    from app.config import HEADERS, TIMEOUT_SHOPIFY_CHECK, get_random_headers
 except ImportError:
-    from config import HEADERS, TIMEOUT_SHOPIFY_CHECK
+    from config import HEADERS, TIMEOUT_SHOPIFY_CHECK, get_random_headers
 
 
 def detect_cms_from_url(url: str) -> Dict[str, any]:
@@ -45,7 +45,7 @@ def detect_cms_from_url(url: str) -> Dict[str, any]:
                 timeout = TIMEOUT_SHOPIFY_CHECK + (attempt * 5)
                 resp = requests.get(
                     url,
-                    headers=HEADERS,
+                    headers=get_random_headers(),
                     timeout=timeout,
                     allow_redirects=True
                 )
