@@ -27,29 +27,52 @@ class MetaAdsClient:
         self.access_token = access_token
 
     def _get_api(self, url: str, params: dict) -> dict:
-        """Appel API avec retry automatique"""
+        """Appel API avec retry automatique et gestion du rate limiting"""
         params = params.copy()
         params["access_token"] = self.access_token
 
-        for attempt in range(3):
+        max_retries = 5
+        for attempt in range(max_retries):
             try:
                 r = requests.get(url, params=params, timeout=TIMEOUT)
-                if r.status_code == 200:
-                    return r.json()
 
-                if r.status_code in (429, 500):
-                    sleep_time = 0.5 * (attempt + 1)
+                # Parse response
+                try:
+                    data = r.json()
+                except (ValueError, json.JSONDecodeError):
+                    data = {}
+
+                # Check for rate limit error in JSON response (code 613)
+                if "error" in data:
+                    error_code = data["error"].get("code")
+                    error_msg = data["error"].get("message", "")
+
+                    if error_code == 613 or "rate limit" in error_msg.lower():
+                        # Rate limit - exponential backoff
+                        sleep_time = min(2 ** attempt, 60)  # Max 60s
+                        print(f"⏳ Rate limit atteint, attente {sleep_time}s...")
+                        time.sleep(sleep_time)
+                        continue
+
+                    # Other API error
+                    raise RuntimeError(f"API Error {error_code}: {error_msg}")
+
+                if r.status_code == 200:
+                    return data
+
+                if r.status_code in (429, 500, 502, 503):
+                    sleep_time = min(2 ** attempt, 30)
                     time.sleep(sleep_time)
                     continue
 
                 raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
             except requests.RequestException as e:
-                if attempt < 2:
-                    time.sleep(0.5 * (attempt + 1))
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
                     continue
                 raise RuntimeError(f"Erreur réseau: {e}")
 
-        raise RuntimeError("Échec après 3 tentatives")
+        raise RuntimeError("Échec après plusieurs tentatives (rate limit)")
 
     def search_ads(
         self,

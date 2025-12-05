@@ -1510,13 +1510,21 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
 
     for i, kw in enumerate(keywords):
         tracker.update_step("Recherche", i + 1, len(keywords), f"Mot-clé: {kw}")
-        ads = client.search_ads(kw, countries, languages)
-        for ad in ads:
-            ad_id = ad.get("id")
-            if ad_id and ad_id not in seen_ad_ids:
-                ad["_keyword"] = kw
-                all_ads.append(ad)
-                seen_ad_ids.add(ad_id)
+
+        # Délai entre les mots-clés pour éviter le rate limit
+        if i > 0:
+            time.sleep(1.0)  # 1 seconde entre chaque mot-clé
+
+        try:
+            ads = client.search_ads(kw, countries, languages)
+            for ad in ads:
+                ad_id = ad.get("id")
+                if ad_id and ad_id not in seen_ad_ids:
+                    ad["_keyword"] = kw
+                    all_ads.append(ad)
+                    seen_ad_ids.add(ad_id)
+        except RuntimeError as e:
+            st.warning(f"⚠️ Erreur pour '{kw}': {str(e)[:100]}")
 
     tracker.complete_phase(f"{len(all_ads)} annonces trouvées", details={
         "keywords_searched": len(keywords),
