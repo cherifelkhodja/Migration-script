@@ -1388,14 +1388,14 @@ def render_keyword_search():
             languages = st.multiselect(
                 "Langues",
                 options=list(AVAILABLE_LANGUAGES.keys()),
-                default=DEFAULT_LANGUAGES,
+                default=[],  # Vide par défaut
                 format_func=lambda x: f"{x} - {AVAILABLE_LANGUAGES[x]}",
                 key="languages_keyword"
             )
 
     # CMS Filter
     cms_options = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow", "Autre/Inconnu"]
-    selected_cms = st.multiselect("CMS à inclure", options=cms_options, default=cms_options, key="cms_keyword")
+    selected_cms = st.multiselect("CMS à inclure", options=cms_options, default=["Shopify"], key="cms_keyword")
 
     # Mode aperçu
     st.markdown("---")
@@ -1442,14 +1442,14 @@ def render_page_id_search():
             languages = st.multiselect(
                 "Langues",
                 options=list(AVAILABLE_LANGUAGES.keys()),
-                default=DEFAULT_LANGUAGES,
+                default=[],  # Vide par défaut
                 format_func=lambda x: f"{x} - {AVAILABLE_LANGUAGES[x]}",
                 key="languages_pageid"
             )
 
     # CMS Filter
     cms_options = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow", "Autre/Inconnu"]
-    selected_cms = st.multiselect("CMS à inclure", options=cms_options, default=cms_options, key="cms_pageid")
+    selected_cms = st.multiselect("CMS à inclure", options=cms_options, default=["Shopify"], key="cms_pageid")
 
     # Mode aperçu
     st.markdown("---")
