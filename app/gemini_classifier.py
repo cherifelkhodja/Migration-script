@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlparse
 import logging
+import random
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
@@ -24,9 +25,17 @@ logger = logging.getLogger(__name__)
 # Constantes
 MAX_CONTENT_LENGTH = 2000  # Max caractères par site
 BATCH_SIZE = 20  # Nombre de sites par requête Gemini
-REQUEST_TIMEOUT = 30  # Timeout pour le scraping
+REQUEST_TIMEOUT = 15  # Timeout pour le scraping (réduit pour éviter les blocages)
 GEMINI_TIMEOUT = 60  # Timeout pour Gemini
 RATE_LIMIT_DELAY = 4.5  # Délai entre appels Gemini (15 RPM max = 4s minimum, 4.5s pour sécurité)
+
+# User-Agents réalistes pour le scraping
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+]
 
 
 @dataclass
@@ -47,25 +56,27 @@ class SiteContent:
             self.product_links = []
 
     def to_text(self) -> str:
-        """Convertit en texte concis pour le prompt"""
+        """Convertit en texte concis pour le prompt - BASÉ SUR LE SITE WEB uniquement"""
         parts = []
-        # Le nom de la page est souvent très indicatif de l'activité
-        if self.page_name:
-            parts.append(f"Nom: {self.page_name[:100]}")
+        # Priorité au contenu du site web (pas le nom de la page)
         if self.title:
             parts.append(f"Titre: {self.title[:200]}")
         if self.description:
-            parts.append(f"Description: {self.description[:300]}")
+            parts.append(f"Description: {self.description[:400]}")
         if self.h1:
-            parts.append(f"H1: {self.h1[:100]}")
+            parts.append(f"H1: {self.h1[:150]}")
         if self.keywords:
-            parts.append(f"Keywords: {self.keywords[:150]}")
+            parts.append(f"Keywords: {self.keywords[:200]}")
         if self.product_links:
-            links_text = ", ".join(self.product_links[:10])
-            parts.append(f"Produits: {links_text[:300]}")
+            links_text = ", ".join(self.product_links[:15])
+            parts.append(f"Produits: {links_text[:400]}")
 
         text = " | ".join(parts)
         return text[:MAX_CONTENT_LENGTH]
+
+    def has_content(self) -> bool:
+        """Vérifie si on a du contenu utile du site"""
+        return bool(self.title or self.description or self.h1 or self.keywords or self.product_links)
 
 
 @dataclass
@@ -213,62 +224,101 @@ async def fetch_site_content(
     page_id: str,
     url: str,
     page_name: str = "",
-    timeout: int = REQUEST_TIMEOUT
+    timeout: int = REQUEST_TIMEOUT,
+    retries: int = 2
 ) -> SiteContent:
     """
-    Récupère et parse le contenu d'un site de manière asynchrone.
+    Récupère et parse le contenu d'un site de manière asynchrone avec retry.
 
     Args:
         session: Session aiohttp
         page_id: ID de la page
         url: URL à scraper
+        page_name: Nom de la page (non utilisé pour classification)
         timeout: Timeout en secondes
+        retries: Nombre de tentatives
 
     Returns:
         SiteContent avec les données extraites
     """
+    original_url = url
+
     # S'assurer que l'URL a un schéma
     if not url.startswith(('http://', 'https://')):
         url = f'https://{url}'
 
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
-    }
+    last_error = None
 
-    try:
-        async with session.get(
-            url,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=timeout),
-            ssl=False,
-            allow_redirects=True
-        ) as response:
-            if response.status != 200:
-                return SiteContent(
-                    page_id=page_id,
-                    url=url,
-                    page_name=page_name,
-                    error=f"HTTP {response.status}"
-                )
+    for attempt in range(retries + 1):
+        # Headers réalistes avec User-Agent aléatoire (différent à chaque tentative)
+        headers = {
+            'User-Agent': random.choice(USER_AGENTS),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
+        }
 
-            # Limiter la taille du contenu
-            content = await response.text(errors='ignore')
-            if len(content) > 500000:  # 500KB max
-                content = content[:500000]
+        try:
+            async with session.get(
+                url,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=timeout),
+                ssl=False,
+                allow_redirects=True,
+                max_redirects=5
+            ) as response:
+                if response.status != 200:
+                    last_error = f"HTTP {response.status}"
+                    if response.status in [403, 429, 503]:
+                        # Retry sur ces erreurs
+                        if attempt < retries:
+                            await asyncio.sleep(1)
+                            continue
+                    return SiteContent(
+                        page_id=page_id,
+                        url=original_url,
+                        page_name=page_name,
+                        error=last_error
+                    )
 
-            result = extract_site_content_sync(content, page_id, url, page_name)
-            # S'assurer que page_name est toujours présent
-            result.page_name = page_name
-            return result
+                # Limiter la taille du contenu
+                content = await response.text(errors='ignore')
+                if len(content) > 500000:  # 500KB max
+                    content = content[:500000]
 
-    except asyncio.TimeoutError:
-        return SiteContent(page_id=page_id, url=url, page_name=page_name, error="Timeout")
-    except aiohttp.ClientError as e:
-        return SiteContent(page_id=page_id, url=url, page_name=page_name, error=f"Network error: {str(e)[:50]}")
-    except Exception as e:
-        return SiteContent(page_id=page_id, url=url, page_name=page_name, error=f"Error: {str(e)[:50]}")
+                result = extract_site_content_sync(content, page_id, original_url, page_name)
+
+                # Log si on a trouvé du contenu
+                if result.has_content():
+                    logger.debug(f"✓ Scraped {original_url}: title={bool(result.title)}, desc={bool(result.description)}")
+                else:
+                    logger.warning(f"⚠ No content found for {original_url}")
+
+                return result
+
+        except asyncio.TimeoutError:
+            last_error = "Timeout"
+            if attempt < retries:
+                await asyncio.sleep(0.5)
+                continue
+        except aiohttp.ClientError as e:
+            last_error = f"Network: {str(e)[:40]}"
+            if attempt < retries:
+                await asyncio.sleep(0.5)
+                continue
+        except Exception as e:
+            last_error = f"Error: {str(e)[:40]}"
+            break
+
+    logger.warning(f"✗ Failed to scrape {original_url}: {last_error}")
+    return SiteContent(page_id=page_id, url=original_url, page_name=page_name, error=last_error)
 
 
 async def scrape_sites_batch(
@@ -373,22 +423,19 @@ Réponds UNIQUEMENT avec un tableau JSON, sans markdown, sans backticks:
 IMPORTANT: Le champ "id" doit correspondre EXACTEMENT à l'ID fourni."""
 
     def _build_user_prompt(self, sites_data: List[SiteContent]) -> str:
-        """Construit le prompt utilisateur avec les données des sites"""
-        lines = ["Voici les sites e-commerce à classifier :\n"]
+        """Construit le prompt utilisateur avec les données des sites - CONTENU SITE UNIQUEMENT"""
+        lines = ["Voici les sites e-commerce à classifier (basé sur leur contenu web) :\n"]
 
         for site in sites_data:
+            # UNIQUEMENT le contenu du site web
             site_text = site.to_text()
 
-            # Si on a du contenu, l'utiliser
-            if site_text:
+            if site.has_content():
                 lines.append(f"ID: {site.page_id} | {site_text}")
             else:
-                # Fallback: utiliser le nom de page et/ou le domaine
+                # Si pas de contenu, on indique l'URL mais on ne peut pas classifier
                 domain = urlparse(site.url).netloc.replace('www.', '')
-                if site.page_name:
-                    lines.append(f"ID: {site.page_id} | Nom: {site.page_name} | Site: {domain}")
-                else:
-                    lines.append(f"ID: {site.page_id} | Site: {domain} | URL: {site.url}")
+                lines.append(f"ID: {site.page_id} | Site: {domain} | (contenu non disponible)")
 
         return "\n".join(lines)
 
@@ -605,11 +652,18 @@ async def classify_pages_async(
 
     scraped_contents = await scrape_sites_batch(pages, max_concurrent=10)
 
-    # Filtrer les contenus valides
-    valid_contents = [c for c in scraped_contents if not c.error or c.title or c.description]
+    # Statistiques de scraping
+    with_content = [c for c in scraped_contents if c.has_content()]
+    with_errors = [c for c in scraped_contents if c.error]
+    no_content = [c for c in scraped_contents if not c.has_content() and not c.error]
+
+    logger.info(f"📊 Scraping stats: {len(with_content)} OK, {len(with_errors)} erreurs, {len(no_content)} vides")
+
+    # Seuls les sites avec du contenu seront classifiés correctement
+    valid_contents = with_content
 
     if progress_callback:
-        progress_callback(len(pages), len(pages), f"{len(valid_contents)} sites analysés")
+        progress_callback(len(pages), len(pages), f"{len(valid_contents)}/{len(pages)} sites avec contenu")
 
     # Étape 2: Classifier par batches
     total_batches = (len(valid_contents) + batch_size - 1) // batch_size
