@@ -9,6 +9,7 @@ numpy>=1.24.0
 
 # HTTP Requests
 requests>=2.31.0
+aiohttp>=3.9.0
 
 # HTML Parsing
 beautifulsoup4>=4.12.0
