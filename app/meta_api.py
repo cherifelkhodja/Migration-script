@@ -484,11 +484,20 @@ class MetaAdsClient:
                 data = self._get_api(url, params)
             except RuntimeError as e:
                 err_msg = str(e)
+                # Log l'erreur pour diagnostic
+                print(f"❌ Erreur API Meta pour '{keyword}': {err_msg}")
+
+                # Réduire la limite si demandé par l'API
                 if ("reduce" in err_msg or "code\":1" in err_msg) and limit_curr > LIMIT_MIN:
                     limit_curr = max(LIMIT_MIN, limit_curr // 2)
                     params["limit"] = limit_curr
                     time.sleep(0.3)
                     continue
+
+                # Erreur OAuth/Token expiré
+                if "OAuth" in err_msg or "token" in err_msg.lower() or "expired" in err_msg.lower():
+                    print(f"🔑 Token invalide ou expiré! Vérifiez vos tokens Meta API dans Settings.")
+
                 break
 
             batch = data.get("data", [])
