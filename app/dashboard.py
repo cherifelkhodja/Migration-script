@@ -4127,6 +4127,10 @@ def render_search_logs():
         st.error("Base de données non connectée")
         return
 
+    # S'assurer que les migrations sont exécutées (ajoute les colonnes manquantes)
+    from app.database import ensure_tables_exist
+    ensure_tables_exist(db)
+
     # Import des fonctions de log
     from app.database import get_search_logs, get_search_log_detail, get_search_logs_stats, delete_search_log
 

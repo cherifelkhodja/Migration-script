@@ -424,6 +424,7 @@ def ensure_tables_exist(db: DatabaseManager) -> bool:
     """
     S'assure que toutes les tables existent dans la base de données.
     Crée les tables manquantes si nécessaire.
+    Ajoute les colonnes manquantes aux tables existantes.
 
     Args:
         db: Instance DatabaseManager
@@ -433,10 +434,45 @@ def ensure_tables_exist(db: DatabaseManager) -> bool:
     """
     try:
         Base.metadata.create_all(db.engine)
+
+        # Migrations pour ajouter les colonnes manquantes
+        _run_migrations(db)
+
         return True
     except Exception as e:
         print(f"Erreur création tables: {e}")
         return False
+
+
+def _run_migrations(db: DatabaseManager):
+    """Exécute les migrations pour ajouter les colonnes manquantes"""
+    from sqlalchemy import text
+
+    migrations = [
+        # Colonnes API stats pour SearchLog
+        ("search_logs", "meta_api_calls", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS meta_api_calls INTEGER DEFAULT 0"),
+        ("search_logs", "scraper_api_calls", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS scraper_api_calls INTEGER DEFAULT 0"),
+        ("search_logs", "web_requests", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS web_requests INTEGER DEFAULT 0"),
+        ("search_logs", "meta_api_errors", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS meta_api_errors INTEGER DEFAULT 0"),
+        ("search_logs", "scraper_api_errors", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS scraper_api_errors INTEGER DEFAULT 0"),
+        ("search_logs", "web_errors", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS web_errors INTEGER DEFAULT 0"),
+        ("search_logs", "rate_limit_hits", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS rate_limit_hits INTEGER DEFAULT 0"),
+        ("search_logs", "meta_api_avg_time", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS meta_api_avg_time FLOAT DEFAULT 0"),
+        ("search_logs", "scraper_api_avg_time", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS scraper_api_avg_time FLOAT DEFAULT 0"),
+        ("search_logs", "web_avg_time", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS web_avg_time FLOAT DEFAULT 0"),
+        ("search_logs", "scraper_api_cost", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS scraper_api_cost FLOAT DEFAULT 0"),
+        ("search_logs", "api_details", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS api_details TEXT"),
+    ]
+
+    with db.get_session() as session:
+        for table, column, sql in migrations:
+            try:
+                session.execute(text(sql))
+                session.commit()
+            except Exception as e:
+                # Colonne existe déjà ou autre erreur non critique
+                session.rollback()
+                pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
