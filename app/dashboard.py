@@ -206,10 +206,14 @@ class SearchProgressTracker:
             "ads_saved": 0
         }
 
+        # Log détaillé des étapes
+        self.detail_logs = []
+
         # Placeholders pour mise à jour dynamique
         with self.container:
             self.status_box = st.empty()
             self.progress_bar = st.progress(0)
+            self.detail_log_box = st.empty()  # Pour le log détaillé
             self.summary_box = st.empty()
 
     def format_time(self, seconds: float) -> str:
@@ -320,6 +324,51 @@ class SearchProgressTracker:
         """Ajoute à une métrique globale"""
         if key in self.metrics:
             self.metrics[key] += value
+
+    def log_detail(self, icon: str, message: str, count: int = None, total_so_far: int = None):
+        """
+        Ajoute une entrée au log détaillé en temps réel.
+
+        Args:
+            icon: Emoji pour l'entrée
+            message: Message descriptif
+            count: Nombre d'items pour cette étape (optionnel)
+            total_so_far: Total cumulé jusqu'à présent (optionnel)
+        """
+        timestamp = self.format_time(time.time() - self.start_time)
+        log_entry = {
+            "time": timestamp,
+            "icon": icon,
+            "message": message,
+            "count": count,
+            "total": total_so_far
+        }
+        self.detail_logs.append(log_entry)
+        self._render_detail_logs()
+
+    def _render_detail_logs(self):
+        """Affiche le log détaillé avec les dernières entrées"""
+        with self.detail_log_box.container():
+            # Afficher les 10 dernières entrées (ou toutes si moins)
+            recent_logs = self.detail_logs[-10:]
+
+            if recent_logs:
+                st.markdown("##### 📋 Détails en temps réel")
+                log_text = ""
+                for log in recent_logs:
+                    line = f"`{log['time']}` {log['icon']} {log['message']}"
+                    if log.get('count') is not None:
+                        line += f" → **{log['count']}**"
+                    if log.get('total') is not None:
+                        line += f" (total: {log['total']})"
+                    log_text += line + "\n"
+
+                st.markdown(log_text)
+
+    def clear_detail_logs(self):
+        """Efface le log détaillé (entre les phases)"""
+        self.detail_logs = []
+        self.detail_log_box.empty()
 
     def _save_phases_to_db(self):
         """Sauvegarde les phases en base de données"""
@@ -1587,15 +1636,22 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
 
         try:
             ads = client.search_ads(kw, countries, languages)
+            new_ads_count = 0
             for ad in ads:
                 ad_id = ad.get("id")
                 if ad_id and ad_id not in seen_ad_ids:
                     ad["_keyword"] = kw
                     all_ads.append(ad)
                     seen_ad_ids.add(ad_id)
-        except RuntimeError as e:
-            st.warning(f"⚠️ Erreur pour '{kw}': {str(e)[:100]}")
+                    new_ads_count += 1
 
+            # Log détaillé pour ce mot-clé
+            tracker.log_detail("🔍", f"'{kw}'", count=new_ads_count, total_so_far=len(all_ads))
+
+        except RuntimeError as e:
+            tracker.log_detail("❌", f"'{kw}' - Erreur: {str(e)[:50]}")
+
+    tracker.clear_detail_logs()
     tracker.complete_phase(f"{len(all_ads)} annonces trouvées", details={
         "keywords_searched": len(keywords),
         "ads_found": len(all_ads)
@@ -1653,6 +1709,14 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
         data["ads_found_search"] = len(data["_ad_ids"])
 
     pages_filtered = {pid: data for pid, data in pages.items() if data["ads_found_search"] >= min_ads}
+
+    # Log détaillé du filtrage
+    tracker.log_detail("📊", f"Total pages trouvées", count=len(pages))
+    tracker.log_detail("✅", f"Pages avec ≥{min_ads} ads", count=len(pages_filtered))
+    if blacklisted_ads_count > 0:
+        tracker.log_detail("🚫", f"Ads blacklistées ignorées", count=blacklisted_ads_count)
+
+    tracker.clear_detail_logs()
 
     # Afficher les détails du filtrage
     phase2_details = f"{len(pages_filtered)} pages avec ≥{min_ads} ads"
@@ -1739,6 +1803,7 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
             return pid, {"cms": "Unknown", "is_shopify": False}
 
     # Multithreading pour la détection CMS (8 workers)
+    cms_counts = {}  # Compteur par CMS
     if pages_need_cms:
         completed = 0
         with ThreadPoolExecutor(max_workers=8) as executor:
@@ -1746,11 +1811,25 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
 
             for future in as_completed(futures):
                 pid, cms_result = future.result()
-                pages_with_sites[pid]["cms"] = cms_result["cms"]
+                cms_name = cms_result["cms"]
+                pages_with_sites[pid]["cms"] = cms_name
                 pages_with_sites[pid]["is_shopify"] = cms_result.get("is_shopify", False)
                 completed += 1
+
+                # Compter les CMS
+                cms_counts[cms_name] = cms_counts.get(cms_name, 0) + 1
+
                 if completed % 5 == 0:
                     tracker.update_step("Analyse CMS", completed, len(pages_need_cms))
+                    # Log les CMS détectés
+                    tracker.log_detail("🔍", f"CMS analysés", count=completed, total_so_far=len(pages_need_cms))
+
+    # Log des CMS trouvés
+    tracker.clear_detail_logs()
+    for cms_name, count in sorted(cms_counts.items(), key=lambda x: -x[1])[:5]:
+        tracker.log_detail("🏷️", f"{cms_name}", count=count)
+
+    tracker.clear_detail_logs()
 
     # Filter by CMS
     def cms_matches(cms_name):
