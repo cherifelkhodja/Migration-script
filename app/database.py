@@ -950,7 +950,7 @@ def get_dashboard_trends(db: DatabaseManager, days: int = 7) -> Dict:
 
         # Pour les deltas d'état, on utilise l'historique de suivi
         # Compter les évolutions positives (pages montantes)
-        evolution = get_pages_evolution(db, days=days)
+        evolution = get_evolution_stats(db, period_days=days)
         rising_count = len([e for e in evolution if e.get("pct_ads", 0) >= 20])
         falling_count = len([e for e in evolution if e.get("pct_ads", 0) <= -20])
 
