@@ -41,6 +41,21 @@ DEFAULT_STATE_THRESHOLDS = {
     "XXL": 150,   # 150+ ads
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Critères Winning Ads
+# Format: liste de tuples (max_age_days, min_reach)
+# Une ad est "winning" si elle valide au moins un de ces critères
+WINNING_AD_CRITERIA = [
+    (4, 15000),    # ≤4 jours et >15k reach
+    (5, 20000),    # ≤5 jours et >20k reach
+    (6, 30000),    # ≤6 jours et >30k reach
+    (7, 40000),    # ≤7 jours et >40k reach
+    (8, 50000),    # ≤8 jours et >50k reach
+    (15, 100000),  # ≤15 jours et >100k reach
+    (22, 200000),  # ≤22 jours et >200k reach
+    (29, 400000),  # ≤29 jours et >400k reach
+]
+
 # Parallélisation
 WORKERS_WEB_ANALYSIS = 10
 TIMEOUT_WEB = 25

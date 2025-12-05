@@ -110,6 +110,32 @@ class Blacklist(Base):
     )
 
 
+class WinningAds(Base):
+    """Table winning_ads - Annonces performantes détectées"""
+    __tablename__ = "winning_ads"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ad_id = Column(String(50), nullable=False, index=True)
+    page_id = Column(String(50), nullable=False, index=True)
+    page_name = Column(String(255))
+    ad_creation_time = Column(DateTime)
+    ad_age_days = Column(Integer)  # Âge de l'ad au moment du scan
+    eu_total_reach = Column(Integer)  # Reach au moment du scan
+    matched_criteria = Column(String(100))  # Critère validé (ex: "≤4d & >15k")
+    ad_creative_bodies = Column(Text)
+    ad_creative_link_captions = Column(Text)
+    ad_creative_link_titles = Column(Text)
+    ad_snapshot_url = Column(String(500))
+    lien_site = Column(String(500))
+    date_scan = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_winning_ads_page', 'page_id'),
+        Index('idx_winning_ads_date', 'date_scan'),
+        Index('idx_winning_ads_ad', 'ad_id', 'date_scan'),
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # GESTION DE LA CONNEXION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -775,3 +801,295 @@ def get_blacklist_ids(db: DatabaseManager) -> set:
     with db.get_session() as session:
         entries = session.query(Blacklist.page_id).all()
         return {e.page_id for e in entries}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GESTION DES WINNING ADS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def is_winning_ad(
+    ad: Dict,
+    scan_date: datetime,
+    criteria: List = None
+) -> tuple:
+    """
+    Vérifie si une annonce est une "winning ad" basé sur reach + âge
+
+    Args:
+        ad: Dictionnaire de l'annonce
+        scan_date: Date du scan (pour calculer l'âge)
+        criteria: Liste de tuples (max_age_days, min_reach) - optionnel
+
+    Returns:
+        Tuple (is_winning, age_days, reach, matched_criteria_str)
+    """
+    # Critères par défaut
+    if criteria is None:
+        criteria = [
+            (4, 15000), (5, 20000), (6, 30000), (7, 40000),
+            (8, 50000), (15, 100000), (22, 200000), (29, 400000)
+        ]
+
+    # Extraire le reach
+    reach_raw = ad.get("eu_total_reach")
+    if not reach_raw:
+        return (False, None, None, None)
+
+    # Parser le reach (peut être un dict avec lower_bound/upper_bound ou un int)
+    if isinstance(reach_raw, dict):
+        reach = reach_raw.get("lower_bound", 0)
+    elif isinstance(reach_raw, str):
+        try:
+            reach = int(reach_raw.replace(",", "").replace(" ", ""))
+        except (ValueError, AttributeError):
+            return (False, None, None, None)
+    else:
+        try:
+            reach = int(reach_raw)
+        except (ValueError, TypeError):
+            return (False, None, None, None)
+
+    if reach <= 0:
+        return (False, None, reach, None)
+
+    # Calculer l'âge de l'ad
+    ad_creation = ad.get("ad_creation_time")
+    if not ad_creation:
+        return (False, None, reach, None)
+
+    # Parser la date de création
+    if isinstance(ad_creation, str):
+        try:
+            ad_creation = datetime.fromisoformat(ad_creation.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            return (False, None, reach, None)
+
+    # Calculer l'âge en jours
+    if ad_creation.tzinfo is not None:
+        # Si ad_creation a un timezone, on enlève pour comparaison
+        ad_creation = ad_creation.replace(tzinfo=None)
+
+    age_days = (scan_date - ad_creation).days
+
+    if age_days < 0:
+        return (False, age_days, reach, None)
+
+    # Vérifier les critères
+    for max_age, min_reach in criteria:
+        if age_days <= max_age and reach > min_reach:
+            criteria_str = f"≤{max_age}d & >{min_reach // 1000}k"
+            return (True, age_days, reach, criteria_str)
+
+    return (False, age_days, reach, None)
+
+
+def save_winning_ads(
+    db: DatabaseManager,
+    winning_ads_data: List[Dict],
+    pages_final: Dict = None
+) -> int:
+    """
+    Sauvegarde les winning ads dans la base de données
+
+    Args:
+        db: Instance DatabaseManager
+        winning_ads_data: Liste de dictionnaires avec les données des winning ads
+        pages_final: Dictionnaire des pages (optionnel, pour récupérer le website)
+
+    Returns:
+        Nombre de winning ads sauvegardées
+    """
+    if not winning_ads_data:
+        return 0
+
+    scan_time = datetime.utcnow()
+    count = 0
+
+    with db.get_session() as session:
+        for data in winning_ads_data:
+            ad = data.get("ad", {})
+            page_id = str(data.get("page_id", ad.get("page_id", "")))
+
+            # Récupérer le website depuis pages_final si disponible
+            website = ""
+            if pages_final and page_id in pages_final:
+                website = pages_final[page_id].get("website", "")
+
+            # Parser ad_creation_time
+            ad_creation = None
+            if ad.get("ad_creation_time"):
+                try:
+                    ad_creation = datetime.fromisoformat(
+                        ad["ad_creation_time"].replace("Z", "+00:00")
+                    )
+                    if ad_creation.tzinfo is not None:
+                        ad_creation = ad_creation.replace(tzinfo=None)
+                except (ValueError, AttributeError):
+                    pass
+
+            winning_entry = WinningAds(
+                ad_id=str(ad.get("id", "")),
+                page_id=page_id,
+                page_name=ad.get("page_name", ""),
+                ad_creation_time=ad_creation,
+                ad_age_days=data.get("age_days"),
+                eu_total_reach=data.get("reach"),
+                matched_criteria=data.get("matched_criteria", ""),
+                ad_creative_bodies=to_str_list(ad.get("ad_creative_bodies")),
+                ad_creative_link_captions=to_str_list(ad.get("ad_creative_link_captions")),
+                ad_creative_link_titles=to_str_list(ad.get("ad_creative_link_titles")),
+                ad_snapshot_url=ad.get("ad_snapshot_url", ""),
+                lien_site=website,
+                date_scan=scan_time
+            )
+            session.add(winning_entry)
+            count += 1
+
+    return count
+
+
+def get_winning_ads(
+    db: DatabaseManager,
+    page_id: str = None,
+    limit: int = 100,
+    days: int = None
+) -> List[Dict]:
+    """
+    Récupère les winning ads depuis la base de données
+
+    Args:
+        db: Instance DatabaseManager
+        page_id: Filtrer par page (optionnel)
+        limit: Nombre max de résultats
+        days: Filtrer par période en jours (optionnel)
+
+    Returns:
+        Liste des winning ads
+    """
+    from datetime import timedelta
+
+    with db.get_session() as session:
+        query = session.query(WinningAds).order_by(
+            WinningAds.date_scan.desc(),
+            WinningAds.eu_total_reach.desc()
+        )
+
+        if page_id:
+            query = query.filter(WinningAds.page_id == page_id)
+
+        if days:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            query = query.filter(WinningAds.date_scan >= cutoff)
+
+        entries = query.limit(limit).all()
+
+        return [
+            {
+                "ad_id": e.ad_id,
+                "page_id": e.page_id,
+                "page_name": e.page_name,
+                "ad_creation_time": e.ad_creation_time,
+                "ad_age_days": e.ad_age_days,
+                "eu_total_reach": e.eu_total_reach,
+                "matched_criteria": e.matched_criteria,
+                "ad_creative_bodies": e.ad_creative_bodies,
+                "ad_creative_link_captions": e.ad_creative_link_captions,
+                "ad_creative_link_titles": e.ad_creative_link_titles,
+                "ad_snapshot_url": e.ad_snapshot_url,
+                "lien_site": e.lien_site,
+                "date_scan": e.date_scan
+            }
+            for e in entries
+        ]
+
+
+def get_winning_ads_stats(db: DatabaseManager, days: int = 30) -> Dict:
+    """
+    Récupère les statistiques des winning ads
+
+    Args:
+        db: Instance DatabaseManager
+        days: Période en jours pour les stats
+
+    Returns:
+        Dictionnaire avec les statistiques
+    """
+    from datetime import timedelta
+    from sqlalchemy import func
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    with db.get_session() as session:
+        # Total winning ads
+        total = session.query(WinningAds).filter(
+            WinningAds.date_scan >= cutoff
+        ).count()
+
+        # Par page (top 10)
+        by_page = session.query(
+            WinningAds.page_id,
+            WinningAds.page_name,
+            func.count(WinningAds.id).label('count')
+        ).filter(
+            WinningAds.date_scan >= cutoff
+        ).group_by(
+            WinningAds.page_id, WinningAds.page_name
+        ).order_by(
+            func.count(WinningAds.id).desc()
+        ).limit(10).all()
+
+        # Par critère
+        by_criteria = session.query(
+            WinningAds.matched_criteria,
+            func.count(WinningAds.id).label('count')
+        ).filter(
+            WinningAds.date_scan >= cutoff
+        ).group_by(
+            WinningAds.matched_criteria
+        ).all()
+
+        # Reach moyen
+        avg_reach = session.query(
+            func.avg(WinningAds.eu_total_reach)
+        ).filter(
+            WinningAds.date_scan >= cutoff
+        ).scalar()
+
+        return {
+            "total": total,
+            "by_page": [{"page_id": p[0], "page_name": p[1], "count": p[2]} for p in by_page],
+            "by_criteria": {c[0]: c[1] for c in by_criteria if c[0]},
+            "avg_reach": int(avg_reach) if avg_reach else 0
+        }
+
+
+def get_winning_ads_by_page(
+    db: DatabaseManager,
+    days: int = 30
+) -> Dict[str, int]:
+    """
+    Récupère le nombre de winning ads par page
+
+    Args:
+        db: Instance DatabaseManager
+        days: Période en jours
+
+    Returns:
+        Dict {page_id: count}
+    """
+    from datetime import timedelta
+    from sqlalchemy import func
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    with db.get_session() as session:
+        results = session.query(
+            WinningAds.page_id,
+            func.count(WinningAds.id).label('count')
+        ).filter(
+            WinningAds.date_scan >= cutoff
+        ).group_by(
+            WinningAds.page_id
+        ).all()
+
+        return {r[0]: r[1] for r in results}

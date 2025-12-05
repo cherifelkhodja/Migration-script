@@ -29,7 +29,7 @@ from app.config import (
     MIN_ADS_INITIAL, MIN_ADS_FOR_EXPORT,
     DEFAULT_COUNTRIES, DEFAULT_LANGUAGES,
     DATABASE_URL, MIN_ADS_SUIVI, MIN_ADS_LISTE,
-    DEFAULT_STATE_THRESHOLDS
+    DEFAULT_STATE_THRESHOLDS, WINNING_AD_CRITERIA
 )
 from app.meta_api import MetaAdsClient, extract_website_from_ads, extract_currency_from_ads
 from app.shopify_detector import detect_cms_from_url
@@ -39,7 +39,8 @@ from app.database import (
     DatabaseManager, save_pages_recherche, save_suivi_page,
     save_ads_recherche, get_suivi_stats, search_pages, get_suivi_history,
     get_evolution_stats, get_page_evolution_history, get_etat_from_ads_count,
-    add_to_blacklist, remove_from_blacklist, get_blacklist, get_blacklist_ids
+    add_to_blacklist, remove_from_blacklist, get_blacklist, get_blacklist_ids,
+    is_winning_ad, save_winning_ads, get_winning_ads, get_winning_ads_stats
 )
 
 
@@ -132,6 +133,11 @@ def render_sidebar():
         if st.button("📊 Analytics", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Analytics" else "secondary"):
             st.session_state.current_page = "Analytics"
+            st.rerun()
+
+        if st.button("🏆 Winning Ads", use_container_width=True,
+                     type="primary" if st.session_state.current_page == "Winning Ads" else "secondary"):
+            st.session_state.current_page = "Winning Ads"
             st.rerun()
 
         if st.button("🚫 Blacklist", use_container_width=True,
@@ -427,11 +433,13 @@ def render_preview_results():
         web = web_results.get(pid, {})
         website = data.get('website', '')
         fb_link = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={countries[0]}&view_all_page_id={pid}"
+        winning_count = data.get('winning_ads_count', 0)
 
         col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
 
         with col1:
-            st.write(f"**{data.get('page_name', 'N/A')}** - {data.get('ads_active_total', 0)} ads")
+            winning_badge = f" 🏆 {winning_count}" if winning_count > 0 else ""
+            st.write(f"**{data.get('page_name', 'N/A')}** - {data.get('ads_active_total', 0)} ads{winning_badge}")
             st.caption(f"CMS: {data.get('cms', 'N/A')} | Produits: {web.get('product_count', 'N/A')}")
 
         with col2:
@@ -467,8 +475,10 @@ def render_preview_results():
                     det = st.session_state.get("detection_thresholds", {})
                     suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI))
                     ads_saved = save_ads_recherche(db, pages_final, st.session_state.get("page_ads", {}), countries, det.get("min_ads_liste", MIN_ADS_LISTE))
+                    winning_ads_data = st.session_state.get("winning_ads_data", [])
+                    winning_saved = save_winning_ads(db, winning_ads_data, pages_final)
 
-                    st.success(f"✓ Sauvegardé : {pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads")
+                    st.success(f"✓ Sauvegardé : {pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads, {winning_saved} winning")
                     st.session_state.show_preview_results = False
                     st.balloons()
                 except Exception as e:
@@ -648,10 +658,43 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
         progress.progress((i + 1) / len(pages_final))
         time.sleep(0.2)
 
+    # Phase 7: Détection des Winning Ads
+    st.subheader("🏆 Phase 7: Détection des Winning Ads")
+    scan_date = datetime.now()
+    winning_ads_data = []
+    winning_ads_by_page = {}  # {page_id: count}
+
+    progress = st.progress(0)
+    total_ads_checked = 0
+
+    for i, (pid, data) in enumerate(pages_final.items()):
+        page_winning_count = 0
+        for ad in page_ads.get(pid, []):
+            is_winning, age_days, reach, matched_criteria = is_winning_ad(ad, scan_date, WINNING_AD_CRITERIA)
+            if is_winning:
+                winning_ads_data.append({
+                    "ad": ad,
+                    "page_id": pid,
+                    "age_days": age_days,
+                    "reach": reach,
+                    "matched_criteria": matched_criteria
+                })
+                page_winning_count += 1
+            total_ads_checked += 1
+
+        if page_winning_count > 0:
+            winning_ads_by_page[pid] = page_winning_count
+            data["winning_ads_count"] = page_winning_count
+
+        progress.progress((i + 1) / len(pages_final))
+
+    st.success(f"✓ {len(winning_ads_data)} winning ads détectées sur {len(winning_ads_by_page)} pages")
+
     # Save to session first (needed for preview mode)
     st.session_state.pages_final = pages_final
     st.session_state.web_results = web_results
     st.session_state.page_ads = dict(page_ads)
+    st.session_state.winning_ads_data = winning_ads_data
     st.session_state.countries = countries
     st.session_state.languages = languages
     st.session_state.preview_mode = preview_mode
@@ -663,7 +706,7 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
         st.rerun()
     else:
         # Mode normal - sauvegarder directement
-        st.subheader("💾 Phase 7: Sauvegarde en base de données")
+        st.subheader("💾 Phase 8: Sauvegarde en base de données")
 
         if db:
             try:
@@ -672,11 +715,13 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
                 det = st.session_state.get("detection_thresholds", {})
                 suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI))
                 ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, det.get("min_ads_liste", MIN_ADS_LISTE))
+                winning_saved = save_winning_ads(db, winning_ads_data, pages_final)
 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Pages", pages_saved)
                 col2.metric("Suivi", suivi_saved)
                 col3.metric("Annonces", ads_saved)
+                col4.metric("🏆 Winning", winning_saved)
                 st.success("✓ Données sauvegardées !")
             except Exception as e:
                 st.error(f"Erreur sauvegarde: {e}")
@@ -800,10 +845,40 @@ def run_page_id_search(token, page_ids, countries, languages, selected_cms, prev
         progress.progress((i + 1) / len(pages_final))
         time.sleep(0.2)
 
+    # Phase 4: Détection des Winning Ads
+    st.subheader("🏆 Phase 4: Détection des Winning Ads")
+    scan_date = datetime.now()
+    winning_ads_data = []
+    winning_ads_by_page = {}
+
+    progress = st.progress(0)
+    for i, (pid, data) in enumerate(pages_final.items()):
+        page_winning_count = 0
+        for ad in page_ads.get(pid, []):
+            is_winning, age_days, reach, matched_criteria = is_winning_ad(ad, scan_date, WINNING_AD_CRITERIA)
+            if is_winning:
+                winning_ads_data.append({
+                    "ad": ad,
+                    "page_id": pid,
+                    "age_days": age_days,
+                    "reach": reach,
+                    "matched_criteria": matched_criteria
+                })
+                page_winning_count += 1
+
+        if page_winning_count > 0:
+            winning_ads_by_page[pid] = page_winning_count
+            data["winning_ads_count"] = page_winning_count
+
+        progress.progress((i + 1) / len(pages_final))
+
+    st.success(f"✓ {len(winning_ads_data)} winning ads détectées sur {len(winning_ads_by_page)} pages")
+
     # Save to session
     st.session_state.pages_final = pages_final
     st.session_state.web_results = web_results
     st.session_state.page_ads = dict(page_ads)
+    st.session_state.winning_ads_data = winning_ads_data
     st.session_state.countries = countries
     st.session_state.languages = languages
     st.session_state.preview_mode = preview_mode
@@ -813,7 +888,7 @@ def run_page_id_search(token, page_ids, countries, languages, selected_cms, prev
         st.session_state.show_preview_results = True
         st.rerun()
     else:
-        st.subheader("💾 Phase 4: Sauvegarde en base de données")
+        st.subheader("💾 Phase 5: Sauvegarde en base de données")
 
         if db:
             try:
@@ -822,11 +897,13 @@ def run_page_id_search(token, page_ids, countries, languages, selected_cms, prev
                 det = st.session_state.get("detection_thresholds", {})
                 suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI))
                 ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, det.get("min_ads_liste", MIN_ADS_LISTE))
+                winning_saved = save_winning_ads(db, winning_ads_data, pages_final)
 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Pages", pages_saved)
                 col2.metric("Suivi", suivi_saved)
                 col3.metric("Annonces", ads_saved)
+                col4.metric("🏆 Winning", winning_saved)
                 st.success("✓ Données sauvegardées !")
             except Exception as e:
                 st.error(f"Erreur sauvegarde: {e}")
@@ -1216,6 +1293,166 @@ def render_analytics():
                     parents=[""] * len(themes)
                 )
                 st.plotly_chart(fig, key="analytics_themes", use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Erreur: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PAGE: WINNING ADS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def render_winning_ads():
+    """Page Winning Ads - Annonces performantes détectées"""
+    st.title("🏆 Winning Ads")
+    st.markdown("Annonces performantes basées sur reach + âge")
+
+    db = get_database()
+    if not db:
+        st.warning("Base de données non connectée")
+        return
+
+    # Critères expliqués
+    with st.expander("ℹ️ Critères de détection des Winning Ads", expanded=False):
+        st.markdown("""
+        Une annonce est considérée comme **winning** si elle valide **au moins un** de ces critères :
+
+        | Âge max | Reach min |
+        |---------|-----------|
+        | ≤4 jours | >15 000 |
+        | ≤5 jours | >20 000 |
+        | ≤6 jours | >30 000 |
+        | ≤7 jours | >40 000 |
+        | ≤8 jours | >50 000 |
+        | ≤15 jours | >100 000 |
+        | ≤22 jours | >200 000 |
+        | ≤29 jours | >400 000 |
+
+        Plus une annonce est récente avec un reach élevé, plus elle est performante.
+        """)
+
+    # Filtres
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        period = st.selectbox(
+            "📅 Période",
+            options=[7, 14, 30, 60, 90],
+            format_func=lambda x: f"{x} jours",
+            index=2
+        )
+
+    with col2:
+        limit = st.selectbox("Limite", [50, 100, 200, 500], index=1)
+
+    with col3:
+        sort_by = st.selectbox(
+            "Trier par",
+            options=["Reach", "Date de scan", "Âge de l'ad"],
+            index=0
+        )
+
+    try:
+        # Statistiques globales
+        stats = get_winning_ads_stats(db, days=period)
+
+        st.markdown("---")
+        st.subheader("📊 Statistiques")
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("🏆 Total Winning Ads", stats.get("total", 0))
+        col2.metric("📄 Pages avec Winning", len(stats.get("by_page", [])))
+        col3.metric("📈 Reach moyen", f"{stats.get('avg_reach', 0):,}")
+
+        # Critères les plus fréquents
+        by_criteria = stats.get("by_criteria", {})
+        if by_criteria:
+            top_criteria = max(by_criteria.items(), key=lambda x: x[1]) if by_criteria else ("N/A", 0)
+            col4.metric("🎯 Critère top", top_criteria[0])
+
+        # Graphique par critère
+        if by_criteria:
+            st.markdown("---")
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.subheader("Répartition par critère")
+                fig = px.bar(
+                    x=list(by_criteria.keys()),
+                    y=list(by_criteria.values()),
+                    color=list(by_criteria.keys()),
+                    labels={"x": "Critère", "y": "Nombre"}
+                )
+                fig.update_layout(showlegend=False)
+                st.plotly_chart(fig, key="winning_by_criteria", use_container_width=True)
+
+            with col2:
+                st.subheader("Top Pages avec Winning Ads")
+                by_page = stats.get("by_page", [])
+                if by_page:
+                    df_pages = pd.DataFrame(by_page)
+                    df_pages.columns = ["Page ID", "Nom", "Winning Ads"]
+                    st.dataframe(df_pages, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Aucune page avec winning ads")
+
+        # Liste des winning ads
+        st.markdown("---")
+        st.subheader("📋 Liste des Winning Ads")
+
+        winning_ads = get_winning_ads(db, limit=limit, days=period)
+
+        if winning_ads:
+            st.info(f"🏆 {len(winning_ads)} winning ads trouvées")
+
+            for ad in winning_ads:
+                reach_formatted = f"{ad.get('eu_total_reach', 0):,}" if ad.get('eu_total_reach') else "N/A"
+                age = ad.get('ad_age_days', 'N/A')
+                criteria = ad.get('matched_criteria', 'N/A')
+
+                with st.expander(f"🏆 **{ad.get('page_name', 'N/A')}** - {reach_formatted} reach ({criteria})"):
+                    col1, col2 = st.columns([2, 1])
+
+                    with col1:
+                        # Texte de l'annonce
+                        bodies = ad.get('ad_creative_bodies', '')
+                        if bodies:
+                            st.markdown("**Texte de l'annonce:**")
+                            st.text(bodies[:500] + "..." if len(bodies) > 500 else bodies)
+
+                        # Liens
+                        captions = ad.get('ad_creative_link_captions', '')
+                        if captions:
+                            st.markdown(f"**Caption:** {captions}")
+
+                        titles = ad.get('ad_creative_link_titles', '')
+                        if titles:
+                            st.markdown(f"**Titre:** {titles}")
+
+                    with col2:
+                        st.metric("📈 Reach", reach_formatted)
+                        st.metric("📅 Âge", f"{age} jours" if age else "N/A")
+                        st.metric("🎯 Critère", criteria)
+
+                        # Date de création
+                        creation = ad.get('ad_creation_time')
+                        if creation:
+                            st.caption(f"Créé: {creation.strftime('%Y-%m-%d')}")
+
+                        # Date de scan
+                        scan = ad.get('date_scan')
+                        if scan:
+                            st.caption(f"Scanné: {scan.strftime('%Y-%m-%d %H:%M')}")
+
+                        # Liens
+                        if ad.get('ad_snapshot_url'):
+                            st.link_button("🔗 Voir l'annonce", ad['ad_snapshot_url'])
+
+                        if ad.get('lien_site'):
+                            st.link_button("🌐 Site", ad['lien_site'])
+
+        else:
+            st.info("Aucune winning ad trouvée pour cette période. Lancez une recherche pour en détecter.")
 
     except Exception as e:
         st.error(f"Erreur: {e}")
@@ -1620,6 +1857,8 @@ def main():
         render_monitoring()
     elif page == "Analytics":
         render_analytics()
+    elif page == "Winning Ads":
+        render_winning_ads()
     elif page == "Blacklist":
         render_blacklist()
     elif page == "Settings":
