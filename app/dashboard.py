@@ -168,7 +168,7 @@ def get_database() -> DatabaseManager:
 class SearchProgressTracker:
     """
     Gestionnaire de progression pour les recherches avec timers détaillés.
-    Affiche le temps écoulé par phase et sous-étape.
+    Affiche le temps écoulé par phase et sous-étape avec interface visuelle.
     """
 
     def __init__(self, container):
@@ -181,15 +181,15 @@ class SearchProgressTracker:
         self.phase_start = None
         self.step_start = None
         self.phases_completed = []
+        self.current_phase = 0
+        self.current_phase_name = ""
+        self.total_phases = 8
 
         # Placeholders pour mise à jour dynamique
         with self.container:
-            self.header = st.empty()
-            self.phase_status = st.empty()
-            self.step_status = st.empty()
+            self.status_box = st.empty()
             self.progress_bar = st.progress(0)
-            self.stats_cols = st.columns(4)
-            self.details = st.empty()
+            self.summary_box = st.empty()
 
     def format_time(self, seconds: float) -> str:
         """Formate le temps en format lisible"""
@@ -198,62 +198,75 @@ class SearchProgressTracker:
         else:
             mins = int(seconds // 60)
             secs = seconds % 60
-            return f"{mins}m {secs:.1f}s"
+            return f"{mins}m {secs:.0f}s"
 
-    def start_phase(self, phase_num: int, phase_name: str, total_phases: int = 7):
+    def _render_status_box(self, step_info: str = "", extra_info: str = "", eta_str: str = ""):
+        """Affiche la boîte de statut avec toutes les infos"""
+        total_elapsed = time.time() - self.start_time
+        phase_elapsed = time.time() - self.phase_start if self.phase_start else 0
+
+        # Construire le contenu
+        with self.status_box.container():
+            # Header avec temps total
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"### ⏱️ Phase {self.current_phase}/{self.total_phases}: {self.current_phase_name}")
+            with col2:
+                st.markdown(f"**⏱ {self.format_time(total_elapsed)}**")
+
+            # Métriques en ligne
+            m1, m2, m3, m4 = st.columns(4)
+            with m1:
+                st.metric("Phase", f"{self.current_phase}/{self.total_phases}")
+            with m2:
+                st.metric("Temps total", self.format_time(total_elapsed))
+            with m3:
+                st.metric("Temps phase", self.format_time(phase_elapsed))
+            with m4:
+                if eta_str:
+                    st.metric("ETA", eta_str)
+                else:
+                    st.metric("ETA", "-")
+
+            # Info sur l'étape courante
+            if step_info:
+                st.info(f"🔄 {step_info}")
+
+            # Détail de l'élément en cours
+            if extra_info:
+                st.caption(f"📍 {extra_info}")
+
+    def start_phase(self, phase_num: int, phase_name: str, total_phases: int = 8):
         """Démarre une nouvelle phase"""
         self.phase_start = time.time()
         self.current_phase = phase_num
         self.current_phase_name = phase_name
         self.total_phases = total_phases
 
-        # Temps total écoulé
-        total_elapsed = time.time() - self.start_time
-
-        self.header.markdown(f"""
-        ### ⏱️ Progression de la recherche
-        **Temps total:** {self.format_time(total_elapsed)}
-        """)
-
-        self.phase_status.info(f"**Phase {phase_num}/{total_phases}:** {phase_name}")
-        self.step_status.empty()
-
-        # Mettre à jour les stats
-        with self.stats_cols[0]:
-            st.metric("Phase", f"{phase_num}/{total_phases}")
-        with self.stats_cols[1]:
-            st.metric("Temps total", self.format_time(total_elapsed))
+        self._render_status_box()
+        self.progress_bar.progress(0)
 
     def update_step(self, step_name: str, current: int, total: int, extra_info: str = None):
         """Met à jour la sous-étape courante"""
         self.step_start = time.time() if current == 1 else self.step_start
 
         # Calcul du temps estimé restant
-        if current > 0:
+        eta_str = ""
+        if current > 0 and self.phase_start:
             elapsed_phase = time.time() - self.phase_start
             avg_per_item = elapsed_phase / current
             remaining_items = total - current
             eta = avg_per_item * remaining_items
-            eta_str = f" | ETA: {self.format_time(eta)}" if eta > 1 else ""
-        else:
-            eta_str = ""
+            if eta > 1:
+                eta_str = self.format_time(eta)
 
-        # Progress
+        # Progress bar
         progress = current / total if total > 0 else 0
         self.progress_bar.progress(progress)
 
-        # Step info
-        step_info = f"🔄 {step_name} ({current}/{total}){eta_str}"
-        if extra_info:
-            step_info += f"\n\n`{extra_info}`"
-        self.step_status.markdown(step_info)
-
-        # Update stats
-        phase_elapsed = time.time() - self.phase_start
-        with self.stats_cols[2]:
-            st.metric("Temps phase", self.format_time(phase_elapsed))
-        with self.stats_cols[3]:
-            st.metric("Progression", f"{int(progress * 100)}%")
+        # Statut
+        step_info = f"{step_name}: {current}/{total} ({int(progress * 100)}%)"
+        self._render_status_box(step_info, extra_info or "", eta_str)
 
     def complete_phase(self, result_summary: str):
         """Marque une phase comme terminée"""
@@ -265,33 +278,35 @@ class SearchProgressTracker:
             "result": result_summary
         })
 
-        self.phase_status.success(f"✅ **Phase {self.current_phase}:** {self.current_phase_name} ({self.format_time(phase_elapsed)})")
-        self.step_status.markdown(f"*{result_summary}*")
         self.progress_bar.progress(1.0)
+
+        # Afficher phase terminée
+        with self.status_box.container():
+            st.success(f"✅ **Phase {self.current_phase}:** {self.current_phase_name} — {result_summary} ({self.format_time(phase_elapsed)})")
 
     def show_summary(self):
         """Affiche le résumé final avec tous les temps"""
         total_time = time.time() - self.start_time
 
-        self.header.markdown(f"""
-        ### ✅ Recherche terminée
-        **Temps total:** {self.format_time(total_time)}
-        """)
+        # Clear status box
+        self.status_box.empty()
 
-        # Tableau récapitulatif
-        summary_data = []
-        for p in self.phases_completed:
-            summary_data.append({
-                "Phase": f"{p['num']}. {p['name']}",
-                "Durée": self.format_time(p['time']),
-                "Résultat": p['result']
-            })
+        # Afficher le résumé
+        with self.summary_box.container():
+            st.markdown(f"### ✅ Recherche terminée en {self.format_time(total_time)}")
 
-        self.details.dataframe(
-            pd.DataFrame(summary_data),
-            hide_index=True,
-            use_container_width=True
-        )
+            # Tableau récapitulatif
+            summary_data = []
+            for p in self.phases_completed:
+                summary_data.append({
+                    "Phase": f"{p['num']}. {p['name']}",
+                    "Durée": self.format_time(p['time']),
+                    "Résultat": p['result']
+                })
+
+            if summary_data:
+                df = pd.DataFrame(summary_data)
+                st.dataframe(df, hide_index=True, use_container_width=True)
 
         return total_time
 
