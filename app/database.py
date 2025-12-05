@@ -2,14 +2,25 @@
 Module de gestion de la base de données PostgreSQL
 """
 import os
-from datetime import datetime
-from typing import List, Dict, Optional, Any
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional, Any, Tuple
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, Float, Index, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.dialects.postgresql import insert
+
+# Import du cache (avec fallback si non disponible)
+try:
+    from app.cache import get_stats_cache, cached, invalidate_stats_cache
+    CACHE_ENABLED = True
+except ImportError:
+    CACHE_ENABLED = False
+    def cached(*args, **kwargs):
+        def decorator(func):
+            return func
+        return decorator
 
 Base = declarative_base()
 
@@ -40,6 +51,7 @@ class PageRecherche(Base):
     nombre_ads_active = Column(Integer, default=0)
     nombre_produits = Column(Integer, default=0)
     dernier_scan = Column(DateTime, default=datetime.utcnow)
+    date_creation = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -47,6 +59,10 @@ class PageRecherche(Base):
         Index('idx_page_etat', 'etat'),
         Index('idx_page_cms', 'cms'),
         Index('idx_page_dernier_scan', 'dernier_scan'),
+        # Nouveaux index composites pour requêtes fréquentes
+        Index('idx_page_cms_etat', 'cms', 'etat'),  # Filtre CMS + État
+        Index('idx_page_etat_ads', 'etat', 'nombre_ads_active'),  # Tri par ads dans un état
+        Index('idx_page_created', 'created_at'),  # Pour tendances
     )
 
 
@@ -133,6 +149,9 @@ class WinningAds(Base):
         Index('idx_winning_ads_page', 'page_id'),
         Index('idx_winning_ads_date', 'date_scan'),
         Index('idx_winning_ads_ad', 'ad_id', 'date_scan'),
+        # Nouveaux index composites
+        Index('idx_winning_ads_page_date', 'page_id', 'date_scan'),  # Stats par page/période
+        Index('idx_winning_ads_reach', 'eu_total_reach'),  # Tri par reach
     )
 
 
@@ -336,6 +355,8 @@ class SearchLog(Base):
     __table_args__ = (
         Index('idx_search_log_date', 'started_at'),
         Index('idx_search_log_status', 'status'),
+        # Nouveaux index composites
+        Index('idx_search_log_status_date', 'status', 'started_at'),  # Filtrer par statut + période
     )
 
 
@@ -384,11 +405,11 @@ class APICallLog(Base):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class DatabaseManager:
-    """Gestionnaire de connexion à la base de données"""
+    """Gestionnaire de connexion à la base de données avec connection pooling optimisé"""
 
     def __init__(self, database_url: str = None):
         """
-        Initialise la connexion à la base de données
+        Initialise la connexion à la base de données avec pool de connexions.
 
         Args:
             database_url: URL de connexion PostgreSQL
@@ -399,8 +420,17 @@ class DatabaseManager:
                 "postgresql://postgres:postgres@localhost:5432/meta_ads"
             )
 
-        self.engine = create_engine(database_url, pool_pre_ping=True)
-        self.SessionLocal = sessionmaker(bind=self.engine)
+        # Configuration du pool de connexions optimisé
+        self.engine = create_engine(
+            database_url,
+            pool_pre_ping=True,          # Vérifie que la connexion est valide avant utilisation
+            pool_size=5,                  # Nombre de connexions permanentes dans le pool
+            max_overflow=10,              # Connexions supplémentaires autorisées en pic
+            pool_timeout=30,              # Timeout pour obtenir une connexion (secondes)
+            pool_recycle=1800,            # Recycle les connexions après 30 min (évite timeout DB)
+            echo=False,                   # Mettre à True pour debug SQL
+        )
+        self.SessionLocal = sessionmaker(bind=self.engine, expire_on_commit=False)
 
     def create_tables(self):
         """Crée toutes les tables si elles n'existent pas"""
@@ -408,7 +438,7 @@ class DatabaseManager:
 
     @contextmanager
     def get_session(self) -> Session:
-        """Context manager pour les sessions"""
+        """Context manager pour les sessions avec gestion automatique des transactions"""
         session = self.SessionLocal()
         try:
             yield session
@@ -418,6 +448,17 @@ class DatabaseManager:
             raise
         finally:
             session.close()
+
+    def get_pool_status(self) -> Dict:
+        """Retourne les statistiques du pool de connexions"""
+        pool = self.engine.pool
+        return {
+            "pool_size": pool.size(),
+            "checked_in": pool.checkedin(),
+            "checked_out": pool.checkedout(),
+            "overflow": pool.overflow(),
+            "invalid": pool.invalidatedcount() if hasattr(pool, 'invalidatedcount') else 0
+        }
 
 
 def ensure_tables_exist(db: DatabaseManager) -> bool:
@@ -788,8 +829,9 @@ def get_page_history(db: DatabaseManager, page_id: str) -> List[Dict]:
         ]
 
 
+@cached(ttl=30, key_prefix="suivi_")
 def get_suivi_stats(db: DatabaseManager) -> Dict:
-    """Récupère les statistiques de suivi"""
+    """Récupère les statistiques de suivi (cached 30s)"""
     with db.get_session() as session:
         # Nombre total de pages suivies
         total_pages = session.query(PageRecherche).count()
@@ -814,9 +856,10 @@ def get_suivi_stats(db: DatabaseManager) -> Dict:
         }
 
 
+@cached(ttl=60, key_prefix="trends_")
 def get_dashboard_trends(db: DatabaseManager, days: int = 7) -> Dict:
     """
-    Calcule les tendances en comparant la période actuelle avec la précédente.
+    Calcule les tendances en comparant la période actuelle avec la précédente (cached 60s).
 
     Args:
         db: Instance DatabaseManager
@@ -1488,9 +1531,10 @@ def get_winning_ads(
         ]
 
 
+@cached(ttl=30, key_prefix="winning_stats_")
 def get_winning_ads_stats(db: DatabaseManager, days: int = 30) -> Dict:
     """
-    Récupère les statistiques des winning ads
+    Récupère les statistiques des winning ads (cached 30s)
 
     Args:
         db: Instance DatabaseManager
@@ -1499,7 +1543,6 @@ def get_winning_ads_stats(db: DatabaseManager, days: int = 30) -> Dict:
     Returns:
         Dictionnaire avec les statistiques
     """
-    from datetime import timedelta
     from sqlalchemy import func
 
     cutoff = datetime.utcnow() - timedelta(days=days)
@@ -2668,3 +2711,264 @@ def reset_token_stats(db: DatabaseManager, token_id: int) -> bool:
         token.last_error_message = None
         token.rate_limited_until = None
         return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NETTOYAGE AUTOMATIQUE DES DONNÉES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def cleanup_old_data(
+    db: DatabaseManager,
+    winning_ads_days: int = 90,
+    search_logs_days: int = 30,
+    api_logs_days: int = 7,
+    dry_run: bool = False
+) -> Dict[str, int]:
+    """
+    Nettoie les anciennes données pour maintenir les performances de la DB.
+
+    Args:
+        db: Instance DatabaseManager
+        winning_ads_days: Supprimer les winning ads plus vieilles que X jours
+        search_logs_days: Supprimer les logs de recherche plus vieux que X jours
+        api_logs_days: Supprimer les logs API plus vieux que X jours
+        dry_run: Si True, compte seulement sans supprimer
+
+    Returns:
+        Dict avec le nombre d'entrées supprimées par table
+    """
+    results = {
+        "winning_ads": 0,
+        "search_logs": 0,
+        "api_call_logs": 0,
+        "suivi_page": 0
+    }
+
+    with db.get_session() as session:
+        # 1. Winning Ads anciennes
+        cutoff_winning = datetime.utcnow() - timedelta(days=winning_ads_days)
+        query_winning = session.query(WinningAds).filter(
+            WinningAds.date_scan < cutoff_winning
+        )
+        if dry_run:
+            results["winning_ads"] = query_winning.count()
+        else:
+            results["winning_ads"] = query_winning.delete(synchronize_session=False)
+
+        # 2. Search Logs anciens
+        cutoff_logs = datetime.utcnow() - timedelta(days=search_logs_days)
+        query_logs = session.query(SearchLog).filter(
+            SearchLog.started_at < cutoff_logs
+        )
+        if dry_run:
+            results["search_logs"] = query_logs.count()
+        else:
+            results["search_logs"] = query_logs.delete(synchronize_session=False)
+
+        # 3. API Call Logs anciens
+        cutoff_api = datetime.utcnow() - timedelta(days=api_logs_days)
+        query_api = session.query(APICallLog).filter(
+            APICallLog.called_at < cutoff_api
+        )
+        if dry_run:
+            results["api_call_logs"] = query_api.count()
+        else:
+            results["api_call_logs"] = query_api.delete(synchronize_session=False)
+
+        # 4. Suivi Page ancien (garder seulement les 30 derniers jours par page)
+        cutoff_suivi = datetime.utcnow() - timedelta(days=60)
+        query_suivi = session.query(SuiviPage).filter(
+            SuiviPage.date_scan < cutoff_suivi
+        )
+        if dry_run:
+            results["suivi_page"] = query_suivi.count()
+        else:
+            results["suivi_page"] = query_suivi.delete(synchronize_session=False)
+
+    # Invalider le cache après nettoyage
+    if not dry_run and CACHE_ENABLED:
+        invalidate_stats_cache()
+
+    return results
+
+
+def vacuum_database(db: DatabaseManager) -> bool:
+    """
+    Exécute un VACUUM ANALYZE sur la base pour récupérer l'espace et mettre à jour les stats.
+    Note: Nécessite autocommit=True, donc on utilise une connexion directe.
+
+    Returns:
+        True si succès
+    """
+    try:
+        from sqlalchemy import text
+        # VACUUM ne peut pas être exécuté dans une transaction
+        with db.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            conn.execute(text("VACUUM ANALYZE"))
+        return True
+    except Exception as e:
+        print(f"Erreur VACUUM: {e}")
+        return False
+
+
+def get_database_stats(db: DatabaseManager) -> Dict:
+    """
+    Retourne des statistiques sur la base de données.
+
+    Returns:
+        Dict avec les statistiques de chaque table
+    """
+    from sqlalchemy import func, text
+
+    stats = {}
+
+    with db.get_session() as session:
+        # Compter les entrées par table
+        stats["tables"] = {
+            "pages": session.query(PageRecherche).count(),
+            "suivi": session.query(SuiviPage).count(),
+            "ads": session.query(AdsRecherche).count(),
+            "winning_ads": session.query(WinningAds).count(),
+            "blacklist": session.query(Blacklist).count(),
+            "search_logs": session.query(SearchLog).count(),
+            "api_logs": session.query(APICallLog).count(),
+            "favorites": session.query(Favorite).count(),
+            "collections": session.query(Collection).count(),
+            "tags": session.query(Tag).count(),
+        }
+
+        # Dates extrêmes
+        oldest_page = session.query(func.min(PageRecherche.created_at)).scalar()
+        newest_page = session.query(func.max(PageRecherche.created_at)).scalar()
+        oldest_winning = session.query(func.min(WinningAds.date_scan)).scalar()
+        newest_winning = session.query(func.max(WinningAds.date_scan)).scalar()
+
+        stats["dates"] = {
+            "oldest_page": oldest_page.isoformat() if oldest_page else None,
+            "newest_page": newest_page.isoformat() if newest_page else None,
+            "oldest_winning_ad": oldest_winning.isoformat() if oldest_winning else None,
+            "newest_winning_ad": newest_winning.isoformat() if newest_winning else None,
+        }
+
+        # Pool de connexions
+        stats["pool"] = db.get_pool_status()
+
+    return stats
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HEALTH CHECK
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def health_check(db: DatabaseManager) -> Dict:
+    """
+    Vérifie la santé de la base de données.
+
+    Returns:
+        Dict avec le statut et les détails
+    """
+    from sqlalchemy import text
+
+    result = {
+        "status": "healthy",
+        "database": "unknown",
+        "pool": None,
+        "tables_exist": False,
+        "errors": []
+    }
+
+    try:
+        # 1. Test de connexion basique
+        with db.get_session() as session:
+            session.execute(text("SELECT 1"))
+        result["database"] = "connected"
+
+        # 2. Vérifier que les tables existent
+        with db.get_session() as session:
+            # Tester une requête simple sur chaque table principale
+            session.query(PageRecherche).limit(1).all()
+            session.query(WinningAds).limit(1).all()
+            session.query(SearchLog).limit(1).all()
+        result["tables_exist"] = True
+
+        # 3. Stats du pool
+        result["pool"] = db.get_pool_status()
+
+        # 4. Vérifier l'espace (estimation basée sur le nombre de lignes)
+        with db.get_session() as session:
+            total_rows = (
+                session.query(PageRecherche).count() +
+                session.query(WinningAds).count() +
+                session.query(SearchLog).count() +
+                session.query(APICallLog).count()
+            )
+            if total_rows > 1000000:  # Plus d'1M de lignes
+                result["warnings"] = ["Database has over 1M rows, consider cleanup"]
+
+    except Exception as e:
+        result["status"] = "unhealthy"
+        result["errors"].append(str(e))
+
+    return result
+
+
+def batch_insert_pages(
+    db: DatabaseManager,
+    pages_data: List[Dict],
+    batch_size: int = 100
+) -> int:
+    """
+    Insertion en batch optimisée pour les nouvelles pages.
+    Utilise INSERT ... ON CONFLICT DO UPDATE pour gérer les doublons.
+
+    Args:
+        db: Instance DatabaseManager
+        pages_data: Liste de dictionnaires avec les données des pages
+        batch_size: Taille des batches
+
+    Returns:
+        Nombre de pages insérées/mises à jour
+    """
+    if not pages_data:
+        return 0
+
+    total = 0
+    scan_time = datetime.utcnow()
+
+    with db.get_session() as session:
+        for i in range(0, len(pages_data), batch_size):
+            batch = pages_data[i:i + batch_size]
+
+            for data in batch:
+                stmt = insert(PageRecherche).values(
+                    page_id=str(data.get("page_id", "")),
+                    page_name=data.get("page_name", ""),
+                    lien_site=data.get("website", ""),
+                    lien_fb_ad_library=data.get("fb_link", ""),
+                    keywords=data.get("keywords", ""),
+                    cms=data.get("cms", "Unknown"),
+                    etat=data.get("etat", "XS"),
+                    nombre_ads_active=data.get("ads_count", 0),
+                    nombre_produits=data.get("product_count", 0),
+                    dernier_scan=scan_time,
+                    created_at=scan_time,
+                    updated_at=scan_time,
+                ).on_conflict_do_update(
+                    index_elements=['page_id'],
+                    set_={
+                        'page_name': data.get("page_name", ""),
+                        'lien_site': data.get("website", ""),
+                        'nombre_ads_active': data.get("ads_count", 0),
+                        'nombre_produits': data.get("product_count", 0),
+                        'dernier_scan': scan_time,
+                        'updated_at': scan_time,
+                    }
+                )
+                session.execute(stmt)
+                total += 1
+
+    # Invalider le cache
+    if CACHE_ENABLED:
+        invalidate_stats_cache()
+
+    return total
