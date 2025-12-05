@@ -1446,6 +1446,8 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
     pages = {}
     page_ads = defaultdict(list)
     name_counter = defaultdict(Counter)
+    blacklisted_ads_count = 0
+    blacklisted_pages_found = set()
 
     for i, ad in enumerate(all_ads):
         if i % 100 == 0:
@@ -1457,6 +1459,8 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
 
         # Ignorer les pages blacklistées
         if str(pid) in blacklist_ids:
+            blacklisted_ads_count += 1
+            blacklisted_pages_found.add(str(pid))
             continue
 
         pname = (ad.get("page_name") or "").strip()
@@ -1488,10 +1492,20 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
         data["ads_found_search"] = len(data["_ad_ids"])
 
     pages_filtered = {pid: data for pid, data in pages.items() if data["ads_found_search"] >= min_ads}
-    tracker.complete_phase(f"{len(pages_filtered)} pages avec ≥{min_ads} ads")
+
+    # Afficher les détails du filtrage
+    phase2_details = f"{len(pages_filtered)} pages avec ≥{min_ads} ads"
+    if blacklisted_ads_count > 0:
+        phase2_details += f" ({blacklisted_ads_count} ads de {len(blacklisted_pages_found)} page(s) blacklistée(s) ignorées)"
+    tracker.complete_phase(phase2_details)
 
     if not pages_filtered:
-        st.warning("Aucune page trouvée avec assez d'ads")
+        if blacklisted_ads_count > 0 and len(pages) == 0:
+            st.warning(f"⚠️ Toutes les {blacklisted_ads_count} ads trouvées appartiennent à des pages blacklistées")
+        elif len(all_ads) == 0:
+            st.warning("⚠️ Aucune annonce trouvée pour ces mots-clés. Essayez d'autres termes de recherche.")
+        else:
+            st.warning(f"⚠️ {len(pages)} pages trouvées mais aucune avec ≥{min_ads} ads (après filtrage blacklist)")
         return
 
     # ═══ PHASE 3: Vérification cache + Extraction sites web ═══
