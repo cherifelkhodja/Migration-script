@@ -171,9 +171,9 @@ def execute_background_search(
     Returns:
         Dict avec les résultats et search_log_id
     """
-    from app.meta_api import MetaAdsClient, init_token_rotator
+    from app.meta_api import MetaAdsClient, init_token_rotator, extract_currency_from_ads
     from app.shopify_detector import detect_cms_from_url
-    from app.web_analyzer import analyze_website_complete, extract_currency_from_ads
+    from app.web_analyzer import analyze_website_complete
     from app.winning_detector import is_winning_ad
     from app.database import (
         get_active_meta_tokens, get_blacklist_ids, get_cached_pages_info,
