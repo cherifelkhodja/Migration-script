@@ -325,7 +325,7 @@ class SearchProgressTracker:
         if key in self.metrics:
             self.metrics[key] += value
 
-    def log_detail(self, icon: str, message: str, count: int = None, total_so_far: int = None):
+    def log_detail(self, icon: str, message: str, count: int = None, total_so_far: int = None, replace: bool = False):
         """
         Ajoute une entrée au log détaillé en temps réel.
 
@@ -334,6 +334,7 @@ class SearchProgressTracker:
             message: Message descriptif
             count: Nombre d'items pour cette étape (optionnel)
             total_so_far: Total cumulé jusqu'à présent (optionnel)
+            replace: Si True, remplace la dernière entrée au lieu d'en ajouter une nouvelle
         """
         timestamp = self.format_time(time.time() - self.start_time)
         log_entry = {
@@ -343,17 +344,22 @@ class SearchProgressTracker:
             "count": count,
             "total": total_so_far
         }
-        self.detail_logs.append(log_entry)
+
+        if replace and self.detail_logs:
+            self.detail_logs[-1] = log_entry
+        else:
+            self.detail_logs.append(log_entry)
+
         self._render_detail_logs()
 
     def _render_detail_logs(self):
         """Affiche le log détaillé avec les dernières entrées"""
         with self.detail_log_box.container():
-            # Afficher les 10 dernières entrées (ou toutes si moins)
-            recent_logs = self.detail_logs[-10:]
+            # Afficher les 5 dernières entrées
+            recent_logs = self.detail_logs[-5:]
 
             if recent_logs:
-                st.markdown("##### 📋 Détails en temps réel")
+                st.markdown("##### 📋 Progression")
                 log_text = ""
                 for log in recent_logs:
                     line = f"`{log['time']}` {log['icon']} {log['message']}"
@@ -1821,8 +1827,8 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
 
                 if completed % 5 == 0:
                     tracker.update_step("Analyse CMS", completed, len(pages_need_cms))
-                    # Log les CMS détectés
-                    tracker.log_detail("🔍", f"CMS analysés", count=completed, total_so_far=len(pages_need_cms))
+                    # Log les CMS détectés (replace=True pour mise à jour en place)
+                    tracker.log_detail("🔍", f"CMS analysés", count=completed, total_so_far=len(pages_need_cms), replace=True)
 
     # Log des CMS trouvés
     tracker.clear_detail_logs()
