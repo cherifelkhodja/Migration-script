@@ -1573,7 +1573,14 @@ def get_winning_ads_stats(db: DatabaseManager, days: int = 30) -> Dict:
             WinningAds.date_scan >= cutoff
         ).count()
 
-        # Par page (top 10)
+        # Nombre total de pages distinctes avec winning ads
+        unique_pages_count = session.query(
+            func.count(func.distinct(WinningAds.page_id))
+        ).filter(
+            WinningAds.date_scan >= cutoff
+        ).scalar() or 0
+
+        # Par page (top 10 pour affichage)
         by_page = session.query(
             WinningAds.page_id,
             WinningAds.page_name,
@@ -1605,6 +1612,7 @@ def get_winning_ads_stats(db: DatabaseManager, days: int = 30) -> Dict:
 
         return {
             "total": total,
+            "unique_pages": unique_pages_count,  # Nombre total de pages distinctes
             "by_page": [{"page_id": p[0], "page_name": p[1], "count": p[2]} for p in by_page],
             "by_criteria": {c[0]: c[1] for c in by_criteria if c[0]},
             "avg_reach": int(avg_reach) if avg_reach else 0

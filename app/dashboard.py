@@ -3449,8 +3449,8 @@ def render_winning_ads():
 
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("🏆 Total Winning Ads", stats.get("total", 0))
-        col2.metric("📄 Pages avec Winning", len(stats.get("by_page", [])))
-        col3.metric("📈 Reach moyen", f"{stats.get('avg_reach', 0):,}")
+        col2.metric("📄 Pages avec Winning", stats.get("unique_pages", 0))
+        col3.metric("📈 Reach moyen", f"{stats.get('avg_reach', 0):,}".replace(",", " "))
 
         # Critères les plus fréquents
         by_criteria = stats.get("by_criteria", {})
