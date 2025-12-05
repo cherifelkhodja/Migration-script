@@ -2724,7 +2724,7 @@ def complete_search_log(
     api_metrics: Dict = None
 ) -> bool:
     """
-    Finalise un log de recherche
+    Finalise un log de recherche (wrapper pour update_search_log).
 
     Args:
         db: Instance DatabaseManager
@@ -2734,54 +2734,29 @@ def complete_search_log(
         metrics: Dictionnaire avec les métriques finales
         api_metrics: Dictionnaire avec les métriques API
     """
-    import json
+    # Extraire les métriques des dicts
+    kwargs = {}
+    if metrics:
+        kwargs.update({
+            "total_ads_found": metrics.get("total_ads_found"),
+            "total_pages_found": metrics.get("total_pages_found"),
+            "pages_after_filter": metrics.get("pages_after_filter"),
+            "pages_shopify": metrics.get("pages_shopify"),
+            "pages_other_cms": metrics.get("pages_other_cms"),
+            "winning_ads_count": metrics.get("winning_ads_count"),
+            "blacklisted_ads_skipped": metrics.get("blacklisted_ads_skipped"),
+            "pages_saved": metrics.get("pages_saved"),
+            "ads_saved": metrics.get("ads_saved"),
+        })
+    if api_metrics:
+        kwargs.update(api_metrics)
 
-    with db.get_session() as session:
-        log = session.query(SearchLog).filter(SearchLog.id == log_id).first()
-        if not log:
-            return False
-
-        log.ended_at = datetime.utcnow()
-        log.duration_seconds = (log.ended_at - log.started_at).total_seconds()
-        log.status = status
-
-        if error_message:
-            log.error_message = error_message
-
-        if metrics:
-            log.total_ads_found = metrics.get("total_ads_found", 0)
-            log.total_pages_found = metrics.get("total_pages_found", 0)
-            log.pages_after_filter = metrics.get("pages_after_filter", 0)
-            log.pages_shopify = metrics.get("pages_shopify", 0)
-            log.pages_other_cms = metrics.get("pages_other_cms", 0)
-            log.winning_ads_count = metrics.get("winning_ads_count", 0)
-            log.blacklisted_ads_skipped = metrics.get("blacklisted_ads_skipped", 0)
-            log.pages_saved = metrics.get("pages_saved", 0)
-            log.ads_saved = metrics.get("ads_saved", 0)
-
-        # Métriques API
-        if api_metrics:
-            log.meta_api_calls = api_metrics.get("meta_api_calls", 0)
-            log.scraper_api_calls = api_metrics.get("scraper_api_calls", 0)
-            log.web_requests = api_metrics.get("web_requests", 0)
-            log.meta_api_errors = api_metrics.get("meta_api_errors", 0)
-            log.scraper_api_errors = api_metrics.get("scraper_api_errors", 0)
-            log.web_errors = api_metrics.get("web_errors", 0)
-            log.rate_limit_hits = api_metrics.get("rate_limit_hits", 0)
-            log.meta_api_avg_time = api_metrics.get("meta_api_avg_time", 0)
-            log.scraper_api_avg_time = api_metrics.get("scraper_api_avg_time", 0)
-            log.web_avg_time = api_metrics.get("web_avg_time", 0)
-            log.scraper_api_cost = api_metrics.get("scraper_api_cost", 0)
-            # Sauvegarder api_details avec scraper_errors_by_type
-            api_details_data = {}
-            if api_metrics.get("api_details"):
-                api_details_data["keyword_stats"] = api_metrics["api_details"]
-            if api_metrics.get("scraper_errors_by_type"):
-                api_details_data["scraper_errors_by_type"] = api_metrics["scraper_errors_by_type"]
-            if api_details_data:
-                log.api_details = json.dumps(api_details_data, ensure_ascii=False)
-
-        return True
+    return update_search_log(
+        db, log_id,
+        status=status,
+        error_message=error_message,
+        **kwargs
+    )
 
 
 def update_search_log(
