@@ -4164,3 +4164,119 @@ def get_classification_stats(db: DatabaseManager) -> Dict:
             "classification_rate": round(classified / total * 100, 1) if total > 0 else 0,
             "top_categories": [{"category": c, "count": n} for c, n in top_categories]
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FONCTIONS DE MIGRATION BATCH
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def migration_add_country_to_all_pages(db: DatabaseManager, country: str = "FR") -> int:
+    """
+    Ajoute un pays à toutes les pages existantes (si pas déjà présent).
+
+    Args:
+        db: DatabaseManager
+        country: Code pays (défaut: "FR")
+
+    Returns:
+        Nombre de pages mises à jour
+    """
+    country = country.upper().strip()
+    updated = 0
+
+    with db.get_session() as session:
+        # Récupérer toutes les pages
+        pages = session.query(PageRecherche).all()
+
+        for page in pages:
+            existing_countries = []
+            if page.pays:
+                existing_countries = [c.strip().upper() for c in page.pays.split(",") if c.strip()]
+
+            if country not in existing_countries:
+                existing_countries.append(country)
+                page.pays = ",".join(existing_countries)
+                updated += 1
+
+    return updated
+
+
+def get_all_pages_for_classification(
+    db: DatabaseManager,
+    include_classified: bool = True,
+    limit: int = None
+) -> List[Dict]:
+    """
+    Récupère toutes les pages pour classification (y compris déjà classifiées).
+
+    Args:
+        db: DatabaseManager
+        include_classified: Inclure les pages déjà classifiées
+        limit: Limite de pages (None = toutes)
+
+    Returns:
+        Liste de pages avec page_id et url
+    """
+    with db.get_session() as session:
+        query = session.query(PageRecherche).filter(
+            PageRecherche.lien_site != None,
+            PageRecherche.lien_site != ""
+        )
+
+        if not include_classified:
+            query = query.filter(
+                (PageRecherche.thematique == None) | (PageRecherche.thematique == "")
+            )
+
+        if limit:
+            query = query.limit(limit)
+
+        pages = query.all()
+
+        return [
+            {
+                "page_id": p.page_id,
+                "page_name": p.page_name,
+                "url": p.lien_site,
+                "cms": p.cms,
+                "current_thematique": p.thematique,
+                "current_subcategory": p.subcategory
+            }
+            for p in pages
+        ]
+
+
+def get_pages_count(db: DatabaseManager) -> Dict:
+    """
+    Compte les pages par statut de classification et pays.
+
+    Returns:
+        Dict avec les comptages
+    """
+    from sqlalchemy import func
+
+    with db.get_session() as session:
+        total = session.query(func.count(PageRecherche.id)).scalar() or 0
+
+        with_url = session.query(func.count(PageRecherche.id)).filter(
+            PageRecherche.lien_site != None,
+            PageRecherche.lien_site != ""
+        ).scalar() or 0
+
+        classified = session.query(func.count(PageRecherche.id)).filter(
+            PageRecherche.thematique != None,
+            PageRecherche.thematique != ""
+        ).scalar() or 0
+
+        with_fr = session.query(func.count(PageRecherche.id)).filter(
+            PageRecherche.pays.ilike("%FR%")
+        ).scalar() or 0
+
+        return {
+            "total": total,
+            "with_url": with_url,
+            "classified": classified,
+            "unclassified": with_url - classified,
+            "with_fr": with_fr,
+            "without_fr": total - with_fr
+        }

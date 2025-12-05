@@ -4973,6 +4973,220 @@ def render_settings():
                         except Exception as e:
                             st.error(f"Erreur: {e}")
 
+        # ═══════════════════════════════════════════════════════════════════════════
+        # MIGRATION: Appliquer aux pages existantes
+        # ═══════════════════════════════════════════════════════════════════════════
+        st.markdown("---")
+        st.subheader("🔄 Migration des données existantes")
+        st.markdown("Appliquer la classification et le pays France aux pages déjà enregistrées.")
+
+        # Importer les fonctions de migration
+        from app.database import (
+            get_pages_count, migration_add_country_to_all_pages,
+            get_all_pages_for_classification, update_pages_classification_batch,
+            build_taxonomy_prompt, init_default_taxonomy
+        )
+
+        # Stats actuelles
+        try:
+            migration_stats = get_pages_count(db)
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Total pages", migration_stats["total"])
+            col2.metric("Classifiées", migration_stats["classified"])
+            col3.metric("Avec pays FR", migration_stats["with_fr"])
+            col4.metric("Sans pays FR", migration_stats["without_fr"])
+        except Exception:
+            migration_stats = {"total": 0, "classified": 0, "with_fr": 0, "without_fr": 0, "unclassified": 0}
+
+        # Actions de migration
+        st.markdown("**Actions de migration:**")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.markdown("**🇫🇷 Ajouter France**")
+            st.caption(f"{migration_stats.get('without_fr', 0)} pages sans FR")
+            if st.button("Ajouter FR à toutes les pages", key="migration_add_fr", type="secondary"):
+                if migration_stats.get('without_fr', 0) == 0:
+                    st.info("✓ Toutes les pages ont déjà FR")
+                else:
+                    with st.spinner("Ajout de FR en cours..."):
+                        try:
+                            updated = migration_add_country_to_all_pages(db, "FR")
+                            st.success(f"✅ {updated} pages mises à jour avec FR")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur: {e}")
+
+        with col2:
+            st.markdown("**🏷️ Classification Gemini**")
+            unclassified = migration_stats.get('unclassified', 0)
+            st.caption(f"{unclassified} pages non classifiées")
+            reclassify_all = st.checkbox("Re-classifier TOUTES les pages", key="migration_reclassify_all")
+
+            pages_to_classify = migration_stats.get('total', 0) if reclassify_all else unclassified
+
+            if st.button("Lancer la classification", key="migration_classify", type="secondary"):
+                if not gemini_key:
+                    st.error("Configurez GEMINI_API_KEY d'abord")
+                elif pages_to_classify == 0:
+                    st.info("✓ Aucune page à classifier")
+                else:
+                    # Estimation du temps
+                    from app.gemini_classifier import BATCH_SIZE, RATE_LIMIT_DELAY
+                    gemini_batches = (pages_to_classify + BATCH_SIZE - 1) // BATCH_SIZE
+                    estimated_time = gemini_batches * RATE_LIMIT_DELAY / 60
+
+                    st.info(f"⏱️ Temps estimé: ~{estimated_time:.1f} minutes ({gemini_batches} batches)")
+
+                    # Progress bar et status
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+
+                    try:
+                        # Initialiser taxonomie
+                        init_default_taxonomy(db)
+                        taxonomy_text = build_taxonomy_prompt(db)
+
+                        if not taxonomy_text:
+                            st.error("Aucune taxonomie configurée")
+                        else:
+                            # Récupérer les pages
+                            pages = get_all_pages_for_classification(db, include_classified=reclassify_all)
+                            total_pages = len(pages)
+
+                            if total_pages == 0:
+                                st.info("✓ Aucune page à classifier")
+                            else:
+                                from app.gemini_classifier import classify_pages_sync
+
+                                # Traiter par lots
+                                batch_size_migration = 100
+                                total_classified = 0
+                                total_errors = 0
+
+                                for i in range(0, total_pages, batch_size_migration):
+                                    batch = pages[i:i + batch_size_migration]
+                                    batch_num = i // batch_size_migration + 1
+                                    total_batches = (total_pages + batch_size_migration - 1) // batch_size_migration
+
+                                    progress = (i + len(batch)) / total_pages
+                                    progress_bar.progress(progress)
+                                    status_text.text(f"Batch {batch_num}/{total_batches} - {len(batch)} pages...")
+
+                                    try:
+                                        results = classify_pages_sync(batch, taxonomy_text)
+
+                                        classifications = [
+                                            {
+                                                "page_id": r.page_id,
+                                                "category": r.category,
+                                                "subcategory": r.subcategory,
+                                                "confidence": r.confidence_score
+                                            }
+                                            for r in results
+                                        ]
+
+                                        updated = update_pages_classification_batch(db, classifications)
+                                        errors = sum(1 for r in results if r.error)
+                                        total_classified += updated
+                                        total_errors += errors
+
+                                    except Exception as e:
+                                        st.warning(f"Erreur batch {batch_num}: {e}")
+                                        total_errors += len(batch)
+
+                                progress_bar.progress(1.0)
+                                status_text.text("Terminé!")
+                                st.success(f"✅ {total_classified} pages classifiées ({total_errors} erreurs)")
+                                st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Erreur: {e}")
+
+        with col3:
+            st.markdown("**🚀 Migration complète**")
+            st.caption("FR + Classification de toutes les pages")
+            if st.button("Lancer migration complète", key="migration_full", type="primary"):
+                if not gemini_key:
+                    st.error("Configurez GEMINI_API_KEY d'abord")
+                else:
+                    # Étape 1: Ajouter FR
+                    with st.spinner("Étape 1/2: Ajout de FR..."):
+                        try:
+                            updated_fr = migration_add_country_to_all_pages(db, "FR")
+                            st.success(f"✅ Étape 1: {updated_fr} pages avec FR")
+                        except Exception as e:
+                            st.error(f"Erreur FR: {e}")
+                            updated_fr = 0
+
+                    # Étape 2: Classification
+                    from app.gemini_classifier import BATCH_SIZE, RATE_LIMIT_DELAY
+
+                    init_default_taxonomy(db)
+                    taxonomy_text = build_taxonomy_prompt(db)
+
+                    if not taxonomy_text:
+                        st.error("Aucune taxonomie configurée")
+                    else:
+                        pages = get_all_pages_for_classification(db, include_classified=True)
+                        total_pages = len(pages)
+
+                        if total_pages == 0:
+                            st.info("✓ Aucune page à classifier")
+                        else:
+                            gemini_batches = (total_pages + BATCH_SIZE - 1) // BATCH_SIZE
+                            estimated_time = gemini_batches * RATE_LIMIT_DELAY / 60
+                            st.info(f"⏱️ Étape 2: Classification de {total_pages} pages (~{estimated_time:.1f} min)")
+
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+
+                            try:
+                                from app.gemini_classifier import classify_pages_sync
+
+                                batch_size_migration = 100
+                                total_classified = 0
+                                total_errors = 0
+
+                                for i in range(0, total_pages, batch_size_migration):
+                                    batch = pages[i:i + batch_size_migration]
+                                    batch_num = i // batch_size_migration + 1
+                                    total_batches = (total_pages + batch_size_migration - 1) // batch_size_migration
+
+                                    progress = (i + len(batch)) / total_pages
+                                    progress_bar.progress(progress)
+                                    status_text.text(f"Batch {batch_num}/{total_batches}...")
+
+                                    try:
+                                        results = classify_pages_sync(batch, taxonomy_text)
+
+                                        classifications = [
+                                            {
+                                                "page_id": r.page_id,
+                                                "category": r.category,
+                                                "subcategory": r.subcategory,
+                                                "confidence": r.confidence_score
+                                            }
+                                            for r in results
+                                        ]
+
+                                        updated = update_pages_classification_batch(db, classifications)
+                                        errors = sum(1 for r in results if r.error)
+                                        total_classified += updated
+                                        total_errors += errors
+
+                                    except Exception as e:
+                                        total_errors += len(batch)
+
+                                progress_bar.progress(1.0)
+                                status_text.text("Migration terminée!")
+                                st.success(f"✅ Migration complète: {updated_fr} pages FR, {total_classified} classifiées")
+                                st.rerun()
+
+                            except Exception as e:
+                                st.error(f"Erreur classification: {e}")
+
     else:
         st.warning("Base de données non connectée")
 
