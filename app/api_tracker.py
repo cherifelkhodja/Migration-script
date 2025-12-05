@@ -56,6 +56,7 @@ class APITracker:
         self._scraper_api_calls = 0
         self._scraper_api_errors = 0
         self._scraper_api_times: List[float] = []
+        self._scraper_errors_by_type: Dict[str, int] = {}  # Erreurs par type (404, 403, timeout, etc.)
 
         self._web_requests = 0
         self._web_errors = 0
@@ -129,6 +130,30 @@ class APITracker:
             self._scraper_api_calls += 1
             if not success:
                 self._scraper_api_errors += 1
+                # Catégoriser l'erreur
+                if error_type == "timeout":
+                    err_key = "timeout"
+                elif status_code == 403:
+                    err_key = "403_forbidden"
+                elif status_code == 404:
+                    err_key = "404_not_found"
+                elif status_code == 429:
+                    err_key = "429_rate_limit"
+                elif status_code == 500:
+                    err_key = "500_server_error"
+                elif status_code == 502:
+                    err_key = "502_bad_gateway"
+                elif status_code == 503:
+                    err_key = "503_unavailable"
+                elif status_code >= 400 and status_code < 500:
+                    err_key = f"{status_code}_client_error"
+                elif status_code >= 500:
+                    err_key = f"{status_code}_server_error"
+                elif error_type:
+                    err_key = error_type
+                else:
+                    err_key = "unknown"
+                self._scraper_errors_by_type[err_key] = self._scraper_errors_by_type.get(err_key, 0) + 1
             self._scraper_api_times.append(response_time_ms)
 
             call = APICall(
@@ -192,6 +217,7 @@ class APITracker:
                 # Erreurs
                 "meta_api_errors": self._meta_api_errors,
                 "scraper_api_errors": self._scraper_api_errors,
+                "scraper_errors_by_type": dict(self._scraper_errors_by_type),
                 "web_errors": self._web_errors,
                 "rate_limit_hits": self._rate_limit_hits,
 
@@ -216,6 +242,7 @@ class APITracker:
             "web_requests": summary["web_requests"],
             "meta_api_errors": summary["meta_api_errors"],
             "scraper_api_errors": summary["scraper_api_errors"],
+            "scraper_errors_by_type": summary["scraper_errors_by_type"],
             "web_errors": summary["web_errors"],
             "rate_limit_hits": summary["rate_limit_hits"],
             "meta_api_avg_time": round(summary["meta_api_avg_time"], 2),

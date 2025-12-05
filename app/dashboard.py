@@ -4389,6 +4389,25 @@ def render_search_logs():
                 with err_cols[4]:
                     st.caption(f"💰 Coût ScraperAPI: ${scraper_cost:.4f}")
 
+                # Détail des erreurs scraper par type (si disponibles)
+                scraper_errors_by_type = log.get("scraper_errors_by_type")
+                if scraper_errors_by_type and isinstance(scraper_errors_by_type, dict) and len(scraper_errors_by_type) > 0:
+                    error_labels = {
+                        "timeout": "⏰ Timeout",
+                        "403_forbidden": "🚫 403 Bloqué",
+                        "404_not_found": "🔍 404 Non trouvé",
+                        "429_rate_limit": "⏱️ 429 Rate limit",
+                        "500_server_error": "💥 500 Erreur serveur",
+                        "502_bad_gateway": "🌐 502 Bad Gateway",
+                        "503_unavailable": "🔧 503 Indisponible",
+                        "unknown": "❓ Inconnu"
+                    }
+                    err_details = []
+                    for err_type, count in sorted(scraper_errors_by_type.items(), key=lambda x: -x[1]):
+                        label = error_labels.get(err_type, f"⚠️ {err_type}")
+                        err_details.append(f"{label}: {count}")
+                    st.caption("📊 **Détail erreurs scraper:** " + " | ".join(err_details))
+
                 # Ligne 3: Temps moyens
                 meta_avg = log.get("meta_api_avg_time", 0) or 0
                 scraper_avg = log.get("scraper_api_avg_time", 0) or 0

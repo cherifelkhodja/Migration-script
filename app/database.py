@@ -2081,8 +2081,14 @@ def complete_search_log(
             log.scraper_api_avg_time = api_metrics.get("scraper_api_avg_time", 0)
             log.web_avg_time = api_metrics.get("web_avg_time", 0)
             log.scraper_api_cost = api_metrics.get("scraper_api_cost", 0)
+            # Sauvegarder api_details avec scraper_errors_by_type
+            api_details_data = {}
             if api_metrics.get("api_details"):
-                log.api_details = json.dumps(api_metrics["api_details"], ensure_ascii=False)
+                api_details_data["keyword_stats"] = api_metrics["api_details"]
+            if api_metrics.get("scraper_errors_by_type"):
+                api_details_data["scraper_errors_by_type"] = api_metrics["scraper_errors_by_type"]
+            if api_details_data:
+                log.api_details = json.dumps(api_details_data, ensure_ascii=False)
 
         return True
 
@@ -2207,8 +2213,29 @@ def get_search_logs(
             "scraper_api_avg_time": getattr(l, 'scraper_api_avg_time', 0) or 0,
             "web_avg_time": getattr(l, 'web_avg_time', 0) or 0,
             "scraper_api_cost": getattr(l, 'scraper_api_cost', 0) or 0,
-            "api_details": json.loads(l.api_details) if getattr(l, 'api_details', None) else {}
+            **_parse_api_details(getattr(l, 'api_details', None))
         } for l in logs]
+
+
+def _parse_api_details(api_details_json: str) -> Dict:
+    """Parse le JSON api_details et extrait les champs"""
+    import json
+    result = {"api_details": {}, "scraper_errors_by_type": {}}
+    if not api_details_json:
+        return result
+    try:
+        data = json.loads(api_details_json)
+        if isinstance(data, dict):
+            # Nouveau format avec keyword_stats et scraper_errors_by_type
+            if "keyword_stats" in data:
+                result["api_details"] = data.get("keyword_stats", {})
+                result["scraper_errors_by_type"] = data.get("scraper_errors_by_type", {})
+            else:
+                # Ancien format: tout est keyword_stats
+                result["api_details"] = data
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return result
 
 
 def get_search_log_detail(db: DatabaseManager, log_id: int) -> Optional[Dict]:
