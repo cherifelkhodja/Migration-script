@@ -51,7 +51,6 @@ class PageRecherche(Base):
     nombre_ads_active = Column(Integer, default=0)
     nombre_produits = Column(Integer, default=0)
     dernier_scan = Column(DateTime, default=datetime.utcnow)
-    date_creation = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -503,8 +502,6 @@ def _run_migrations(db: DatabaseManager):
         ("search_logs", "web_avg_time", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS web_avg_time FLOAT DEFAULT 0"),
         ("search_logs", "scraper_api_cost", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS scraper_api_cost FLOAT DEFAULT 0"),
         ("search_logs", "api_details", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS api_details TEXT"),
-        # Colonne date_creation pour PageRecherche (pour les tendances)
-        ("liste_page_recherche", "date_creation", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS date_creation TIMESTAMP DEFAULT NOW()"),
     ]
 
     # Index migrations (CREATE INDEX IF NOT EXISTS)
@@ -902,13 +899,13 @@ def get_dashboard_trends(db: DatabaseManager, days: int = 7) -> Dict:
         # ═══ PAGES AJOUTÉES ═══
         # Pages ajoutées dans la période actuelle
         current_pages = session.query(PageRecherche).filter(
-            PageRecherche.date_creation >= current_start
+            PageRecherche.created_at >= current_start
         ).count()
 
         # Pages ajoutées dans la période précédente
         previous_pages = session.query(PageRecherche).filter(
-            PageRecherche.date_creation >= previous_start,
-            PageRecherche.date_creation < current_start
+            PageRecherche.created_at >= previous_start,
+            PageRecherche.created_at < current_start
         ).count()
 
         # ═══ WINNING ADS ═══
