@@ -11,13 +11,13 @@ try:
     from app.config import (
         REQUEST_TIMEOUT, HEADERS, DEFAULT_PAYMENTS, TAXONOMY, KEYWORD_OVERRIDES,
         THEME_ASSET_CANDIDATES, REQUEST_SNIPPET, INLINE_NAME_PATTERNS,
-        ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_random_headers
+        ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_random_headers, get_proxied_url, is_proxy_enabled
     )
 except ImportError:
     from config import (
         REQUEST_TIMEOUT, HEADERS, DEFAULT_PAYMENTS, TAXONOMY, KEYWORD_OVERRIDES,
         THEME_ASSET_CANDIDATES, REQUEST_SNIPPET, INLINE_NAME_PATTERNS,
-        ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_random_headers
+        ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_random_headers, get_proxied_url, is_proxy_enabled
     )
 
 
@@ -27,9 +27,10 @@ def ensure_url(url: str) -> str:
 
 
 def get_web(url: str, timeout: int = REQUEST_TIMEOUT) -> Optional[requests.Response]:
-    """Requête HTTP avec gestion d'erreurs et User-Agent aléatoire"""
+    """Requête HTTP avec gestion d'erreurs, proxy optionnel et User-Agent aléatoire"""
     try:
-        return requests.get(url, headers=get_random_headers(), timeout=timeout, allow_redirects=True)
+        proxied_url, headers = get_proxied_url(url)
+        return requests.get(proxied_url, headers=headers, timeout=timeout, allow_redirects=True)
     except:
         return None
 
@@ -63,9 +64,10 @@ def _origin(url: str) -> str:
 
 
 def _get_text(url: str) -> Optional[str]:
-    """Récupère le contenu texte d'une URL avec User-Agent aléatoire"""
+    """Récupère le contenu texte d'une URL avec proxy optionnel"""
     try:
-        r = requests.get(url, headers=get_random_headers(), timeout=REQUEST_TIMEOUT, allow_redirects=True)
+        proxied_url, headers = get_proxied_url(url)
+        r = requests.get(proxied_url, headers=headers, timeout=REQUEST_TIMEOUT, allow_redirects=True)
         if r.status_code == 200 and r.text:
             return r.text
     except:

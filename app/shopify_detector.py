@@ -9,14 +9,15 @@ from typing import Optional, Dict
 from urllib.parse import urlparse
 
 try:
-    from app.config import HEADERS, TIMEOUT_SHOPIFY_CHECK, get_random_headers
+    from app.config import HEADERS, TIMEOUT_SHOPIFY_CHECK, get_random_headers, get_proxied_url, is_proxy_enabled
 except ImportError:
-    from config import HEADERS, TIMEOUT_SHOPIFY_CHECK, get_random_headers
+    from config import HEADERS, TIMEOUT_SHOPIFY_CHECK, get_random_headers, get_proxied_url, is_proxy_enabled
 
 
 def detect_cms_from_url(url: str) -> Dict[str, any]:
     """
     Détecte le CMS d'un site web avec plusieurs méthodes
+    Utilise ScraperAPI si configuré pour éviter les bans.
 
     Returns:
         Dict avec 'cms', 'is_shopify', 'confidence', 'details'
@@ -43,9 +44,10 @@ def detect_cms_from_url(url: str) -> Dict[str, any]:
         for attempt in range(3):
             try:
                 timeout = TIMEOUT_SHOPIFY_CHECK + (attempt * 5)
+                proxied_url, headers = get_proxied_url(url)
                 resp = requests.get(
-                    url,
-                    headers=get_random_headers(),
+                    proxied_url,
+                    headers=headers,
                     timeout=timeout,
                     allow_redirects=True
                 )

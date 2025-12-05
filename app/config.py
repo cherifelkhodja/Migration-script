@@ -75,6 +75,10 @@ FIELDS_ADS_COMPLETE = ",".join([
 # Analyse Web
 REQUEST_TIMEOUT = 25
 
+# ScraperAPI pour proxy (optionnel - si pas de clé, requêtes directes)
+SCRAPER_API_KEY = os.getenv("SCRAPER_API_KEY", "")
+SCRAPER_API_URL = "http://api.scraperapi.com"
+
 # User-Agents pour rotation (éviter les bans)
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -91,6 +95,38 @@ def get_random_headers() -> dict:
     """Retourne des headers avec un User-Agent aléatoire"""
     import random
     return {"User-Agent": random.choice(USER_AGENTS)}
+
+
+def get_proxied_url(url: str) -> tuple[str, dict]:
+    """
+    Retourne l'URL et les headers à utiliser pour la requête.
+    Si ScraperAPI est configuré, utilise le proxy.
+    Sinon, requête directe avec User-Agent aléatoire.
+
+    Returns:
+        tuple: (url_to_use, headers_to_use)
+    """
+    import random
+    from urllib.parse import urlencode
+
+    if SCRAPER_API_KEY:
+        # Utiliser ScraperAPI
+        params = {
+            "api_key": SCRAPER_API_KEY,
+            "url": url,
+            "render": "false",  # Pas besoin de JS rendering
+        }
+        proxy_url = f"{SCRAPER_API_URL}?{urlencode(params)}"
+        return proxy_url, {}  # ScraperAPI gère les headers
+    else:
+        # Requête directe avec rotation User-Agent
+        return url, {"User-Agent": random.choice(USER_AGENTS)}
+
+
+def is_proxy_enabled() -> bool:
+    """Vérifie si le proxy ScraperAPI est activé"""
+    return bool(SCRAPER_API_KEY)
+
 
 # Headers par défaut (pour compatibilité)
 HEADERS = {"User-Agent": USER_AGENTS[0]}
