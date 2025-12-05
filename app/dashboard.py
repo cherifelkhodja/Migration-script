@@ -2527,15 +2527,62 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
                 st.error(f"Erreur sauvegarde: {e}")
                 tracker.finalize_log(status="failed", error_message=str(e))
 
+        # ═══ PHASE 9: Classification automatique (Gemini) ═══
+        classified_count = 0
+        gemini_key = os.getenv("GEMINI_API_KEY", "")
+
+        if gemini_key and pages_saved > 0:
+            tracker.start_phase(9, "🏷️ Classification automatique (Gemini)", total_phases=9)
+
+            try:
+                from app.gemini_classifier import classify_and_save
+                from app.database import build_taxonomy_prompt, init_default_taxonomy
+
+                # Initialiser la taxonomie si nécessaire
+                init_default_taxonomy(db)
+
+                # Préparer les pages à classifier
+                pages_to_classify = [
+                    {"page_id": pid, "url": data.get("website", "")}
+                    for pid, data in pages_final.items()
+                    if data.get("website")
+                ]
+
+                if pages_to_classify:
+                    tracker.update_step("Classification", 1, 1, f"{len(pages_to_classify)} pages")
+
+                    # Classifier
+                    result = classify_and_save(db, pages=pages_to_classify)
+
+                    classified_count = result.get("classified", 0)
+                    errors_count = result.get("errors", 0)
+
+                    phase9_stats = {
+                        "Pages à classifier": len(pages_to_classify),
+                        "Pages classifiées": classified_count,
+                        "Erreurs": errors_count,
+                    }
+                    tracker.complete_phase(f"{classified_count} pages classifiées", stats=phase9_stats)
+                else:
+                    tracker.complete_phase("Aucune page avec URL à classifier", stats={"Pages": 0})
+
+            except Exception as e:
+                st.warning(f"⚠️ Classification non effectuée: {str(e)[:100]}")
+                tracker.complete_phase(f"Erreur: {str(e)[:50]}", stats={"Erreur": str(e)[:100]})
+        elif not gemini_key:
+            # Pas de clé Gemini configurée - on skip silencieusement
+            pass
+
         # Afficher le résumé final
         tracker.show_summary()
         tracker.finalize_log(status="completed")
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Pages", pages_saved)
         col2.metric("Suivi", suivi_saved)
         col3.metric("Annonces", ads_saved)
         col4.metric("🏆 Winning", winning_saved)
+        col5.metric("🏷️ Classifiées", classified_count)
 
         st.balloons()
         st.success("🎉 Recherche terminée !")
@@ -2794,7 +2841,7 @@ def render_pages_shops():
                 break
 
     # ═══ FILTRES ═══
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
 
     with col1:
         default_search = loaded_filter.get("search_term", "") if loaded_filter else ""
@@ -2813,6 +2860,12 @@ def render_pages_shops():
         etat_filter = st.selectbox("État", etat_options, index=etat_idx)
 
     with col4:
+        # Filtre par thématique/catégorie
+        from app.database import get_taxonomy_categories
+        thematique_options = ["Toutes", "Non classifiées"] + get_taxonomy_categories(db)
+        thematique_filter = st.selectbox("🏷️ Catégorie", thematique_options, index=0)
+
+    with col5:
         limit = st.selectbox("Limite", [50, 100, 200, 500], index=1)
 
     # Sauvegarder le filtre actuel
@@ -2850,11 +2903,19 @@ def render_pages_shops():
 
     # Recherche
     try:
+        # Déterminer le filtre thématique
+        thematique_param = None
+        if thematique_filter == "Non classifiées":
+            thematique_param = "__unclassified__"  # Valeur spéciale
+        elif thematique_filter != "Toutes":
+            thematique_param = thematique_filter
+
         results = search_pages(
             db,
             cms=cms_filter if cms_filter != "Tous" else None,
             etat=etat_filter if etat_filter != "Tous" else None,
             search_term=search_term if search_term else None,
+            thematique=thematique_param,
             limit=limit
         )
 
@@ -2887,6 +2948,8 @@ def render_pages_shops():
                     "Score": lambda p: p.get("score", 0),
                     "Keywords": lambda p: p.get("keywords", ""),
                     "Thématique": lambda p: p.get("thematique", ""),
+                    "Sous-catégorie": lambda p: p.get("subcategory", ""),
+                    "Confiance Classif.": lambda p: f"{int(p.get('classification_confidence', 0)*100)}%" if p.get('classification_confidence') else "",
                     "Ads Library": lambda p: p.get("lien_fb_ad_library", ""),
                     "Page Facebook": lambda p: f"https://www.facebook.com/{p.get('page_id', '')}",
                     "Date création": lambda p: p.get("date_creation", ""),
@@ -3039,12 +3102,28 @@ def render_pages_shops():
                 # Formater états avec badges emoji
                 df["etat_display"] = df["etat"].apply(lambda x: format_state_for_df(x) if x else "")
 
+                # Formater classification avec badge
+                def format_classification(row):
+                    subcat = row.get("subcategory", "")
+                    conf = row.get("classification_confidence", 0)
+                    if subcat:
+                        # Badge de confiance
+                        if conf and conf >= 0.8:
+                            return f"✓ {subcat}"
+                        elif conf and conf >= 0.5:
+                            return f"~ {subcat}"
+                        else:
+                            return f"? {subcat}"
+                    return "—"
+
+                df["classification_display"] = df.apply(format_classification, axis=1)
+
                 # Colonnes à afficher
-                display_cols = ["score_display", "page_name", "lien_site", "cms", "etat_display", "nombre_ads_active", "winning_ads", "nombre_produits"]
+                display_cols = ["score_display", "page_name", "lien_site", "cms", "etat_display", "nombre_ads_active", "winning_ads", "classification_display"]
                 df_display = df[[c for c in display_cols if c in df.columns]]
 
                 # Renommer colonnes
-                col_names = ["Score", "Nom", "Site", "CMS", "État", "Ads", "🏆", "Produits"]
+                col_names = ["Score", "Nom", "Site", "CMS", "État", "Ads", "🏆", "🏷️ Catég."]
                 df_display.columns = col_names[:len(df_display.columns)]
 
                 st.dataframe(
@@ -3075,6 +3154,24 @@ def render_pages_shops():
                                 st.write(f"**Keywords:** {page.get('keywords', '')}")
                             if page.get('thematique'):
                                 st.write(f"**Thématique:** {page.get('thematique', '')}")
+
+                            # Classification Gemini (sous-catégorie)
+                            subcat = page.get('subcategory')
+                            conf = page.get('classification_confidence', 0)
+                            if subcat:
+                                # Badge coloré selon confiance
+                                if conf and conf >= 0.8:
+                                    conf_badge = "🟢"
+                                    conf_text = f"{int(conf*100)}%"
+                                elif conf and conf >= 0.5:
+                                    conf_badge = "🟡"
+                                    conf_text = f"{int(conf*100)}%"
+                                else:
+                                    conf_badge = "🔴"
+                                    conf_text = "faible"
+                                st.write(f"**🏷️ Classification:** {subcat} {conf_badge} ({conf_text})")
+                            else:
+                                st.caption("🏷️ Non classifié")
 
                             # Afficher les tags
                             page_tags = get_page_tags(db, pid)
@@ -4372,6 +4469,166 @@ def render_settings():
 
     except Exception as e:
         st.error(f"Erreur: {e}")
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # GESTION DE LA TAXONOMIE DE CLASSIFICATION
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.subheader("🏷️ Classification automatique (Gemini)")
+    st.markdown("Gérez les catégories et sous-catégories pour la classification automatique des sites.")
+
+    # Vérifier la clé API Gemini
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+    if gemini_key:
+        st.success("✅ Clé API Gemini configurée")
+    else:
+        st.warning("⚠️ Clé API Gemini non configurée. Ajoutez GEMINI_API_KEY dans les variables d'environnement.")
+
+    if db:
+        from app.database import (
+            get_all_taxonomy, add_taxonomy_entry, update_taxonomy_entry,
+            delete_taxonomy_entry, init_default_taxonomy, get_taxonomy_categories,
+            get_classification_stats, ClassificationTaxonomy
+        )
+
+        # Initialiser la taxonomie par défaut si vide
+        if st.button("🔄 Initialiser taxonomie par défaut", key="init_taxonomy"):
+            added = init_default_taxonomy(db)
+            if added > 0:
+                st.success(f"✅ {added} catégories ajoutées")
+                st.rerun()
+            else:
+                st.info("La taxonomie est déjà initialisée")
+
+        # Stats de classification
+        try:
+            class_stats = get_classification_stats(db)
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Pages classifiées", class_stats["classified"])
+            col2.metric("Non classifiées", class_stats["unclassified"])
+            col3.metric("Taux", f"{class_stats['classification_rate']}%")
+            col4.metric("Total pages", class_stats["total"])
+        except Exception:
+            pass
+
+        # Afficher la taxonomie existante
+        taxonomy = get_all_taxonomy(db, active_only=False)
+
+        if taxonomy:
+            # Grouper par catégorie
+            categories = {}
+            for entry in taxonomy:
+                if entry.category not in categories:
+                    categories[entry.category] = []
+                categories[entry.category].append(entry)
+
+            st.markdown(f"**{len(taxonomy)} entrées dans {len(categories)} catégories**")
+
+            for cat_name, entries in categories.items():
+                with st.expander(f"📁 **{cat_name}** ({len(entries)} sous-catégories)"):
+                    for entry in entries:
+                        col1, col2, col3, col4 = st.columns([3, 3, 1, 1])
+
+                        with col1:
+                            new_subcat = st.text_input(
+                                "Sous-catégorie",
+                                value=entry.subcategory,
+                                key=f"subcat_{entry.id}",
+                                label_visibility="collapsed"
+                            )
+
+                        with col2:
+                            new_desc = st.text_input(
+                                "Description",
+                                value=entry.description or "",
+                                key=f"desc_{entry.id}",
+                                label_visibility="collapsed",
+                                placeholder="Description/exemples"
+                            )
+
+                        with col3:
+                            is_active = st.checkbox(
+                                "Actif",
+                                value=entry.is_active,
+                                key=f"active_{entry.id}"
+                            )
+
+                        with col4:
+                            if st.button("🗑️", key=f"del_tax_{entry.id}"):
+                                delete_taxonomy_entry(db, entry.id)
+                                st.rerun()
+
+                        # Sauvegarder si modifié
+                        if (new_subcat != entry.subcategory or
+                            new_desc != (entry.description or "") or
+                            is_active != entry.is_active):
+                            update_taxonomy_entry(
+                                db, entry.id,
+                                subcategory=new_subcat,
+                                description=new_desc if new_desc else None,
+                                is_active=is_active
+                            )
+
+        # Ajouter une nouvelle entrée
+        st.markdown("---")
+        st.markdown("**➕ Ajouter une catégorie/sous-catégorie**")
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            # Liste des catégories existantes + option nouvelle
+            existing_cats = get_taxonomy_categories(db)
+            cat_options = existing_cats + ["➕ Nouvelle catégorie..."]
+            selected_cat = st.selectbox("Catégorie", options=cat_options, key="new_tax_cat")
+
+            if selected_cat == "➕ Nouvelle catégorie...":
+                new_cat_name = st.text_input("Nouvelle catégorie", key="new_cat_name")
+            else:
+                new_cat_name = selected_cat
+
+        with col2:
+            new_subcat_name = st.text_input("Sous-catégorie", key="new_subcat_name")
+
+        with col3:
+            new_tax_desc = st.text_input("Description", key="new_tax_desc", placeholder="Exemples de produits...")
+
+        if st.button("➕ Ajouter", key="add_taxonomy"):
+            if new_cat_name and new_subcat_name:
+                entry_id = add_taxonomy_entry(db, new_cat_name, new_subcat_name, new_tax_desc or None)
+                st.success(f"✅ Entrée ajoutée (ID: {entry_id})")
+                st.rerun()
+            else:
+                st.error("Catégorie et sous-catégorie requises")
+
+        # Lancer la classification manuelle
+        st.markdown("---")
+        st.markdown("**🚀 Classifier les pages non classifiées**")
+
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            batch_size = st.number_input("Nombre de pages", min_value=10, max_value=500, value=50, step=10)
+
+        with col2:
+            if st.button("🚀 Lancer la classification", key="run_classification", type="primary"):
+                if not gemini_key:
+                    st.error("Configurez GEMINI_API_KEY d'abord")
+                else:
+                    with st.spinner(f"Classification de {batch_size} pages en cours..."):
+                        try:
+                            from app.gemini_classifier import classify_and_save
+
+                            result = classify_and_save(db, limit=batch_size)
+
+                            if "error" in result:
+                                st.error(result["error"])
+                            else:
+                                st.success(f"✅ {result['classified']} pages classifiées ({result.get('errors', 0)} erreurs)")
+                                st.rerun()
+                        except Exception as e:
+                            st.error(f"Erreur: {e}")
+
+    else:
+        st.warning("Base de données non connectée")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

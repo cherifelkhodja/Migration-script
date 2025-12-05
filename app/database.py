@@ -39,7 +39,10 @@ class PageRecherche(Base):
     lien_site = Column(String(500))
     lien_fb_ad_library = Column(String(500))
     keywords = Column(Text)  # Keywords utilisés pour trouver cette page (séparés par |)
-    thematique = Column(String(100))
+    thematique = Column(String(100))  # Catégorie principale (classification Gemini)
+    subcategory = Column(String(100))  # Sous-catégorie (classification Gemini)
+    classification_confidence = Column(Float)  # Score de confiance 0.0-1.0
+    classified_at = Column(DateTime)  # Date de dernière classification
     type_produits = Column(Text)
     moyens_paiements = Column(Text)
     pays = Column(String(50))
@@ -62,6 +65,7 @@ class PageRecherche(Base):
         Index('idx_page_cms_etat', 'cms', 'etat'),  # Filtre CMS + État
         Index('idx_page_etat_ads', 'etat', 'nombre_ads_active'),  # Tri par ads dans un état
         Index('idx_page_created', 'created_at'),  # Pour tendances
+        Index('idx_page_thematique', 'thematique'),  # Pour filtrer par catégorie
     )
 
 
@@ -260,6 +264,25 @@ class UserSettings(Base):
     setting_key = Column(String(50), unique=True, nullable=False)
     setting_value = Column(Text)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ClassificationTaxonomy(Base):
+    """Table classification_taxonomy - Taxonomie pour la classification automatique"""
+    __tablename__ = "classification_taxonomy"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    category = Column(String(100), nullable=False)  # Catégorie principale
+    subcategory = Column(String(100), nullable=False)  # Sous-catégorie
+    description = Column(Text)  # Description/exemples pour aider Gemini
+    is_active = Column(Boolean, default=True)  # Actif ou non
+    sort_order = Column(Integer, default=0)  # Ordre d'affichage
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_taxonomy_category', 'category'),
+        Index('idx_taxonomy_active', 'is_active'),
+    )
 
 
 class MetaToken(Base):
@@ -547,6 +570,10 @@ def _run_migrations(db: DatabaseManager):
         ("search_logs", "web_avg_time", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS web_avg_time FLOAT DEFAULT 0"),
         ("search_logs", "scraper_api_cost", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS scraper_api_cost FLOAT DEFAULT 0"),
         ("search_logs", "api_details", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS api_details TEXT"),
+        # Colonnes classification pour PageRecherche
+        ("liste_page_recherche", "subcategory", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS subcategory VARCHAR(100)"),
+        ("liste_page_recherche", "classification_confidence", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS classification_confidence FLOAT"),
+        ("liste_page_recherche", "classified_at", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS classified_at TIMESTAMP"),
     ]
 
     # Index migrations (CREATE INDEX IF NOT EXISTS)
@@ -554,6 +581,7 @@ def _run_migrations(db: DatabaseManager):
         "CREATE INDEX IF NOT EXISTS idx_page_cms_etat ON liste_page_recherche (cms, etat)",
         "CREATE INDEX IF NOT EXISTS idx_page_etat_ads ON liste_page_recherche (etat, nombre_ads_active)",
         "CREATE INDEX IF NOT EXISTS idx_page_created ON liste_page_recherche (created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_page_thematique ON liste_page_recherche (thematique)",
         "CREATE INDEX IF NOT EXISTS idx_winning_ads_page_date ON winning_ads (page_id, date_scan)",
         "CREATE INDEX IF NOT EXISTS idx_winning_ads_reach ON winning_ads (eu_total_reach)",
         "CREATE INDEX IF NOT EXISTS idx_search_log_status_date ON search_logs (status, started_at)",
@@ -1077,6 +1105,7 @@ def search_pages(
     cms: str = None,
     etat: str = None,
     search_term: str = None,
+    thematique: str = None,
     limit: int = 100
 ) -> List[Dict]:
     """Recherche des pages avec filtres"""
@@ -1092,6 +1121,14 @@ def search_pages(
                 PageRecherche.page_name.ilike(f"%{search_term}%") |
                 PageRecherche.lien_site.ilike(f"%{search_term}%")
             )
+        if thematique:
+            if thematique == "__unclassified__":
+                # Pages non classifiées
+                query = query.filter(
+                    (PageRecherche.thematique == None) | (PageRecherche.thematique == "")
+                )
+            else:
+                query = query.filter(PageRecherche.thematique == thematique)
 
         pages = query.order_by(
             PageRecherche.nombre_ads_active.desc()
@@ -1109,6 +1146,8 @@ def search_pages(
                 "nombre_ads_active": p.nombre_ads_active,
                 "nombre_produits": p.nombre_produits,
                 "thematique": p.thematique,
+                "subcategory": p.subcategory,
+                "classification_confidence": p.classification_confidence,
                 "template": p.template,
                 "devise": p.devise,
                 "dernier_scan": p.dernier_scan
@@ -3356,3 +3395,360 @@ def get_queue_stats(db: DatabaseManager) -> Dict:
         result["active"] = result["pending"] + result["running"]
 
         return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GESTION DE LA TAXONOMIE DE CLASSIFICATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_all_taxonomy(db: DatabaseManager, active_only: bool = True) -> List[ClassificationTaxonomy]:
+    """Récupère toute la taxonomie"""
+    with db.get_session() as session:
+        query = session.query(ClassificationTaxonomy)
+        if active_only:
+            query = query.filter(ClassificationTaxonomy.is_active == True)
+        return query.order_by(
+            ClassificationTaxonomy.sort_order,
+            ClassificationTaxonomy.category,
+            ClassificationTaxonomy.subcategory
+        ).all()
+
+
+def get_taxonomy_by_category(db: DatabaseManager, category: str) -> List[ClassificationTaxonomy]:
+    """Récupère les sous-catégories d'une catégorie"""
+    with db.get_session() as session:
+        return session.query(ClassificationTaxonomy).filter(
+            ClassificationTaxonomy.category == category,
+            ClassificationTaxonomy.is_active == True
+        ).order_by(ClassificationTaxonomy.sort_order).all()
+
+
+def get_taxonomy_categories(db: DatabaseManager) -> List[str]:
+    """Récupère la liste unique des catégories"""
+    with db.get_session() as session:
+        results = session.query(ClassificationTaxonomy.category).filter(
+            ClassificationTaxonomy.is_active == True
+        ).distinct().order_by(ClassificationTaxonomy.category).all()
+        return [r[0] for r in results]
+
+
+def add_taxonomy_entry(
+    db: DatabaseManager,
+    category: str,
+    subcategory: str,
+    description: str = None,
+    sort_order: int = 0
+) -> int:
+    """Ajoute une entrée à la taxonomie"""
+    with db.get_session() as session:
+        entry = ClassificationTaxonomy(
+            category=category,
+            subcategory=subcategory,
+            description=description,
+            sort_order=sort_order,
+            is_active=True
+        )
+        session.add(entry)
+        session.flush()
+        return entry.id
+
+
+def update_taxonomy_entry(
+    db: DatabaseManager,
+    entry_id: int,
+    category: str = None,
+    subcategory: str = None,
+    description: str = None,
+    sort_order: int = None,
+    is_active: bool = None
+) -> bool:
+    """Met à jour une entrée de la taxonomie"""
+    with db.get_session() as session:
+        entry = session.query(ClassificationTaxonomy).filter(
+            ClassificationTaxonomy.id == entry_id
+        ).first()
+        if not entry:
+            return False
+
+        if category is not None:
+            entry.category = category
+        if subcategory is not None:
+            entry.subcategory = subcategory
+        if description is not None:
+            entry.description = description
+        if sort_order is not None:
+            entry.sort_order = sort_order
+        if is_active is not None:
+            entry.is_active = is_active
+
+        return True
+
+
+def delete_taxonomy_entry(db: DatabaseManager, entry_id: int) -> bool:
+    """Supprime une entrée de la taxonomie"""
+    with db.get_session() as session:
+        deleted = session.query(ClassificationTaxonomy).filter(
+            ClassificationTaxonomy.id == entry_id
+        ).delete()
+        return deleted > 0
+
+
+def init_default_taxonomy(db: DatabaseManager) -> int:
+    """Initialise la taxonomie par défaut si vide"""
+    with db.get_session() as session:
+        count = session.query(ClassificationTaxonomy).count()
+        if count > 0:
+            return 0  # Déjà initialisée
+
+    # Taxonomie par défaut
+    default_taxonomy = [
+        # Mode & Accessoires
+        ("Mode & Accessoires", "Vêtements Femme", "Robes, tops, bas, lingerie, manteaux"),
+        ("Mode & Accessoires", "Vêtements Homme", "Costumes, casual, sportswear, sous-vêtements"),
+        ("Mode & Accessoires", "Mode Enfant & Bébé", "Vêtements fille/garçon, layette, chaussures enfant"),
+        ("Mode & Accessoires", "Chaussures", "Sneakers, ville, bottes, sandales, sport"),
+        ("Mode & Accessoires", "Maroquinerie & Bagagerie", "Sacs à main, valises, sacs à dos, portefeuilles"),
+        ("Mode & Accessoires", "Accessoires de mode", "Chapeaux, écharpes, ceintures, gants, cravates"),
+        ("Mode & Accessoires", "Bijoux & Joaillerie", "Montres, bagues, colliers, bijoux fantaisie"),
+
+        # High-Tech & Électronique
+        ("High-Tech & Électronique", "Téléphonie", "Smartphones, reconditionné, coques, chargeurs"),
+        ("High-Tech & Électronique", "Informatique", "Ordinateurs portables, PC fixes, tablettes, moniteurs"),
+        ("High-Tech & Électronique", "Composants & Périphériques", "Cartes graphiques, disques durs, claviers/souris, imprimantes"),
+        ("High-Tech & Électronique", "Image & Son", "Téléviseurs, vidéoprojecteurs, enceintes, casques audio, Hi-Fi"),
+        ("High-Tech & Électronique", "Photo & Vidéo", "Appareils photo, objectifs, drones, caméras sport"),
+        ("High-Tech & Électronique", "Gaming", "Consoles (PS5/Xbox/Switch), jeux vidéo, accessoires gaming"),
+        ("High-Tech & Électronique", "Maison Connectée", "Assistants vocaux, sécurité, éclairage connecté"),
+
+        # Maison, Jardin & Bricolage
+        ("Maison, Jardin & Bricolage", "Mobilier", "Canapés, lits, tables, chaises, rangements"),
+        ("Maison, Jardin & Bricolage", "Décoration & Linge", "Luminaires, tapis, rideaux, linge de lit, objets déco"),
+        ("Maison, Jardin & Bricolage", "Cuisine & Art de la table", "Ustensiles, poêles/casseroles, vaisselle, verres"),
+        ("Maison, Jardin & Bricolage", "Gros Électroménager", "Lave-linge, frigo, four, lave-vaisselle"),
+        ("Maison, Jardin & Bricolage", "Petit Électroménager", "Aspirateurs, cafetières, robots cuisine, fers à repasser"),
+        ("Maison, Jardin & Bricolage", "Bricolage & Outillage", "Outillage électroportatif, plomberie, électricité"),
+        ("Maison, Jardin & Bricolage", "Jardin & Piscine", "Mobilier de jardin, barbecues, tondeuses, piscines"),
+
+        # Beauté, Santé & Bien-être
+        ("Beauté, Santé & Bien-être", "Maquillage", "Teint, yeux, lèvres, ongles"),
+        ("Beauté, Santé & Bien-être", "Soins Visage & Corps", "Crèmes, sérums, nettoyants, solaires"),
+        ("Beauté, Santé & Bien-être", "Capillaire", "Shampoings, colorations, lisseurs/sèche-cheveux"),
+        ("Beauté, Santé & Bien-être", "Parfums", "Femme, Homme, Enfant, bougies parfumées"),
+        ("Beauté, Santé & Bien-être", "Santé & Parapharmacie", "Premiers secours, vitamines, hygiène dentaire"),
+        ("Beauté, Santé & Bien-être", "Bien-être & Naturel", "Huiles essentielles, CBD, compléments alimentaires"),
+        ("Beauté, Santé & Bien-être", "Hygiène & Soin Bébé", "Couches, soins bébé, maternité"),
+
+        # Sports & Loisirs
+        ("Sports & Loisirs", "Vêtements & Chaussures de Sport", "Running, fitness, maillots, thermique"),
+        ("Sports & Loisirs", "Matériel de Fitness", "Musculation, tapis de course, yoga"),
+        ("Sports & Loisirs", "Sports d'Extérieur", "Randonnée, camping, escalade, ski"),
+        ("Sports & Loisirs", "Sports d'Équipe & Raquettes", "Football, tennis, basket, rugby"),
+        ("Sports & Loisirs", "Cycles & Glisse", "Vélos, trottinettes, skate, surf"),
+        ("Sports & Loisirs", "Nutrition Sportive", "Protéines, barres énergétiques, boissons"),
+
+        # Culture, Jeux & Divertissement
+        ("Culture, Jeux & Divertissement", "Livres & Presse", "Romans, BD/Manga, scolaire, ebooks"),
+        ("Culture, Jeux & Divertissement", "Musique & Instruments", "Guitares, pianos, DJ, partitions, vinyles"),
+        ("Culture, Jeux & Divertissement", "Jeux & Jouets", "Jeux de société, poupées, construction, éducatif"),
+        ("Culture, Jeux & Divertissement", "Cinéma & Séries", "DVD, Blu-Ray, produits dérivés"),
+        ("Culture, Jeux & Divertissement", "Loisirs Créatifs", "Beaux-arts, mercerie, scrapbooking, papeterie"),
+
+        # Alimentation & Boissons
+        ("Alimentation & Boissons", "Épicerie Salée & Sucrée", "Conserves, pâtes, chocolats, biscuits"),
+        ("Alimentation & Boissons", "Boissons & Cave", "Vins, spiritueux, bières, sodas, café/thé"),
+        ("Alimentation & Boissons", "Produits Frais", "Boucherie, fromagerie, fruits & légumes"),
+        ("Alimentation & Boissons", "Spécialisé / Gourmet", "Bio, sans gluten, produits régionaux, épicerie fine"),
+
+        # Animaux
+        ("Animaux", "Chiens", "Croquettes, laisses, couchages, jouets"),
+        ("Animaux", "Chats", "Arbres à chat, litière, nourriture"),
+        ("Animaux", "NAC & Autres", "Rongeurs, oiseaux, aquariophilie, reptiles"),
+
+        # Auto, Moto & Industrie
+        ("Auto, Moto & Industrie", "Pièces Auto/Moto", "Pneus, batteries, pièces mécaniques, huiles"),
+        ("Auto, Moto & Industrie", "Équipement & Accessoires", "Casques moto, nettoyage, audio embarqué"),
+        ("Auto, Moto & Industrie", "Industrie & Bureau", "Fournitures de bureau, mobilier pro, emballage"),
+
+        # Divers & Spécialisé
+        ("Divers & Spécialisé", "Adulte / Charme", "Lovestore, lingerie sexy"),
+        ("Divers & Spécialisé", "Cadeaux & Gadgets", "Box mensuelles, gadgets humoristiques, personnalisation"),
+        ("Divers & Spécialisé", "Services", "Billetterie, voyage, impression photo, formations"),
+        ("Divers & Spécialisé", "Généraliste", "Marketplaces vendant de tout sans dominante"),
+    ]
+
+    added = 0
+    for i, (cat, subcat, desc) in enumerate(default_taxonomy):
+        add_taxonomy_entry(db, cat, subcat, desc, sort_order=i)
+        added += 1
+
+    return added
+
+
+def build_taxonomy_prompt(db: DatabaseManager) -> str:
+    """Construit le prompt de taxonomie à partir de la base de données"""
+    taxonomy = get_all_taxonomy(db, active_only=True)
+
+    if not taxonomy:
+        return ""
+
+    # Grouper par catégorie
+    categories = {}
+    for entry in taxonomy:
+        if entry.category not in categories:
+            categories[entry.category] = []
+        categories[entry.category].append(entry)
+
+    # Construire le texte
+    lines = []
+    for i, (cat_name, entries) in enumerate(categories.items(), 1):
+        lines.append(f"\n{i}. {cat_name}")
+        for entry in entries:
+            desc = f": {entry.description}" if entry.description else ""
+            lines.append(f"   - {entry.subcategory}{desc}")
+
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GESTION DE LA CLASSIFICATION DES PAGES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_unclassified_pages(
+    db: DatabaseManager,
+    limit: int = 100,
+    with_website_only: bool = True
+) -> List[PageRecherche]:
+    """Récupère les pages non classifiées"""
+    with db.get_session() as session:
+        query = session.query(PageRecherche).filter(
+            (PageRecherche.thematique == None) | (PageRecherche.thematique == "")
+        )
+        if with_website_only:
+            query = query.filter(
+                PageRecherche.lien_site != None,
+                PageRecherche.lien_site != ""
+            )
+        return query.order_by(PageRecherche.created_at.desc()).limit(limit).all()
+
+
+def get_pages_for_classification(
+    db: DatabaseManager,
+    page_ids: List[str] = None,
+    limit: int = 100
+) -> List[Dict]:
+    """Récupère les pages à classifier avec leurs URLs"""
+    with db.get_session() as session:
+        query = session.query(PageRecherche)
+
+        if page_ids:
+            query = query.filter(PageRecherche.page_id.in_(page_ids))
+        else:
+            # Pages non classifiées avec URL
+            query = query.filter(
+                (PageRecherche.thematique == None) | (PageRecherche.thematique == ""),
+                PageRecherche.lien_site != None,
+                PageRecherche.lien_site != ""
+            )
+
+        pages = query.limit(limit).all()
+
+        return [
+            {
+                "page_id": p.page_id,
+                "page_name": p.page_name,
+                "url": p.lien_site,
+                "cms": p.cms
+            }
+            for p in pages
+        ]
+
+
+def update_page_classification(
+    db: DatabaseManager,
+    page_id: str,
+    category: str,
+    subcategory: str,
+    confidence: float
+) -> bool:
+    """Met à jour la classification d'une page"""
+    with db.get_session() as session:
+        page = session.query(PageRecherche).filter(
+            PageRecherche.page_id == page_id
+        ).first()
+
+        if not page:
+            return False
+
+        page.thematique = category
+        page.subcategory = subcategory
+        page.classification_confidence = confidence
+        page.classified_at = datetime.utcnow()
+
+        return True
+
+
+def update_pages_classification_batch(
+    db: DatabaseManager,
+    classifications: List[Dict]
+) -> int:
+    """
+    Met à jour plusieurs classifications en batch.
+
+    Args:
+        db: DatabaseManager
+        classifications: Liste de dicts avec page_id, category, subcategory, confidence
+
+    Returns:
+        Nombre de pages mises à jour
+    """
+    updated = 0
+    with db.get_session() as session:
+        for c in classifications:
+            page = session.query(PageRecherche).filter(
+                PageRecherche.page_id == c["page_id"]
+            ).first()
+
+            if page:
+                page.thematique = c.get("category", "")
+                page.subcategory = c.get("subcategory", "")
+                page.classification_confidence = c.get("confidence", 0.0)
+                page.classified_at = datetime.utcnow()
+                updated += 1
+
+    return updated
+
+
+def get_classification_stats(db: DatabaseManager) -> Dict:
+    """Statistiques de classification"""
+    from sqlalchemy import func
+
+    with db.get_session() as session:
+        total = session.query(func.count(PageRecherche.id)).scalar() or 0
+
+        classified = session.query(func.count(PageRecherche.id)).filter(
+            PageRecherche.thematique != None,
+            PageRecherche.thematique != ""
+        ).scalar() or 0
+
+        unclassified = total - classified
+
+        # Top catégories
+        top_categories = session.query(
+            PageRecherche.thematique,
+            func.count(PageRecherche.id).label('count')
+        ).filter(
+            PageRecherche.thematique != None,
+            PageRecherche.thematique != ""
+        ).group_by(
+            PageRecherche.thematique
+        ).order_by(
+            func.count(PageRecherche.id).desc()
+        ).limit(10).all()
+
+        return {
+            "total": total,
+            "classified": classified,
+            "unclassified": unclassified,
+            "classification_rate": round(classified / total * 100, 1) if total > 0 else 0,
+            "top_categories": [{"category": c, "count": n} for c, n in top_categories]
+        }
