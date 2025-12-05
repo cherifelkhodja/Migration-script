@@ -138,8 +138,15 @@ class TokenRotator:
             print("⚠️ Tous les tokens sont rate-limited!")
             return False
 
-    def record_call(self, success: bool = True, error_message: str = None):
-        """Enregistre un appel pour le token courant"""
+    def record_call(self, success: bool = True, error_message: str = None, rotate_after: bool = True):
+        """
+        Enregistre un appel pour le token courant et fait une rotation proactive.
+
+        Args:
+            success: Si l'appel a réussi
+            error_message: Message d'erreur éventuel
+            rotate_after: Si True, tourne vers le token suivant après l'appel (round-robin)
+        """
         with self._lock:
             token = self.tokens[self._current_index] if self.tokens else ""
             if token:
@@ -147,6 +154,18 @@ class TokenRotator:
                 # Enregistrer en BDD (seulement succès, les erreurs sont gérées par mark_rate_limited)
                 if success:
                     self._record_to_db(token, success=True)
+
+                # Rotation proactive round-robin après chaque appel réussi
+                if success and rotate_after and len(self.tokens) > 1:
+                    now = time.time()
+                    # Chercher le prochain token non rate-limited
+                    for i in range(1, len(self.tokens) + 1):
+                        next_idx = (self._current_index + i) % len(self.tokens)
+                        next_token = self.tokens[next_idx]
+                        # Vérifier si ce token n'est pas rate-limited
+                        if next_token not in self._rate_limited or self._rate_limited[next_token] <= now:
+                            self._current_index = next_idx
+                            break
 
     def _record_to_db(self, token: str, success: bool = True, is_rate_limit: bool = False,
                       error_message: str = None, rate_limit_seconds: int = 60):
