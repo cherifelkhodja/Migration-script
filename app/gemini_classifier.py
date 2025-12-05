@@ -34,6 +34,7 @@ class SiteContent:
     """Contenu extrait d'un site"""
     page_id: str
     url: str
+    page_name: str = ""  # Nom de la page Facebook/Meta Ads
     title: str = ""
     description: str = ""
     keywords: str = ""
@@ -48,6 +49,9 @@ class SiteContent:
     def to_text(self) -> str:
         """Convertit en texte concis pour le prompt"""
         parts = []
+        # Le nom de la page est souvent très indicatif de l'activité
+        if self.page_name:
+            parts.append(f"Nom: {self.page_name[:100]}")
         if self.title:
             parts.append(f"Titre: {self.title[:200]}")
         if self.description:
@@ -78,7 +82,7 @@ class ClassificationResult:
 # SCRAPER OPTIMISÉ (LOW TOKEN)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def extract_site_content_sync(html: str, page_id: str, url: str) -> SiteContent:
+def extract_site_content_sync(html: str, page_id: str, url: str, page_name: str = "") -> SiteContent:
     """
     Extrait le contenu minimal d'une page HTML (version synchrone).
 
@@ -105,7 +109,7 @@ def extract_site_content_sync(html: str, page_id: str, url: str) -> SiteContent:
         try:
             soup = BeautifulSoup(html, 'html.parser')
         except Exception as e:
-            return SiteContent(page_id=page_id, url=url, error=f"Parse error: {str(e)[:50]}")
+            return SiteContent(page_id=page_id, url=url, page_name=page_name, error=f"Parse error: {str(e)[:50]}")
 
     # Extraire le titre
     title = ""
@@ -137,6 +141,7 @@ def extract_site_content_sync(html: str, page_id: str, url: str) -> SiteContent:
     return SiteContent(
         page_id=page_id,
         url=url,
+        page_name=page_name,
         title=title,
         description=description,
         keywords=keywords,
@@ -207,6 +212,7 @@ async def fetch_site_content(
     session: aiohttp.ClientSession,
     page_id: str,
     url: str,
+    page_name: str = "",
     timeout: int = REQUEST_TIMEOUT
 ) -> SiteContent:
     """
@@ -243,6 +249,7 @@ async def fetch_site_content(
                 return SiteContent(
                     page_id=page_id,
                     url=url,
+                    page_name=page_name,
                     error=f"HTTP {response.status}"
                 )
 
@@ -251,14 +258,17 @@ async def fetch_site_content(
             if len(content) > 500000:  # 500KB max
                 content = content[:500000]
 
-            return extract_site_content_sync(content, page_id, url)
+            result = extract_site_content_sync(content, page_id, url, page_name)
+            # S'assurer que page_name est toujours présent
+            result.page_name = page_name
+            return result
 
     except asyncio.TimeoutError:
-        return SiteContent(page_id=page_id, url=url, error="Timeout")
+        return SiteContent(page_id=page_id, url=url, page_name=page_name, error="Timeout")
     except aiohttp.ClientError as e:
-        return SiteContent(page_id=page_id, url=url, error=f"Network error: {str(e)[:50]}")
+        return SiteContent(page_id=page_id, url=url, page_name=page_name, error=f"Network error: {str(e)[:50]}")
     except Exception as e:
-        return SiteContent(page_id=page_id, url=url, error=f"Error: {str(e)[:50]}")
+        return SiteContent(page_id=page_id, url=url, page_name=page_name, error=f"Error: {str(e)[:50]}")
 
 
 async def scrape_sites_batch(
@@ -269,7 +279,7 @@ async def scrape_sites_batch(
     Scrape plusieurs sites en parallèle.
 
     Args:
-        sites: Liste de dicts avec page_id et url
+        sites: Liste de dicts avec page_id, url et page_name
         max_concurrent: Nombre max de requêtes simultanées
 
     Returns:
@@ -279,7 +289,12 @@ async def scrape_sites_batch(
 
     async with aiohttp.ClientSession(connector=connector) as session:
         tasks = [
-            fetch_site_content(session, site['page_id'], site['url'])
+            fetch_site_content(
+                session,
+                site['page_id'],
+                site['url'],
+                site.get('page_name', '')
+            )
             for site in sites
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -291,6 +306,7 @@ async def scrape_sites_batch(
                 processed.append(SiteContent(
                     page_id=sites[i]['page_id'],
                     url=sites[i]['url'],
+                    page_name=sites[i].get('page_name', ''),
                     error=str(result)[:100]
                 ))
             else:
@@ -321,33 +337,58 @@ class GeminiClassifier:
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY non configurée")
 
-        self.model = "gemini-2.5-flash-lite"
+        # Note: gemini-2.0-flash-lite est le modèle lite de Gemini 2.0
+        self.model = "gemini-2.0-flash-lite"
         self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
 
     def _build_system_prompt(self, taxonomy_text: str) -> str:
         """Construit le prompt système avec la taxonomie"""
-        return f"""Tu es un expert en e-commerce. Analyse la liste des sites fournis (Titre, Description, H1) et classe-les selon cette taxonomie :
+        return f"""Tu es un expert en classification de sites e-commerce français. Ton rôle est de classifier PRÉCISÉMENT chaque site dans la bonne catégorie.
+
+TAXONOMIE DISPONIBLE:
 {taxonomy_text}
 
-INSTRUCTION DE SORTIE :
-Tu dois répondre UNIQUEMENT par un tableau JSON strict (Array of Objects), sans markdown, sans backticks.
-Format attendu : [{{"id": "id_interne_site", "category": "...", "subcategory": "...", "confidence_score": 0.0-1.0}}]
+RÈGLES DE CLASSIFICATION:
+1. Analyse attentivement le titre, la description, le H1 et les produits mentionnés
+2. Choisis la catégorie et sous-catégorie les PLUS SPÉCIFIQUES possibles
+3. NE PAS utiliser "Divers & Spécialisé/Généraliste" sauf si vraiment impossible à classifier
+4. Les indices clés pour identifier la catégorie:
+   - Mots dans le titre/description: "bijoux", "montres" → Bijoux & Joaillerie
+   - Mots comme "vêtements", "robe", "mode" → Mode & Accessoires
+   - Mots comme "smartphone", "tech", "électronique" → High-Tech
+   - Mots comme "maison", "décoration", "meuble" → Maison, Jardin & Bricolage
+   - Mots comme "cosmétique", "beauté", "skincare" → Beauté & Bien-être
+   - Mots comme "jouet", "enfant", "bébé" → Famille & Enfants
 
-IMPORTANT:
-- Le champ "id" doit correspondre EXACTEMENT à l'ID fourni dans les données
-- confidence_score doit être entre 0.0 et 1.0
-- Si tu ne peux pas classifier un site, utilise category="Divers & Spécialisé" et subcategory="Généraliste"
-- Réponds UNIQUEMENT avec le JSON, rien d'autre"""
+CONFIANCE:
+- 0.9-1.0: Très clair (ex: site de bijoux avec "bijoux" dans le titre)
+- 0.7-0.89: Probable (indices clairs mais pas évidents)
+- 0.5-0.69: Incertain mais meilleur choix
+- <0.5: Vraiment difficile à classifier
+
+FORMAT DE RÉPONSE:
+Réponds UNIQUEMENT avec un tableau JSON, sans markdown, sans backticks:
+[{{"id": "ID_EXACT", "category": "Catégorie", "subcategory": "Sous-catégorie", "confidence_score": 0.85}}]
+
+IMPORTANT: Le champ "id" doit correspondre EXACTEMENT à l'ID fourni."""
 
     def _build_user_prompt(self, sites_data: List[SiteContent]) -> str:
         """Construit le prompt utilisateur avec les données des sites"""
-        lines = ["Voici les sites à classifier :\n"]
+        lines = ["Voici les sites e-commerce à classifier :\n"]
 
         for site in sites_data:
-            if site.error:
-                lines.append(f"ID: {site.page_id} | URL: {site.url} | Erreur: {site.error}")
+            site_text = site.to_text()
+
+            # Si on a du contenu, l'utiliser
+            if site_text:
+                lines.append(f"ID: {site.page_id} | {site_text}")
             else:
-                lines.append(f"ID: {site.page_id} | {site.to_text()}")
+                # Fallback: utiliser le nom de page et/ou le domaine
+                domain = urlparse(site.url).netloc.replace('www.', '')
+                if site.page_name:
+                    lines.append(f"ID: {site.page_id} | Nom: {site.page_name} | Site: {domain}")
+                else:
+                    lines.append(f"ID: {site.page_id} | Site: {domain} | URL: {site.url}")
 
         return "\n".join(lines)
 
