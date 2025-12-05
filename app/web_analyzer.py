@@ -2,6 +2,7 @@
 Module pour l'analyse complète des sites web
 """
 import re
+import time
 import requests
 from urllib.parse import urlparse, urljoin
 from typing import Dict, List, Tuple, Optional
@@ -13,12 +14,18 @@ try:
         THEME_ASSET_CANDIDATES, REQUEST_SNIPPET, INLINE_NAME_PATTERNS,
         ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_random_headers, get_proxied_url, is_proxy_enabled
     )
+    from app.api_tracker import get_current_tracker
 except ImportError:
     from config import (
         REQUEST_TIMEOUT, HEADERS, DEFAULT_PAYMENTS, TAXONOMY, KEYWORD_OVERRIDES,
         THEME_ASSET_CANDIDATES, REQUEST_SNIPPET, INLINE_NAME_PATTERNS,
         ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_random_headers, get_proxied_url, is_proxy_enabled
     )
+    try:
+        from api_tracker import get_current_tracker
+    except ImportError:
+        def get_current_tracker():
+            return None
 
 
 def ensure_url(url: str) -> str:
@@ -26,12 +33,65 @@ def ensure_url(url: str) -> str:
     return url if url.startswith("http") else "https://" + url
 
 
-def get_web(url: str, timeout: int = REQUEST_TIMEOUT) -> Optional[requests.Response]:
+def get_web(url: str, timeout: int = REQUEST_TIMEOUT, site_url: str = "", page_id: str = "") -> Optional[requests.Response]:
     """Requête HTTP avec gestion d'erreurs, proxy optionnel et User-Agent aléatoire"""
+    tracker = get_current_tracker()
+    start_time = time.time()
+    use_proxy = is_proxy_enabled()
+
     try:
         proxied_url, headers = get_proxied_url(url)
-        return requests.get(proxied_url, headers=headers, timeout=timeout, allow_redirects=True)
-    except:
+        response = requests.get(proxied_url, headers=headers, timeout=timeout, allow_redirects=True)
+        response_time = (time.time() - start_time) * 1000
+
+        if tracker:
+            api_type = "scraper_api" if use_proxy else "web_request"
+            if api_type == "scraper_api":
+                tracker.track_scraper_api_call(
+                    url=url[:200],
+                    site_url=site_url or url[:200],
+                    status_code=response.status_code,
+                    success=response.status_code == 200,
+                    response_time_ms=response_time,
+                    response_size=len(response.content) if response.content else 0
+                )
+            else:
+                tracker.track_web_request(
+                    url=url[:200],
+                    site_url=site_url or url[:200],
+                    page_id=page_id,
+                    status_code=response.status_code,
+                    success=response.status_code == 200,
+                    response_time_ms=response_time,
+                    response_size=len(response.content) if response.content else 0
+                )
+
+        return response
+    except Exception as e:
+        response_time = (time.time() - start_time) * 1000
+        error_type = "timeout" if "timeout" in str(e).lower() else "error"
+
+        if tracker:
+            api_type = "scraper_api" if use_proxy else "web_request"
+            if api_type == "scraper_api":
+                tracker.track_scraper_api_call(
+                    url=url[:200],
+                    site_url=site_url or url[:200],
+                    success=False,
+                    error_type=error_type,
+                    error_message=str(e)[:200],
+                    response_time_ms=response_time
+                )
+            else:
+                tracker.track_web_request(
+                    url=url[:200],
+                    site_url=site_url or url[:200],
+                    page_id=page_id,
+                    success=False,
+                    error_type=error_type,
+                    error_message=str(e)[:200],
+                    response_time_ms=response_time
+                )
         return None
 
 
@@ -63,14 +123,64 @@ def _origin(url: str) -> str:
     return f"{p.scheme}://{p.netloc}"
 
 
-def _get_text(url: str) -> Optional[str]:
+def _get_text(url: str, site_url: str = "") -> Optional[str]:
     """Récupère le contenu texte d'une URL avec proxy optionnel"""
+    tracker = get_current_tracker()
+    start_time = time.time()
+    use_proxy = is_proxy_enabled()
+
     try:
         proxied_url, headers = get_proxied_url(url)
         r = requests.get(proxied_url, headers=headers, timeout=REQUEST_TIMEOUT, allow_redirects=True)
+        response_time = (time.time() - start_time) * 1000
+
+        if tracker:
+            api_type = "scraper_api" if use_proxy else "web_request"
+            if api_type == "scraper_api":
+                tracker.track_scraper_api_call(
+                    url=url[:200],
+                    site_url=site_url or url[:200],
+                    status_code=r.status_code,
+                    success=r.status_code == 200,
+                    response_time_ms=response_time,
+                    response_size=len(r.content) if r.content else 0
+                )
+            else:
+                tracker.track_web_request(
+                    url=url[:200],
+                    site_url=site_url or url[:200],
+                    status_code=r.status_code,
+                    success=r.status_code == 200,
+                    response_time_ms=response_time,
+                    response_size=len(r.content) if r.content else 0
+                )
+
         if r.status_code == 200 and r.text:
             return r.text
-    except:
+    except Exception as e:
+        response_time = (time.time() - start_time) * 1000
+        error_type = "timeout" if "timeout" in str(e).lower() else "error"
+
+        if tracker:
+            api_type = "scraper_api" if use_proxy else "web_request"
+            if api_type == "scraper_api":
+                tracker.track_scraper_api_call(
+                    url=url[:200],
+                    site_url=site_url or url[:200],
+                    success=False,
+                    error_type=error_type,
+                    error_message=str(e)[:200],
+                    response_time_ms=response_time
+                )
+            else:
+                tracker.track_web_request(
+                    url=url[:200],
+                    site_url=site_url or url[:200],
+                    success=False,
+                    error_type=error_type,
+                    error_message=str(e)[:200],
+                    response_time_ms=response_time
+                )
         return None
     return None
 

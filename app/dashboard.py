@@ -173,16 +173,18 @@ class SearchProgressTracker:
     Enregistre également l'historique complet en base de données.
     """
 
-    def __init__(self, container, db=None, log_id: int = None):
+    def __init__(self, container, db=None, log_id: int = None, api_tracker=None):
         """
         Args:
             container: Streamlit container pour l'affichage
             db: DatabaseManager pour le logging (optionnel)
             log_id: ID du log de recherche créé
+            api_tracker: APITracker pour le suivi des appels API (optionnel)
         """
         self.container = container
         self.db = db
         self.log_id = log_id
+        self.api_tracker = api_tracker
         self.start_time = time.time()
         self.phase_start = None
         self.step_start = None
@@ -329,7 +331,18 @@ class SearchProgressTracker:
                 pass  # Ne pas bloquer si erreur de sauvegarde
 
     def finalize_log(self, status: str = "completed", error_message: str = None):
-        """Finalise le log de recherche en base de données"""
+        """Finalise le log de recherche en base de données avec métriques API"""
+        # Récupérer les métriques API
+        api_metrics = None
+        if self.api_tracker:
+            try:
+                api_metrics = self.api_tracker.get_api_metrics_for_log()
+                # Sauvegarder les appels API détaillés
+                self.api_tracker.save_calls_to_db()
+            except Exception:
+                pass
+
+        # Finaliser le log
         if self.db and self.log_id:
             try:
                 from app.database import complete_search_log
@@ -338,13 +351,21 @@ class SearchProgressTracker:
                     self.log_id,
                     status=status,
                     error_message=error_message,
-                    metrics=self.metrics
+                    metrics=self.metrics,
+                    api_metrics=api_metrics
                 )
             except Exception:
                 pass  # Ne pas bloquer si erreur
 
+        # Nettoyer le tracker global
+        try:
+            from app.api_tracker import clear_current_tracker
+            clear_current_tracker()
+        except Exception:
+            pass
+
     def show_summary(self):
-        """Affiche le résumé final avec tous les temps"""
+        """Affiche le résumé final avec tous les temps et stats API"""
         total_time = time.time() - self.start_time
 
         # Clear status box
@@ -354,7 +375,7 @@ class SearchProgressTracker:
         with self.summary_box.container():
             st.markdown(f"### ✅ Recherche terminée en {self.format_time(total_time)}")
 
-            # Tableau récapitulatif
+            # Tableau récapitulatif des phases
             summary_data = []
             for p in self.phases_completed:
                 summary_data.append({
@@ -366,6 +387,37 @@ class SearchProgressTracker:
             if summary_data:
                 df = pd.DataFrame(summary_data)
                 st.dataframe(df, hide_index=True, use_container_width=True)
+
+            # Stats API si disponibles
+            if self.api_tracker:
+                try:
+                    api_summary = self.api_tracker.get_summary()
+                    st.markdown("#### 📊 Statistiques API")
+
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Meta API", api_summary.get("meta_api_calls", 0))
+                    with col2:
+                        st.metric("ScraperAPI", api_summary.get("scraper_api_calls", 0))
+                    with col3:
+                        st.metric("Web Requests", api_summary.get("web_requests", 0))
+                    with col4:
+                        errors = (api_summary.get("meta_api_errors", 0) +
+                                 api_summary.get("scraper_api_errors", 0) +
+                                 api_summary.get("web_errors", 0))
+                        st.metric("Erreurs", errors, delta=None if errors == 0 else f"-{errors}")
+
+                    # Coût estimé si ScraperAPI utilisé
+                    if api_summary.get("scraper_api_calls", 0) > 0:
+                        cost = api_summary.get("scraper_api_cost", 0)
+                        st.caption(f"💰 Coût ScraperAPI estimé: ${cost:.4f}")
+
+                    # Rate limit hits
+                    if api_summary.get("rate_limit_hits", 0) > 0:
+                        st.warning(f"⚠️ {api_summary['rate_limit_hits']} rate limit(s) atteint(s)")
+
+                except Exception:
+                    pass
 
         return total_time
 
@@ -961,6 +1013,11 @@ def render_sidebar():
             st.session_state.current_page = "Search Ads"
             st.rerun()
 
+        if st.button("📜 Search Logs", use_container_width=True,
+                     type="primary" if st.session_state.current_page == "Search Logs" else "secondary"):
+            st.session_state.current_page = "Search Logs"
+            st.rerun()
+
         if st.button("🏪 Pages / Shops", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Pages / Shops" else "secondary"):
             st.session_state.current_page = "Pages / Shops"
@@ -1023,11 +1080,6 @@ def render_sidebar():
         if st.button("🕐 Scans Programmés", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Scheduled Scans" else "secondary"):
             st.session_state.current_page = "Scheduled Scans"
-            st.rerun()
-
-        if st.button("📜 Historique Recherches", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Search Logs" else "secondary"):
-            st.session_state.current_page = "Search Logs"
             st.rerun()
 
         st.markdown("---")
@@ -1473,6 +1525,8 @@ def render_preview_results():
 
 def run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode=False):
     """Exécute le processus de recherche complet avec tracking détaillé et logging"""
+    from app.api_tracker import APITracker, set_current_tracker, clear_current_tracker
+
     client = MetaAdsClient(token)
     db = get_database()
 
@@ -1480,7 +1534,9 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
     log_id = None
     if db:
         try:
-            from app.database import create_search_log
+            from app.database import create_search_log, ensure_tables_exist
+            # S'assurer que toutes les tables existent (notamment SearchLog)
+            ensure_tables_exist(db)
             log_id = create_search_log(
                 db,
                 keywords=keywords,
@@ -1489,12 +1545,16 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
                 min_ads=min_ads,
                 selected_cms=selected_cms if selected_cms else []
             )
-        except Exception:
-            pass  # Continuer même si le log échoue
+        except Exception as e:
+            st.warning(f"⚠️ Log non créé: {str(e)[:100]}")
+
+    # Créer l'API tracker pour suivre tous les appels
+    api_tracker = APITracker(search_log_id=log_id, db=db)
+    set_current_tracker(api_tracker)
 
     # Créer le tracker de progression avec logging
     progress_container = st.container()
-    tracker = SearchProgressTracker(progress_container, db=db, log_id=log_id)
+    tracker = SearchProgressTracker(progress_container, db=db, log_id=log_id, api_tracker=api_tracker)
 
     # Récupérer la blacklist
     blacklist_ids = set()
@@ -3931,6 +3991,26 @@ def render_search_logs():
     with col4:
         st.metric("Total pages trouvées", stats.get("total_pages_found", 0))
 
+    # Stats API globales
+    total_api = (stats.get("total_meta_api_calls", 0) +
+                 stats.get("total_scraper_api_calls", 0) +
+                 stats.get("total_web_requests", 0))
+
+    if total_api > 0:
+        st.markdown("##### Statistiques API (30 jours)")
+        api1, api2, api3, api4, api5 = st.columns(5)
+        with api1:
+            st.metric("Meta API", stats.get("total_meta_api_calls", 0))
+        with api2:
+            st.metric("ScraperAPI", stats.get("total_scraper_api_calls", 0))
+        with api3:
+            st.metric("Web Direct", stats.get("total_web_requests", 0))
+        with api4:
+            st.metric("Rate Limits", stats.get("total_rate_limit_hits", 0))
+        with api5:
+            cost = stats.get("total_scraper_api_cost", 0)
+            st.metric("Coût ScraperAPI", f"${cost:.2f}")
+
     st.markdown("---")
 
     # Filtres
@@ -4029,6 +4109,75 @@ def render_search_logs():
                 if phase_table:
                     df_phases = pd.DataFrame(phase_table)
                     st.dataframe(df_phases, hide_index=True, use_container_width=True)
+
+            # ═══ STATISTIQUES API ═══
+            meta_api_calls = log.get("meta_api_calls", 0) or 0
+            scraper_api_calls = log.get("scraper_api_calls", 0) or 0
+            web_requests = log.get("web_requests", 0) or 0
+            total_api_calls = meta_api_calls + scraper_api_calls + web_requests
+
+            if total_api_calls > 0:
+                st.markdown("**Statistiques API:**")
+
+                # Ligne 1: Compteurs principaux
+                api_cols = st.columns(4)
+                with api_cols[0]:
+                    st.metric("🔗 Meta API", meta_api_calls)
+                with api_cols[1]:
+                    st.metric("🌐 ScraperAPI", scraper_api_calls)
+                with api_cols[2]:
+                    st.metric("📡 Web Direct", web_requests)
+                with api_cols[3]:
+                    st.metric("📊 Total", total_api_calls)
+
+                # Ligne 2: Erreurs et coûts
+                meta_errors = log.get("meta_api_errors", 0) or 0
+                scraper_errors = log.get("scraper_api_errors", 0) or 0
+                web_errors = log.get("web_errors", 0) or 0
+                rate_limits = log.get("rate_limit_hits", 0) or 0
+                scraper_cost = log.get("scraper_api_cost", 0) or 0
+
+                err_cols = st.columns(5)
+                with err_cols[0]:
+                    st.caption(f"❌ Meta erreurs: {meta_errors}")
+                with err_cols[1]:
+                    st.caption(f"❌ Scraper erreurs: {scraper_errors}")
+                with err_cols[2]:
+                    st.caption(f"❌ Web erreurs: {web_errors}")
+                with err_cols[3]:
+                    st.caption(f"⏱️ Rate limits: {rate_limits}")
+                with err_cols[4]:
+                    st.caption(f"💰 Coût ScraperAPI: ${scraper_cost:.4f}")
+
+                # Ligne 3: Temps moyens
+                meta_avg = log.get("meta_api_avg_time", 0) or 0
+                scraper_avg = log.get("scraper_api_avg_time", 0) or 0
+                web_avg = log.get("web_avg_time", 0) or 0
+
+                time_cols = st.columns(3)
+                with time_cols[0]:
+                    st.caption(f"⏱️ Meta avg: {meta_avg:.0f}ms")
+                with time_cols[1]:
+                    st.caption(f"⏱️ Scraper avg: {scraper_avg:.0f}ms")
+                with time_cols[2]:
+                    st.caption(f"⏱️ Web avg: {web_avg:.0f}ms")
+
+                # Détails par mot-clé (si disponibles)
+                api_details = log.get("api_details")
+                if api_details and isinstance(api_details, dict) and len(api_details) > 0:
+                    with st.expander("📋 Détails par mot-clé"):
+                        details_table = []
+                        for kw, kw_stats in api_details.items():
+                            details_table.append({
+                                "Mot-clé": kw[:30] + "..." if len(kw) > 30 else kw,
+                                "Appels": kw_stats.get("calls", 0),
+                                "Ads": kw_stats.get("ads_found", 0),
+                                "Erreurs": kw_stats.get("errors", 0),
+                                "Temps (ms)": f"{kw_stats.get('time_ms', 0):.0f}"
+                            })
+                        if details_table:
+                            df_details = pd.DataFrame(details_table)
+                            st.dataframe(df_details, hide_index=True, use_container_width=True)
 
             # Message d'erreur si failed
             if status == "failed" and log.get("error_message"):

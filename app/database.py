@@ -281,9 +281,72 @@ class SearchLog(Base):
     pages_saved = Column(Integer, default=0)
     ads_saved = Column(Integer, default=0)
 
+    # ═══ STATS API ═══
+    # Compteurs d'appels
+    meta_api_calls = Column(Integer, default=0)
+    scraper_api_calls = Column(Integer, default=0)
+    web_requests = Column(Integer, default=0)
+
+    # Erreurs
+    meta_api_errors = Column(Integer, default=0)
+    scraper_api_errors = Column(Integer, default=0)
+    web_errors = Column(Integer, default=0)
+    rate_limit_hits = Column(Integer, default=0)
+
+    # Temps de réponse (ms)
+    meta_api_avg_time = Column(Float, default=0)
+    scraper_api_avg_time = Column(Float, default=0)
+    web_avg_time = Column(Float, default=0)
+
+    # Coût estimé (pour ScraperAPI)
+    scraper_api_cost = Column(Float, default=0)
+
+    # Détails API par mot-clé (JSON)
+    api_details = Column(Text)  # JSON avec détails par keyword
+
     __table_args__ = (
         Index('idx_search_log_date', 'started_at'),
         Index('idx_search_log_status', 'status'),
+    )
+
+
+class APICallLog(Base):
+    """Table api_call_logs - Détails de chaque appel API"""
+    __tablename__ = "api_call_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    search_log_id = Column(Integer, index=True)  # Lien vers SearchLog
+
+    # Type d'appel
+    api_type = Column(String(50))  # meta_api, scraper_api, web_request
+    endpoint = Column(String(500))  # URL ou endpoint appelé
+    method = Column(String(10), default="GET")
+
+    # Contexte
+    keyword = Column(String(200))  # Mot-clé associé (si applicable)
+    page_id = Column(String(50))  # Page ID (si applicable)
+    site_url = Column(String(500))  # URL du site (si applicable)
+
+    # Résultat
+    status_code = Column(Integer)
+    success = Column(Boolean, default=True)
+    error_type = Column(String(100))  # rate_limit, timeout, http_error, network_error
+    error_message = Column(Text)
+
+    # Performance
+    response_time_ms = Column(Float)  # Temps de réponse en ms
+    response_size = Column(Integer)  # Taille réponse en bytes
+
+    # Données récupérées
+    items_returned = Column(Integer, default=0)  # Nombre d'éléments retournés
+
+    # Timestamp
+    called_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_api_call_search', 'search_log_id'),
+        Index('idx_api_call_type', 'api_type'),
+        Index('idx_api_call_date', 'called_at'),
     )
 
 
@@ -326,6 +389,25 @@ class DatabaseManager:
             raise
         finally:
             session.close()
+
+
+def ensure_tables_exist(db: DatabaseManager) -> bool:
+    """
+    S'assure que toutes les tables existent dans la base de données.
+    Crée les tables manquantes si nécessaire.
+
+    Args:
+        db: Instance DatabaseManager
+
+    Returns:
+        True si succès
+    """
+    try:
+        Base.metadata.create_all(db.engine)
+        return True
+    except Exception as e:
+        print(f"Erreur création tables: {e}")
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1868,7 +1950,8 @@ def complete_search_log(
     log_id: int,
     status: str = "completed",
     error_message: str = None,
-    metrics: Dict = None
+    metrics: Dict = None,
+    api_metrics: Dict = None
 ) -> bool:
     """
     Finalise un log de recherche
@@ -1879,7 +1962,10 @@ def complete_search_log(
         status: completed, failed, cancelled
         error_message: Message d'erreur si failed
         metrics: Dictionnaire avec les métriques finales
+        api_metrics: Dictionnaire avec les métriques API
     """
+    import json
+
     with db.get_session() as session:
         log = session.query(SearchLog).filter(SearchLog.id == log_id).first()
         if not log:
@@ -1903,7 +1989,83 @@ def complete_search_log(
             log.pages_saved = metrics.get("pages_saved", 0)
             log.ads_saved = metrics.get("ads_saved", 0)
 
+        # Métriques API
+        if api_metrics:
+            log.meta_api_calls = api_metrics.get("meta_api_calls", 0)
+            log.scraper_api_calls = api_metrics.get("scraper_api_calls", 0)
+            log.web_requests = api_metrics.get("web_requests", 0)
+            log.meta_api_errors = api_metrics.get("meta_api_errors", 0)
+            log.scraper_api_errors = api_metrics.get("scraper_api_errors", 0)
+            log.web_errors = api_metrics.get("web_errors", 0)
+            log.rate_limit_hits = api_metrics.get("rate_limit_hits", 0)
+            log.meta_api_avg_time = api_metrics.get("meta_api_avg_time", 0)
+            log.scraper_api_avg_time = api_metrics.get("scraper_api_avg_time", 0)
+            log.web_avg_time = api_metrics.get("web_avg_time", 0)
+            log.scraper_api_cost = api_metrics.get("scraper_api_cost", 0)
+            if api_metrics.get("api_details"):
+                log.api_details = json.dumps(api_metrics["api_details"], ensure_ascii=False)
+
         return True
+
+
+def save_api_calls(db: DatabaseManager, search_log_id: int, calls: list) -> int:
+    """
+    Sauvegarde les appels API en base de données
+
+    Args:
+        db: Instance DatabaseManager
+        search_log_id: ID du SearchLog associé
+        calls: Liste d'objets APICall
+
+    Returns:
+        Nombre d'appels sauvegardés
+    """
+    count = 0
+    with db.get_session() as session:
+        for call in calls:
+            api_call = APICallLog(
+                search_log_id=search_log_id,
+                api_type=call.api_type,
+                endpoint=call.endpoint[:500] if call.endpoint else "",
+                method=call.method,
+                keyword=call.keyword[:200] if call.keyword else "",
+                page_id=call.page_id[:50] if call.page_id else "",
+                site_url=call.site_url[:500] if call.site_url else "",
+                status_code=call.status_code,
+                success=call.success,
+                error_type=call.error_type[:100] if call.error_type else "",
+                error_message=call.error_message[:500] if call.error_message else "",
+                response_time_ms=call.response_time_ms,
+                response_size=call.response_size,
+                items_returned=call.items_returned,
+                called_at=call.called_at
+            )
+            session.add(api_call)
+            count += 1
+    return count
+
+
+def get_api_calls_for_search(db: DatabaseManager, search_log_id: int) -> List[Dict]:
+    """Récupère les appels API pour une recherche"""
+    with db.get_session() as session:
+        calls = session.query(APICallLog).filter(
+            APICallLog.search_log_id == search_log_id
+        ).order_by(APICallLog.called_at).all()
+
+        return [{
+            "id": c.id,
+            "api_type": c.api_type,
+            "endpoint": c.endpoint,
+            "keyword": c.keyword,
+            "site_url": c.site_url,
+            "status_code": c.status_code,
+            "success": c.success,
+            "error_type": c.error_type,
+            "error_message": c.error_message,
+            "response_time_ms": c.response_time_ms,
+            "items_returned": c.items_returned,
+            "called_at": c.called_at
+        } for c in calls]
 
 
 def get_search_logs(
@@ -1953,7 +2115,20 @@ def get_search_logs(
             "winning_ads_count": l.winning_ads_count,
             "blacklisted_ads_skipped": l.blacklisted_ads_skipped,
             "pages_saved": l.pages_saved,
-            "ads_saved": l.ads_saved
+            "ads_saved": l.ads_saved,
+            # Stats API
+            "meta_api_calls": getattr(l, 'meta_api_calls', 0) or 0,
+            "scraper_api_calls": getattr(l, 'scraper_api_calls', 0) or 0,
+            "web_requests": getattr(l, 'web_requests', 0) or 0,
+            "meta_api_errors": getattr(l, 'meta_api_errors', 0) or 0,
+            "scraper_api_errors": getattr(l, 'scraper_api_errors', 0) or 0,
+            "web_errors": getattr(l, 'web_errors', 0) or 0,
+            "rate_limit_hits": getattr(l, 'rate_limit_hits', 0) or 0,
+            "meta_api_avg_time": getattr(l, 'meta_api_avg_time', 0) or 0,
+            "scraper_api_avg_time": getattr(l, 'scraper_api_avg_time', 0) or 0,
+            "web_avg_time": getattr(l, 'web_avg_time', 0) or 0,
+            "scraper_api_cost": getattr(l, 'scraper_api_cost', 0) or 0,
+            "api_details": json.loads(l.api_details) if getattr(l, 'api_details', None) else {}
         } for l in logs]
 
 
@@ -2042,11 +2217,34 @@ def get_search_logs_stats(db: DatabaseManager, days: int = 30) -> Dict:
             SearchLog.status == "completed"
         ).first()
 
+        # Stats API
+        api_stats = session.query(
+            func.sum(SearchLog.meta_api_calls),
+            func.sum(SearchLog.scraper_api_calls),
+            func.sum(SearchLog.web_requests),
+            func.sum(SearchLog.meta_api_errors),
+            func.sum(SearchLog.scraper_api_errors),
+            func.sum(SearchLog.web_errors),
+            func.sum(SearchLog.rate_limit_hits),
+            func.sum(SearchLog.scraper_api_cost)
+        ).filter(
+            SearchLog.started_at >= cutoff
+        ).first()
+
         return {
             "total_searches": total,
             "by_status": {s[0]: s[1] for s in by_status},
             "avg_duration_seconds": round(avg_duration, 1) if avg_duration else 0,
             "total_ads_found": totals[0] or 0,
             "total_pages_found": totals[1] or 0,
-            "total_winning_ads": totals[2] or 0
+            "total_winning_ads": totals[2] or 0,
+            # Stats API
+            "total_meta_api_calls": api_stats[0] or 0,
+            "total_scraper_api_calls": api_stats[1] or 0,
+            "total_web_requests": api_stats[2] or 0,
+            "total_meta_api_errors": api_stats[3] or 0,
+            "total_scraper_api_errors": api_stats[4] or 0,
+            "total_web_errors": api_stats[5] or 0,
+            "total_rate_limit_hits": api_stats[6] or 0,
+            "total_scraper_api_cost": api_stats[7] or 0
         }

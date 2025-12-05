@@ -13,11 +13,17 @@ try:
         ADS_ARCHIVE, TIMEOUT, LIMIT_SEARCH, LIMIT_COUNT, LIMIT_MIN,
         FIELDS_ADS_COMPLETE
     )
+    from app.api_tracker import get_current_tracker
 except ImportError:
     from config import (
         ADS_ARCHIVE, TIMEOUT, LIMIT_SEARCH, LIMIT_COUNT, LIMIT_MIN,
         FIELDS_ADS_COMPLETE
     )
+    try:
+        from api_tracker import get_current_tracker
+    except ImportError:
+        def get_current_tracker():
+            return None
 
 
 class MetaAdsClient:
@@ -25,16 +31,21 @@ class MetaAdsClient:
 
     def __init__(self, access_token: str):
         self.access_token = access_token
+        self._current_keyword = ""  # Pour tracking
 
     def _get_api(self, url: str, params: dict) -> dict:
         """Appel API avec retry automatique et gestion du rate limiting"""
         params = params.copy()
         params["access_token"] = self.access_token
 
+        tracker = get_current_tracker()
         max_retries = 5
+
         for attempt in range(max_retries):
+            start_time = time.time()
             try:
                 r = requests.get(url, params=params, timeout=TIMEOUT)
+                response_time = (time.time() - start_time) * 1000
 
                 # Parse response
                 try:
@@ -42,31 +53,89 @@ class MetaAdsClient:
                 except (ValueError, json.JSONDecodeError):
                     data = {}
 
+                response_size = len(r.text) if r.text else 0
+
                 # Check for rate limit error in JSON response (code 613)
                 if "error" in data:
                     error_code = data["error"].get("code")
                     error_msg = data["error"].get("message", "")
 
                     if error_code == 613 or "rate limit" in error_msg.lower():
+                        # Track rate limit hit
+                        if tracker:
+                            tracker.track_meta_api_call(
+                                endpoint=url[:200],
+                                keyword=self._current_keyword,
+                                status_code=r.status_code,
+                                success=False,
+                                error_type="rate_limit",
+                                error_message=error_msg[:200],
+                                response_time_ms=response_time
+                            )
+
                         # Rate limit - exponential backoff
                         sleep_time = min(2 ** attempt, 60)  # Max 60s
                         print(f"⏳ Rate limit atteint, attente {sleep_time}s...")
                         time.sleep(sleep_time)
                         continue
 
+                    # Track other API error
+                    if tracker:
+                        tracker.track_meta_api_call(
+                            endpoint=url[:200],
+                            keyword=self._current_keyword,
+                            status_code=r.status_code,
+                            success=False,
+                            error_type="api_error",
+                            error_message=error_msg[:200],
+                            response_time_ms=response_time
+                        )
+
                     # Other API error
                     raise RuntimeError(f"API Error {error_code}: {error_msg}")
 
                 if r.status_code == 200:
+                    # Track successful call
+                    items_count = len(data.get("data", []))
+                    if tracker:
+                        tracker.track_meta_api_call(
+                            endpoint=url[:200],
+                            keyword=self._current_keyword,
+                            status_code=200,
+                            success=True,
+                            response_time_ms=response_time,
+                            response_size=response_size,
+                            items_returned=items_count
+                        )
                     return data
 
                 if r.status_code in (429, 500, 502, 503):
+                    if tracker:
+                        tracker.track_meta_api_call(
+                            endpoint=url[:200],
+                            keyword=self._current_keyword,
+                            status_code=r.status_code,
+                            success=False,
+                            error_type="http_error",
+                            response_time_ms=response_time
+                        )
                     sleep_time = min(2 ** attempt, 30)
                     time.sleep(sleep_time)
                     continue
 
                 raise RuntimeError(f"HTTP {r.status_code}: {r.text[:200]}")
+
             except requests.RequestException as e:
+                response_time = (time.time() - start_time) * 1000
+                if tracker:
+                    tracker.track_meta_api_call(
+                        endpoint=url[:200],
+                        keyword=self._current_keyword,
+                        success=False,
+                        error_type="network_error",
+                        error_message=str(e)[:200],
+                        response_time_ms=response_time
+                    )
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)
                     continue
@@ -93,6 +162,9 @@ class MetaAdsClient:
         Returns:
             Liste des annonces trouvées
         """
+        # Set current keyword for API tracking
+        self._current_keyword = keyword
+
         url = ADS_ARCHIVE
         params = {
             "search_terms": keyword,
