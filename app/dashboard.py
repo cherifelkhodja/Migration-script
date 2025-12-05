@@ -60,7 +60,12 @@ def init_session_state():
         'current_page': 'Dashboard',
         'countries': ['FR'],
         'languages': ['fr'],
-        'state_thresholds': DEFAULT_STATE_THRESHOLDS.copy()
+        'state_thresholds': DEFAULT_STATE_THRESHOLDS.copy(),
+        # Seuils de détection
+        'detection_thresholds': {
+            'min_ads_suivi': MIN_ADS_SUIVI,
+            'min_ads_liste': MIN_ADS_LISTE,
+        }
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -459,8 +464,9 @@ def render_preview_results():
                     thresholds = st.session_state.get("state_thresholds", None)
                     languages = st.session_state.get("languages", ["fr"])
                     pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds)
-                    suivi_saved = save_suivi_page(db, pages_final, web_results, MIN_ADS_SUIVI)
-                    ads_saved = save_ads_recherche(db, pages_final, st.session_state.get("page_ads", {}), countries, MIN_ADS_LISTE)
+                    det = st.session_state.get("detection_thresholds", {})
+                    suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI))
+                    ads_saved = save_ads_recherche(db, pages_final, st.session_state.get("page_ads", {}), countries, det.get("min_ads_liste", MIN_ADS_LISTE))
 
                     st.success(f"✓ Sauvegardé : {pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads")
                     st.session_state.show_preview_results = False
@@ -663,8 +669,9 @@ def run_search_process(token, keywords, countries, languages, min_ads, selected_
             try:
                 thresholds = st.session_state.get("state_thresholds", None)
                 pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds)
-                suivi_saved = save_suivi_page(db, pages_final, web_results, MIN_ADS_SUIVI)
-                ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, MIN_ADS_LISTE)
+                det = st.session_state.get("detection_thresholds", {})
+                suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI))
+                ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, det.get("min_ads_liste", MIN_ADS_LISTE))
 
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Pages", pages_saved)
@@ -812,8 +819,9 @@ def run_page_id_search(token, page_ids, countries, languages, selected_cms, prev
             try:
                 thresholds = st.session_state.get("state_thresholds", None)
                 pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds)
-                suivi_saved = save_suivi_page(db, pages_final, web_results, MIN_ADS_SUIVI)
-                ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, MIN_ADS_LISTE)
+                det = st.session_state.get("detection_thresholds", {})
+                suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI))
+                ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, det.get("min_ads_liste", MIN_ADS_LISTE))
 
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Pages", pages_saved)
@@ -1366,14 +1374,59 @@ def render_settings():
 
     st.markdown("---")
 
-    # Seuils de base
+    # Seuils de détection (configurables)
     st.subheader("📊 Seuils de détection")
+    st.markdown("Ces seuils déterminent quelles pages sont sauvegardées dans les différentes tables de la base de données.")
+
+    # Récupérer les seuils actuels
+    detection = st.session_state.detection_thresholds
 
     col1, col2 = st.columns(2)
+
     with col1:
-        st.info(f"Min. ads pour suivi: **{MIN_ADS_SUIVI}**")
+        new_min_suivi = st.number_input(
+            "Min. ads pour Suivi (suivi_page)",
+            min_value=1,
+            max_value=100,
+            value=detection.get("min_ads_suivi", MIN_ADS_SUIVI),
+            help="Nombre minimum d'ads actives pour qu'une page soit ajoutée à la table de suivi. Cette table permet de suivre l'évolution des pages au fil du temps."
+        )
+        st.caption("📈 **Table suivi_page** : Historique d'évolution des pages (ads, produits) pour le monitoring")
+
     with col2:
-        st.info(f"Min. ads pour liste: **{MIN_ADS_LISTE}**")
+        new_min_liste = st.number_input(
+            "Min. ads pour Liste Ads (liste_ads_recherche)",
+            min_value=1,
+            max_value=100,
+            value=detection.get("min_ads_liste", MIN_ADS_LISTE),
+            help="Nombre minimum d'ads actives pour qu'une page ait ses annonces détaillées sauvegardées. Seules les pages dépassant ce seuil auront leurs annonces individuelles enregistrées."
+        )
+        st.caption("📋 **Table liste_ads_recherche** : Détail de chaque annonce (créatifs, textes, liens...)")
+
+    # Bouton sauvegarder seuils détection
+    if st.button("💾 Sauvegarder les seuils de détection", key="save_detection"):
+        st.session_state.detection_thresholds = {
+            "min_ads_suivi": new_min_suivi,
+            "min_ads_liste": new_min_liste,
+        }
+        st.success("✓ Seuils de détection sauvegardés !")
+
+    # Explication visuelle
+    with st.expander("ℹ️ Comment fonctionnent ces seuils ?"):
+        st.markdown("""
+        **Lors d'une recherche, les pages sont filtrées par ces seuils :**
+
+        | Table | Seuil | Contenu |
+        |-------|-------|---------|
+        | `liste_page_recherche` | Toutes | Toutes les pages trouvées avec infos de base |
+        | `suivi_page` | Min. Suivi | Pages pour le monitoring (évolution historique) |
+        | `liste_ads_recherche` | Min. Liste Ads | Détail des annonces individuelles |
+
+        **Exemple avec seuils actuels :**
+        - Une page avec **5 ads** → Sauvée uniquement dans `liste_page_recherche`
+        - Une page avec **15 ads** → Sauvée dans `liste_page_recherche` + `suivi_page`
+        - Une page avec **25 ads** → Sauvée dans les 3 tables
+        """)
 
     st.markdown("---")
 
