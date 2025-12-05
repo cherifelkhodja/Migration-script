@@ -1312,12 +1312,22 @@ def render_keyword_search():
         col1, col2 = st.columns(2)
 
         with col1:
+            # Token principal
             token = st.text_input(
-                "Token Meta API",
+                "Token Meta API #1",
                 type="password",
                 value=os.getenv("META_ACCESS_TOKEN", ""),
-                help="Votre token d'accès Meta Ads API",
+                help="Votre token d'accès Meta Ads API principal",
                 key="token_keyword"
+            )
+
+            # Token secondaire (optionnel) - pour rotation anti-ban
+            token2 = st.text_input(
+                "Token Meta API #2 (optionnel)",
+                type="password",
+                value=os.getenv("META_ACCESS_TOKEN_2", ""),
+                help="Second token pour rotation automatique (anti rate-limit)",
+                key="token2_keyword"
             )
 
             keywords_input = st.text_area(
@@ -1367,7 +1377,7 @@ def render_keyword_search():
             st.error("Au moins un mot-clé requis !")
             return
 
-        run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode)
+        run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode, token2=token2)
 
 
 def render_page_id_search():
@@ -1379,11 +1389,19 @@ def render_page_id_search():
 
         with col1:
             token = st.text_input(
-                "Token Meta API",
+                "Token Meta API #1",
                 type="password",
                 value=os.getenv("META_ACCESS_TOKEN", ""),
-                help="Votre token d'accès Meta Ads API",
+                help="Votre token d'accès Meta Ads API principal",
                 key="token_pageid"
+            )
+
+            token2 = st.text_input(
+                "Token Meta API #2 (optionnel)",
+                type="password",
+                value=os.getenv("META_ACCESS_TOKEN_2", ""),
+                help="Second token pour rotation automatique (anti rate-limit)",
+                key="token2_pageid"
             )
 
             page_ids_input = st.text_area(
@@ -1523,9 +1541,19 @@ def render_preview_results():
             st.rerun()
 
 
-def run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode=False):
+def run_search_process(token, keywords, countries, languages, min_ads, selected_cms, preview_mode=False, token2: str = ""):
     """Exécute le processus de recherche complet avec tracking détaillé et logging"""
     from app.api_tracker import APITracker, set_current_tracker, clear_current_tracker
+    from app.meta_api import init_token_rotator, clear_token_rotator
+
+    # Initialiser le TokenRotator avec les tokens disponibles
+    tokens = [token]
+    if token2 and token2.strip():
+        tokens.append(token2.strip())
+    rotator = init_token_rotator(tokens)
+
+    if rotator.token_count > 1:
+        st.info(f"🔄 {rotator.token_count} tokens Meta configurés - Rotation automatique activée")
 
     client = MetaAdsClient(token)
     db = get_database()

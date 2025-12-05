@@ -7,6 +7,7 @@ import re
 import requests
 from collections import Counter
 from typing import List, Dict, Tuple, Optional, Callable
+from threading import Lock
 
 try:
     from app.config import (
@@ -26,6 +27,139 @@ except ImportError:
             return None
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# TOKEN ROTATOR - Gestion de plusieurs tokens Meta API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TokenRotator:
+    """
+    Gère la rotation entre plusieurs tokens Meta API.
+    Permet de switcher automatiquement quand un token hit rate limit.
+    Thread-safe.
+    """
+
+    def __init__(self, tokens: List[str]):
+        """
+        Args:
+            tokens: Liste de tokens Meta API (filtre les vides)
+        """
+        self.tokens = [t.strip() for t in tokens if t and t.strip()]
+        self._current_index = 0
+        self._lock = Lock()
+        self._rate_limited = {}  # {token: timestamp_until_available}
+        self._call_counts = {t: 0 for t in self.tokens}  # Compteur par token
+
+    @property
+    def token_count(self) -> int:
+        """Nombre de tokens disponibles"""
+        return len(self.tokens)
+
+    def get_current_token(self) -> str:
+        """Retourne le token courant"""
+        with self._lock:
+            if not self.tokens:
+                return ""
+            return self.tokens[self._current_index]
+
+    def get_token_info(self) -> Dict:
+        """Retourne les infos sur l'état des tokens"""
+        with self._lock:
+            now = time.time()
+            return {
+                "total_tokens": len(self.tokens),
+                "current_index": self._current_index + 1,
+                "current_token_masked": self._mask_token(self.get_current_token()),
+                "call_counts": {self._mask_token(t): c for t, c in self._call_counts.items()},
+                "rate_limited": {
+                    self._mask_token(t): round(ts - now, 1)
+                    for t, ts in self._rate_limited.items()
+                    if ts > now
+                }
+            }
+
+    def _mask_token(self, token: str) -> str:
+        """Masque un token pour l'affichage"""
+        if len(token) <= 10:
+            return "***"
+        return f"{token[:6]}...{token[-4:]}"
+
+    def rotate(self, reason: str = "manual") -> bool:
+        """
+        Passe au token suivant.
+
+        Returns:
+            True si rotation effectuée, False si un seul token
+        """
+        with self._lock:
+            if len(self.tokens) <= 1:
+                return False
+
+            old_idx = self._current_index
+            self._current_index = (self._current_index + 1) % len(self.tokens)
+            print(f"🔄 Token rotation ({reason}): #{old_idx + 1} → #{self._current_index + 1}")
+            return True
+
+    def mark_rate_limited(self, cooldown_seconds: int = 60) -> bool:
+        """
+        Marque le token courant comme rate-limited et tourne.
+
+        Args:
+            cooldown_seconds: Temps avant que le token soit réutilisable
+
+        Returns:
+            True si un autre token est disponible
+        """
+        with self._lock:
+            current = self.tokens[self._current_index]
+            self._rate_limited[current] = time.time() + cooldown_seconds
+
+            # Chercher un token non rate-limited
+            now = time.time()
+            for i in range(len(self.tokens)):
+                idx = (self._current_index + i + 1) % len(self.tokens)
+                token = self.tokens[idx]
+                if token not in self._rate_limited or self._rate_limited[token] <= now:
+                    old_idx = self._current_index
+                    self._current_index = idx
+                    print(f"🔄 Token #{old_idx + 1} rate-limited, switch vers #{idx + 1}")
+                    return True
+
+            # Tous les tokens sont rate-limited
+            print("⚠️ Tous les tokens sont rate-limited!")
+            return False
+
+    def record_call(self):
+        """Enregistre un appel pour le token courant"""
+        with self._lock:
+            token = self.tokens[self._current_index] if self.tokens else ""
+            if token:
+                self._call_counts[token] = self._call_counts.get(token, 0) + 1
+
+
+# Singleton global pour le rotator
+_token_rotator: Optional[TokenRotator] = None
+
+
+def get_token_rotator() -> Optional[TokenRotator]:
+    """Retourne le rotator global"""
+    global _token_rotator
+    return _token_rotator
+
+
+def init_token_rotator(tokens: List[str]) -> TokenRotator:
+    """Initialise le rotator global avec les tokens"""
+    global _token_rotator
+    _token_rotator = TokenRotator(tokens)
+    print(f"✅ TokenRotator initialisé avec {_token_rotator.token_count} token(s)")
+    return _token_rotator
+
+
+def clear_token_rotator():
+    """Efface le rotator global"""
+    global _token_rotator
+    _token_rotator = None
+
+
 class MetaAdsClient:
     """Client pour interagir avec l'API Meta Ads Archive"""
 
@@ -33,15 +167,29 @@ class MetaAdsClient:
         self.access_token = access_token
         self._current_keyword = ""  # Pour tracking
 
+    def _get_current_token(self) -> str:
+        """Retourne le token à utiliser (du rotator si disponible)"""
+        rotator = get_token_rotator()
+        if rotator and rotator.token_count > 0:
+            return rotator.get_current_token()
+        return self.access_token
+
     def _get_api(self, url: str, params: dict) -> dict:
         """Appel API avec retry automatique et gestion du rate limiting"""
         params = params.copy()
-        params["access_token"] = self.access_token
 
         tracker = get_current_tracker()
+        rotator = get_token_rotator()
         max_retries = 5
 
         for attempt in range(max_retries):
+            # Utiliser le token du rotator si disponible
+            current_token = self._get_current_token()
+            params["access_token"] = current_token
+
+            if rotator:
+                rotator.record_call()
+
             start_time = time.time()
             try:
                 r = requests.get(url, params=params, timeout=TIMEOUT)
@@ -72,6 +220,13 @@ class MetaAdsClient:
                                 error_message=error_msg[:200],
                                 response_time_ms=response_time
                             )
+
+                        # Essayer de switcher de token si possible
+                        if rotator and rotator.token_count > 1:
+                            switched = rotator.mark_rate_limited(cooldown_seconds=60)
+                            if switched:
+                                # Retry immédiatement avec le nouveau token
+                                continue
 
                         # Rate limit - exponential backoff
                         sleep_time = min(2 ** attempt, 60)  # Max 60s
