@@ -3065,7 +3065,13 @@ def render_winning_ads():
         )
 
     with col2:
-        limit = st.selectbox("Limite", [50, 100, 200, 500], index=1)
+        limit_options = [50, 100, 200, 500, 1000, 0]  # 0 = Toutes
+        limit = st.selectbox(
+            "Limite",
+            limit_options,
+            format_func=lambda x: "Toutes" if x == 0 else str(x),
+            index=1
+        )
 
     with col3:
         sort_by = st.selectbox(
@@ -3081,6 +3087,11 @@ def render_winning_ads():
             index=0,
             help="Par Ad ID: 1 seule entrée par ad. Par Page: 1 meilleure ad par page."
         )
+
+    # Mode d'affichage
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        view_mode = st.radio("Affichage", ["📋 Tableau", "🃏 Cartes"], horizontal=True)
 
     try:
         # Statistiques globales
@@ -3155,7 +3166,9 @@ def render_winning_ads():
         # Liste des winning ads
         st.markdown("---")
 
-        winning_ads = get_winning_ads(db, limit=limit, days=period)
+        # limit=0 signifie "Toutes" -> on utilise une très grande limite
+        actual_limit = limit if limit > 0 else 100000
+        winning_ads = get_winning_ads(db, limit=actual_limit, days=period)
 
         if winning_ads:
             # Appliquer la déduplication AVANT l'export
@@ -3214,55 +3227,91 @@ def render_winning_ads():
             dedup_info = f" (dédupliqué: {dedup_mode})" if dedup_mode != "Aucune" else ""
             st.info(f"🏆 {len(winning_ads)} winning ads trouvées{dedup_info}")
 
-            for ad in winning_ads:
-                reach_formatted = f"{ad.get('eu_total_reach', 0):,}" if ad.get('eu_total_reach') else "N/A"
-                age = ad.get('ad_age_days', 'N/A')
-                criteria = ad.get('matched_criteria', 'N/A')
+            # Mode Tableau
+            if view_mode == "📋 Tableau":
+                table_data = []
+                for ad in winning_ads:
+                    table_data.append({
+                        "Page": ad.get('page_name', 'N/A')[:40],
+                        "Reach": ad.get('eu_total_reach', 0) or 0,
+                        "Âge (j)": ad.get('ad_age_days', 0) or 0,
+                        "Critère": ad.get('matched_criteria', 'N/A'),
+                        "Texte": (ad.get('ad_creative_bodies', '') or '')[:80] + "..." if len(ad.get('ad_creative_bodies', '') or '') > 80 else (ad.get('ad_creative_bodies', '') or ''),
+                        "Site": ad.get('lien_site', ''),
+                        "Ad URL": ad.get('ad_snapshot_url', ''),
+                        "Page ID": ad.get('page_id', ''),
+                        "Ad ID": ad.get('ad_id', ''),
+                        "Scan": ad.get('date_scan').strftime('%Y-%m-%d') if ad.get('date_scan') else ''
+                    })
 
-                with st.expander(f"🏆 **{ad.get('page_name', 'N/A')}** - {reach_formatted} reach ({criteria})"):
-                    col1, col2 = st.columns([2, 1])
+                df_winning = pd.DataFrame(table_data)
 
-                    with col1:
-                        # Texte de l'annonce
-                        bodies = ad.get('ad_creative_bodies', '')
-                        if bodies:
-                            st.markdown("**Texte de l'annonce:**")
-                            st.text(bodies[:500] + "..." if len(bodies) > 500 else bodies)
+                # Configuration des colonnes pour les liens cliquables
+                column_config = {
+                    "Reach": st.column_config.NumberColumn("Reach", format="%d"),
+                    "Site": st.column_config.LinkColumn("Site"),
+                    "Ad URL": st.column_config.LinkColumn("Voir Ad"),
+                }
 
-                        # Liens
-                        captions = ad.get('ad_creative_link_captions', '')
-                        if captions:
-                            st.markdown(f"**Caption:** {captions}")
+                st.dataframe(
+                    df_winning,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config=column_config,
+                    height=600
+                )
 
-                        titles = ad.get('ad_creative_link_titles', '')
-                        if titles:
-                            st.markdown(f"**Titre:** {titles}")
+            # Mode Cartes (ancien affichage)
+            else:
+                for ad in winning_ads:
+                    reach_formatted = f"{ad.get('eu_total_reach', 0):,}" if ad.get('eu_total_reach') else "N/A"
+                    age = ad.get('ad_age_days', 'N/A')
+                    criteria = ad.get('matched_criteria', 'N/A')
 
-                    with col2:
-                        st.metric("📈 Reach", reach_formatted)
-                        st.metric("📅 Âge", f"{age} jours" if age else "N/A")
-                        st.metric("🎯 Critère", criteria)
+                    with st.expander(f"🏆 **{ad.get('page_name', 'N/A')}** - {reach_formatted} reach ({criteria})"):
+                        col1, col2 = st.columns([2, 1])
 
-                        # Date de création
-                        creation = ad.get('ad_creation_time')
-                        if creation:
-                            st.caption(f"Créé: {creation.strftime('%Y-%m-%d')}")
+                        with col1:
+                            # Texte de l'annonce
+                            bodies = ad.get('ad_creative_bodies', '')
+                            if bodies:
+                                st.markdown("**Texte de l'annonce:**")
+                                st.text(bodies[:500] + "..." if len(bodies) > 500 else bodies)
 
-                        # Date de scan
-                        scan = ad.get('date_scan')
-                        if scan:
-                            st.caption(f"Scanné: {scan.strftime('%Y-%m-%d %H:%M')}")
+                            # Liens
+                            captions = ad.get('ad_creative_link_captions', '')
+                            if captions:
+                                st.markdown(f"**Caption:** {captions}")
 
-                        # Liens
-                        if ad.get('ad_snapshot_url'):
-                            st.link_button("🔗 Voir l'annonce", ad['ad_snapshot_url'])
+                            titles = ad.get('ad_creative_link_titles', '')
+                            if titles:
+                                st.markdown(f"**Titre:** {titles}")
 
-                        if ad.get('lien_site'):
-                            st.link_button("🌐 Site", ad['lien_site'])
+                        with col2:
+                            st.metric("📈 Reach", reach_formatted)
+                            st.metric("📅 Âge", f"{age} jours" if age else "N/A")
+                            st.metric("🎯 Critère", criteria)
 
-                        # Copie rapide (code box avec bouton copie intégré)
-                        st.caption("📋 Page ID:")
-                        st.code(ad.get('page_id', ''), language=None)
+                            # Date de création
+                            creation = ad.get('ad_creation_time')
+                            if creation:
+                                st.caption(f"Créé: {creation.strftime('%Y-%m-%d')}")
+
+                            # Date de scan
+                            scan = ad.get('date_scan')
+                            if scan:
+                                st.caption(f"Scanné: {scan.strftime('%Y-%m-%d %H:%M')}")
+
+                            # Liens
+                            if ad.get('ad_snapshot_url'):
+                                st.link_button("🔗 Voir l'annonce", ad['ad_snapshot_url'])
+
+                            if ad.get('lien_site'):
+                                st.link_button("🌐 Site", ad['lien_site'])
+
+                            # Copie rapide (code box avec bouton copie intégré)
+                            st.caption("📋 Page ID:")
+                            st.code(ad.get('page_id', ''), language=None)
 
         else:
             st.info("Aucune winning ad trouvée pour cette période. Lancez une recherche pour en détecter.")
