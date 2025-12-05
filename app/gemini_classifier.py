@@ -11,6 +11,8 @@ import re
 import json
 import asyncio
 import aiohttp
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Optional, Tuple, Any
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,6 +23,10 @@ import random
 # Configuration du logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Supprimer les warnings SSL pour requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Constantes
 MAX_CONTENT_LENGTH = 2000  # Max caractères par site
@@ -326,7 +332,7 @@ async def scrape_sites_batch(
     max_concurrent: int = 10
 ) -> List[SiteContent]:
     """
-    Scrape plusieurs sites en parallèle.
+    Scrape plusieurs sites en parallèle (async version).
 
     Args:
         sites: Liste de dicts avec page_id, url et page_name
@@ -363,6 +369,136 @@ async def scrape_sites_batch(
                 processed.append(result)
 
         return processed
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCRAPER SYNCHRONE AVEC REQUESTS (plus fiable sur Railway)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def fetch_site_content_sync_requests(
+    page_id: str,
+    url: str,
+    page_name: str = "",
+    timeout: int = REQUEST_TIMEOUT
+) -> SiteContent:
+    """
+    Récupère le contenu d'un site avec requests (synchrone, plus fiable).
+
+    Args:
+        page_id: ID de la page
+        url: URL à scraper
+        page_name: Nom de la page (non utilisé pour classification)
+        timeout: Timeout en secondes
+
+    Returns:
+        SiteContent avec les données extraites
+    """
+    original_url = url
+
+    # S'assurer que l'URL a un schéma
+    if not url.startswith(('http://', 'https://')):
+        url = f'https://{url}'
+
+    # Headers réalistes
+    headers = {
+        'User-Agent': random.choice(USER_AGENTS),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Cache-Control': 'max-age=0',
+    }
+
+    try:
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=timeout,
+            verify=False,  # Ignorer les erreurs SSL
+            allow_redirects=True
+        )
+
+        if response.status_code != 200:
+            logger.warning(f"HTTP {response.status_code} for {url}")
+            return SiteContent(
+                page_id=page_id,
+                url=original_url,
+                page_name=page_name,
+                error=f"HTTP {response.status_code}"
+            )
+
+        # Limiter la taille du contenu
+        content = response.text
+        if len(content) > 500000:
+            content = content[:500000]
+
+        result = extract_site_content_sync(content, page_id, original_url, page_name)
+
+        if result.has_content():
+            logger.info(f"✓ OK: {original_url[:50]}... (title={bool(result.title)}, desc={bool(result.description)})")
+        else:
+            logger.warning(f"⚠ Vide: {original_url[:50]}...")
+
+        return result
+
+    except requests.exceptions.Timeout:
+        logger.warning(f"⏱ Timeout: {url[:50]}...")
+        return SiteContent(page_id=page_id, url=original_url, page_name=page_name, error="Timeout")
+    except requests.exceptions.SSLError as e:
+        logger.warning(f"🔒 SSL Error: {url[:50]}... - {str(e)[:30]}")
+        return SiteContent(page_id=page_id, url=original_url, page_name=page_name, error="SSL Error")
+    except requests.exceptions.ConnectionError as e:
+        logger.warning(f"🔌 Connection Error: {url[:50]}... - {str(e)[:30]}")
+        return SiteContent(page_id=page_id, url=original_url, page_name=page_name, error="Connection Error")
+    except Exception as e:
+        logger.warning(f"❌ Error: {url[:50]}... - {str(e)[:30]}")
+        return SiteContent(page_id=page_id, url=original_url, page_name=page_name, error=str(e)[:50])
+
+
+def scrape_sites_sync(
+    sites: List[Dict],
+    max_workers: int = 5
+) -> List[SiteContent]:
+    """
+    Scrape plusieurs sites en parallèle avec ThreadPoolExecutor (synchrone).
+
+    Cette méthode est plus fiable sur Railway que l'async avec aiohttp.
+
+    Args:
+        sites: Liste de dicts avec page_id, url et page_name
+        max_workers: Nombre de threads parallèles
+
+    Returns:
+        Liste de SiteContent
+    """
+    results = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_site = {
+            executor.submit(
+                fetch_site_content_sync_requests,
+                site['page_id'],
+                site['url'],
+                site.get('page_name', '')
+            ): site
+            for site in sites
+        }
+
+        for future in as_completed(future_to_site):
+            site = future_to_site[future]
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                results.append(SiteContent(
+                    page_id=site['page_id'],
+                    url=site['url'],
+                    page_name=site.get('page_name', ''),
+                    error=str(e)[:100]
+                ))
+
+    return results
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -622,7 +758,8 @@ async def classify_pages_async(
     pages: List[Dict],
     taxonomy_text: str,
     batch_size: int = BATCH_SIZE,
-    progress_callback: callable = None
+    progress_callback: callable = None,
+    use_sync_scraper: bool = True  # Utiliser le scraper synchrone par défaut (plus fiable)
 ) -> List[ClassificationResult]:
     """
     Classifie une liste de pages de manière asynchrone.
@@ -632,6 +769,7 @@ async def classify_pages_async(
         taxonomy_text: Texte de la taxonomie
         batch_size: Taille des batches pour Gemini
         progress_callback: Callback(current, total, message)
+        use_sync_scraper: Utiliser le scraper synchrone (requests) au lieu de aiohttp
 
     Returns:
         Liste de ClassificationResult
@@ -650,7 +788,13 @@ async def classify_pages_async(
     if progress_callback:
         progress_callback(0, len(pages), "Extraction du contenu des sites...")
 
-    scraped_contents = await scrape_sites_batch(pages, max_concurrent=10)
+    # Utiliser le scraper synchrone (requests) qui est plus fiable sur Railway
+    if use_sync_scraper:
+        logger.info("🔧 Utilisation du scraper synchrone (requests)")
+        scraped_contents = scrape_sites_sync(pages, max_workers=5)
+    else:
+        logger.info("🔧 Utilisation du scraper async (aiohttp)")
+        scraped_contents = await scrape_sites_batch(pages, max_concurrent=10)
 
     # Statistiques de scraping
     with_content = [c for c in scraped_contents if c.has_content()]
@@ -658,6 +802,14 @@ async def classify_pages_async(
     no_content = [c for c in scraped_contents if not c.has_content() and not c.error]
 
     logger.info(f"📊 Scraping stats: {len(with_content)} OK, {len(with_errors)} erreurs, {len(no_content)} vides")
+
+    # Log des erreurs détaillées
+    if with_errors:
+        error_types = {}
+        for c in with_errors:
+            err = c.error or "Unknown"
+            error_types[err] = error_types.get(err, 0) + 1
+        logger.info(f"📋 Détail erreurs: {error_types}")
 
     # Seuls les sites avec du contenu seront classifiés correctement
     valid_contents = with_content
