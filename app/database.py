@@ -923,13 +923,13 @@ def get_dashboard_trends(db: DatabaseManager, days: int = 7) -> Dict:
         # ═══ RECHERCHES ═══
         # Recherches période actuelle
         current_searches = session.query(SearchLog).filter(
-            SearchLog.created_at >= current_start
+            SearchLog.started_at >= current_start
         ).count()
 
         # Recherches période précédente
         previous_searches = session.query(SearchLog).filter(
-            SearchLog.created_at >= previous_start,
-            SearchLog.created_at < current_start
+            SearchLog.started_at >= previous_start,
+            SearchLog.started_at < current_start
         ).count()
 
         # ═══ EVOLUTION DES ÉTATS ═══
