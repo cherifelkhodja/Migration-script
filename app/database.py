@@ -359,6 +359,51 @@ class SearchLog(Base):
     )
 
 
+class SearchQueue(Base):
+    """Table search_queue - File d'attente des recherches en arrière-plan"""
+    __tablename__ = "search_queue"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Statut: pending, running, completed, failed, cancelled, interrupted
+    status = Column(String(20), default="pending", index=True)
+
+    # Paramètres de recherche (JSON)
+    keywords = Column(Text)  # JSON array des mots-clés
+    cms_filter = Column(Text)  # JSON array des CMS à inclure
+    countries = Column(String(100), default="FR")
+    languages = Column(String(100), default="fr")
+    ads_min = Column(Integer, default=3)
+
+    # Progression
+    current_phase = Column(Integer, default=0)
+    current_phase_name = Column(String(100))
+    progress_percent = Column(Integer, default=0)
+    progress_message = Column(Text)
+    phases_data = Column(Text)  # JSON array des phases complétées avec stats
+
+    # Résultats
+    search_log_id = Column(Integer, nullable=True)  # Lien vers SearchLog une fois terminé
+    error_message = Column(Text, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    # Session utilisateur (pour identifier les recherches d'un utilisateur)
+    user_session = Column(String(100), nullable=True, index=True)
+
+    # Priorité (pour futures améliorations)
+    priority = Column(Integer, default=0)
+
+    __table_args__ = (
+        Index('idx_search_queue_status', 'status'),
+        Index('idx_search_queue_user', 'user_session'),
+        Index('idx_search_queue_created', 'created_at'),
+    )
+
+
 class APICallLog(Base):
     """Table api_call_logs - Détails de chaque appel API"""
     __tablename__ = "api_call_logs"
@@ -3000,3 +3045,314 @@ def batch_insert_pages(
         invalidate_stats_cache()
 
     return total
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GESTION DE LA FILE D'ATTENTE (SEARCH QUEUE)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def create_search_queue(
+    db: DatabaseManager,
+    keywords: List[str],
+    cms_filter: List[str],
+    ads_min: int = 3,
+    countries: str = "FR",
+    languages: str = "fr",
+    user_session: str = None,
+    priority: int = 0
+) -> int:
+    """
+    Crée une nouvelle entrée dans la file d'attente.
+
+    Args:
+        db: Instance DatabaseManager
+        keywords: Liste des mots-clés
+        cms_filter: Liste des CMS à inclure
+        ads_min: Nombre minimum d'ads
+        countries: Pays (défaut FR)
+        languages: Langues (défaut fr)
+        user_session: ID de session utilisateur
+        priority: Priorité (0 = normale)
+
+    Returns:
+        ID de la recherche créée
+    """
+    import json
+
+    with db.get_session() as session:
+        queue_entry = SearchQueue(
+            keywords=json.dumps(keywords),
+            cms_filter=json.dumps(cms_filter),
+            ads_min=ads_min,
+            countries=countries,
+            languages=languages,
+            user_session=user_session,
+            priority=priority,
+            status="pending",
+            phases_data=json.dumps([])
+        )
+        session.add(queue_entry)
+        session.flush()
+        return queue_entry.id
+
+
+def get_search_queue(db: DatabaseManager, search_id: int) -> Optional[SearchQueue]:
+    """Récupère une entrée de la queue par son ID"""
+    with db.get_session() as session:
+        return session.query(SearchQueue).filter(SearchQueue.id == search_id).first()
+
+
+def get_pending_searches(db: DatabaseManager, limit: int = 5) -> List[SearchQueue]:
+    """
+    Récupère les recherches en attente, triées par priorité et date.
+
+    Args:
+        db: Instance DatabaseManager
+        limit: Nombre maximum de recherches à retourner
+
+    Returns:
+        Liste des recherches en attente
+    """
+    with db.get_session() as session:
+        return session.query(SearchQueue).filter(
+            SearchQueue.status == "pending"
+        ).order_by(
+            SearchQueue.priority.desc(),
+            SearchQueue.created_at.asc()
+        ).limit(limit).all()
+
+
+def get_user_searches(
+    db: DatabaseManager,
+    user_session: str = None,
+    include_completed: bool = True,
+    limit: int = 20
+) -> List[SearchQueue]:
+    """
+    Récupère les recherches d'un utilisateur.
+
+    Args:
+        db: Instance DatabaseManager
+        user_session: ID de session (si None, retourne toutes)
+        include_completed: Inclure les recherches terminées
+        limit: Nombre maximum
+
+    Returns:
+        Liste des recherches
+    """
+    with db.get_session() as session:
+        query = session.query(SearchQueue)
+
+        if user_session:
+            query = query.filter(SearchQueue.user_session == user_session)
+
+        if not include_completed:
+            query = query.filter(SearchQueue.status.in_(["pending", "running"]))
+
+        return query.order_by(SearchQueue.created_at.desc()).limit(limit).all()
+
+
+def get_active_searches(db: DatabaseManager) -> List[SearchQueue]:
+    """Récupère toutes les recherches actives (pending ou running)"""
+    with db.get_session() as session:
+        return session.query(SearchQueue).filter(
+            SearchQueue.status.in_(["pending", "running"])
+        ).order_by(SearchQueue.created_at.asc()).all()
+
+
+def get_interrupted_searches(db: DatabaseManager, user_session: str = None) -> List[SearchQueue]:
+    """Récupère les recherches interrompues"""
+    with db.get_session() as session:
+        query = session.query(SearchQueue).filter(SearchQueue.status == "interrupted")
+        if user_session:
+            query = query.filter(SearchQueue.user_session == user_session)
+        return query.order_by(SearchQueue.created_at.desc()).all()
+
+
+def update_search_queue_status(
+    db: DatabaseManager,
+    search_id: int,
+    status: str,
+    search_log_id: int = None,
+    error: str = None
+):
+    """
+    Met à jour le statut d'une recherche.
+
+    Args:
+        db: Instance DatabaseManager
+        search_id: ID de la recherche
+        status: Nouveau statut
+        search_log_id: ID du SearchLog si terminée
+        error: Message d'erreur si échec
+    """
+    with db.get_session() as session:
+        search = session.query(SearchQueue).filter(SearchQueue.id == search_id).first()
+        if search:
+            search.status = status
+
+            if status == "running" and not search.started_at:
+                search.started_at = datetime.utcnow()
+
+            if status in ("completed", "failed", "cancelled"):
+                search.completed_at = datetime.utcnow()
+
+            if search_log_id:
+                search.search_log_id = search_log_id
+
+            if error:
+                search.error_message = error
+
+
+def update_search_queue_progress(
+    db: DatabaseManager,
+    search_id: int,
+    phase: int,
+    phase_name: str,
+    percent: int,
+    message: str,
+    stats: Dict = None,
+    phases_data: List = None
+):
+    """
+    Met à jour la progression d'une recherche.
+
+    Args:
+        db: Instance DatabaseManager
+        search_id: ID de la recherche
+        phase: Numéro de phase actuelle
+        phase_name: Nom de la phase
+        percent: Pourcentage de progression globale
+        message: Message de progression
+        stats: Stats de la phase actuelle
+        phases_data: Données complètes des phases
+    """
+    import json
+
+    with db.get_session() as session:
+        search = session.query(SearchQueue).filter(SearchQueue.id == search_id).first()
+        if search:
+            search.current_phase = phase
+            search.current_phase_name = phase_name
+            search.progress_percent = percent
+            search.progress_message = message
+
+            if phases_data is not None:
+                search.phases_data = json.dumps(phases_data)
+
+
+def cancel_search_queue(db: DatabaseManager, search_id: int) -> bool:
+    """
+    Annule une recherche en attente.
+
+    Args:
+        db: Instance DatabaseManager
+        search_id: ID de la recherche
+
+    Returns:
+        True si annulée, False sinon
+    """
+    with db.get_session() as session:
+        search = session.query(SearchQueue).filter(SearchQueue.id == search_id).first()
+        if search and search.status == "pending":
+            search.status = "cancelled"
+            search.completed_at = datetime.utcnow()
+            return True
+        return False
+
+
+def restart_search_queue(db: DatabaseManager, search_id: int) -> bool:
+    """
+    Relance une recherche interrompue ou échouée.
+
+    Args:
+        db: Instance DatabaseManager
+        search_id: ID de la recherche
+
+    Returns:
+        True si relancée, False sinon
+    """
+    with db.get_session() as session:
+        search = session.query(SearchQueue).filter(SearchQueue.id == search_id).first()
+        if search and search.status in ("interrupted", "failed"):
+            search.status = "pending"
+            search.started_at = None
+            search.completed_at = None
+            search.error_message = None
+            search.current_phase = 0
+            search.progress_percent = 0
+            search.progress_message = None
+            return True
+        return False
+
+
+def recover_interrupted_searches(db: DatabaseManager) -> int:
+    """
+    Marque les recherches 'running' comme 'interrupted'.
+    Appelé au démarrage de l'application.
+
+    Returns:
+        Nombre de recherches interrompues
+    """
+    with db.get_session() as session:
+        running = session.query(SearchQueue).filter(
+            SearchQueue.status == "running"
+        ).all()
+
+        count = 0
+        for search in running:
+            search.status = "interrupted"
+            search.error_message = "Service redémarré - recherche interrompue"
+            count += 1
+
+        return count
+
+
+def cleanup_old_queue_entries(db: DatabaseManager, days: int = 30) -> int:
+    """
+    Supprime les anciennes entrées de la queue.
+
+    Args:
+        db: Instance DatabaseManager
+        days: Âge maximum en jours
+
+    Returns:
+        Nombre d'entrées supprimées
+    """
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    with db.get_session() as session:
+        deleted = session.query(SearchQueue).filter(
+            SearchQueue.status.in_(["completed", "failed", "cancelled"]),
+            SearchQueue.created_at < cutoff
+        ).delete(synchronize_session='fetch')
+
+        return deleted
+
+
+def get_queue_stats(db: DatabaseManager) -> Dict:
+    """Retourne les statistiques de la queue"""
+    from sqlalchemy import func
+
+    with db.get_session() as session:
+        stats = session.query(
+            SearchQueue.status,
+            func.count(SearchQueue.id)
+        ).group_by(SearchQueue.status).all()
+
+        result = {
+            "pending": 0,
+            "running": 0,
+            "completed": 0,
+            "failed": 0,
+            "cancelled": 0,
+            "interrupted": 0
+        }
+
+        for status, count in stats:
+            result[status] = count
+
+        result["total"] = sum(result.values())
+        result["active"] = result["pending"] + result["running"]
+
+        return result

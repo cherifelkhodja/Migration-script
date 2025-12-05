@@ -1322,26 +1322,6 @@ def render_sidebar():
                 st.session_state.dark_mode = dark_mode
                 st.rerun()
 
-        # Global Search
-        search_query = st.text_input(
-            "🔍 Recherche rapide",
-            placeholder="Nom, site, page_id...",
-            key="global_search"
-        )
-        if search_query and len(search_query) >= 2:
-            db = get_database()
-            if db:
-                results = search_pages(db, search_term=search_query, limit=5)
-                if results:
-                    st.caption(f"{len(results)} résultat(s)")
-                    for r in results:
-                        if st.button(f"→ {r.get('page_name', 'N/A')[:25]}", key=f"sr_{r['page_id']}"):
-                            st.session_state.selected_page_id = r['page_id']
-                            st.session_state.current_page = "Pages / Shops"
-                            st.rerun()
-                else:
-                    st.caption("Aucun résultat")
-
         st.markdown("---")
 
         # Main Navigation
@@ -1361,6 +1341,24 @@ def render_sidebar():
                      type="primary" if st.session_state.current_page == "Search Logs" else "secondary"):
             st.session_state.current_page = "Search Logs"
             st.rerun()
+
+        # Indicateur de recherches en arrière-plan
+        try:
+            from app.background_worker import get_worker
+            worker = get_worker()
+            active = worker.get_active_searches()
+            if active:
+                btn_label = f"⏳ Recherches ({len(active)})"
+                btn_type = "primary" if st.session_state.current_page == "Background Searches" else "secondary"
+            else:
+                btn_label = "⏳ Recherches en cours"
+                btn_type = "primary" if st.session_state.current_page == "Background Searches" else "secondary"
+
+            if st.button(btn_label, use_container_width=True, type=btn_type):
+                st.session_state.current_page = "Background Searches"
+                st.rerun()
+        except Exception:
+            pass  # Worker non initialisé
 
         if st.button("🏪 Pages / Shops", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Pages / Shops" else "secondary"):
@@ -4826,6 +4824,202 @@ def render_scheduled_scans():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PAGE: BACKGROUND SEARCHES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def render_background_searches():
+    """Page de gestion des recherches en arrière-plan"""
+    import json
+    st.title("⏳ Recherches en arrière-plan")
+    st.markdown("Gérez les recherches qui s'exécutent en arrière-plan, même si vous quittez la page.")
+
+    db = get_database()
+    if not db:
+        st.error("Base de données non connectée")
+        return
+
+    # Initialiser le worker
+    try:
+        from app.background_worker import get_worker, init_worker
+        from app.database import (
+            get_interrupted_searches, get_user_searches, restart_search_queue,
+            cancel_search_queue, SearchQueue
+        )
+        worker = init_worker()
+    except Exception as e:
+        st.error(f"Erreur initialisation worker: {e}")
+        return
+
+    # ═══ Recherches interrompues (après redémarrage) ═══
+    interrupted = get_interrupted_searches(db)
+    if interrupted:
+        st.warning(f"⚠️ {len(interrupted)} recherche(s) interrompue(s) suite à une maintenance")
+
+        for search in interrupted:
+            keywords = json.loads(search.keywords) if search.keywords else []
+            keywords_display = ", ".join(keywords[:3])
+            if len(keywords) > 3:
+                keywords_display += f"... (+{len(keywords) - 3})"
+
+            col1, col2, col3 = st.columns([4, 1, 1])
+            with col1:
+                st.write(f"**{search.created_at:%d/%m %H:%M}** - Phase {search.current_phase}/8")
+                st.caption(f"Mots-clés: {keywords_display}")
+            with col2:
+                if st.button("🔄 Reprendre", key=f"resume_{search.id}"):
+                    restart_search_queue(db, search.id)
+                    st.success("Recherche relancée!")
+                    st.rerun()
+            with col3:
+                if st.button("🗑️", key=f"delete_int_{search.id}"):
+                    with db.get_session() as session:
+                        session.query(SearchQueue).filter(SearchQueue.id == search.id).delete()
+                    st.rerun()
+
+        st.divider()
+
+    # ═══ Recherches actives ═══
+    st.subheader("🔄 Recherches en cours")
+
+    active_searches = worker.get_active_searches()
+
+    if active_searches:
+        for search in active_searches:
+            with st.container():
+                keywords_display = ", ".join(search.get("keywords", [])[:3])
+
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    # Status badge
+                    if search["status"] == "running":
+                        st.markdown(f"**🟢 En cours** - Phase {search['phase']}/8: {search.get('phase_name', '')}")
+                        st.progress(search["progress"] / 100)
+                        st.caption(search.get("message", ""))
+                    else:
+                        st.markdown(f"**🟡 En attente** - {keywords_display}")
+
+                    st.caption(f"Mots-clés: {keywords_display}")
+                    if search.get("started_at"):
+                        st.caption(f"Démarrée: {search['started_at']:%H:%M:%S}")
+
+                with col2:
+                    if search["status"] == "pending":
+                        if st.button("❌ Annuler", key=f"cancel_{search['id']}"):
+                            worker.cancel_search(search["id"])
+                            st.success("Recherche annulée")
+                            st.rerun()
+
+                st.divider()
+
+        # Auto-refresh
+        if st.button("🔄 Rafraîchir"):
+            st.rerun()
+
+        st.caption("💡 Cette page se rafraîchit automatiquement toutes les 10 secondes")
+        time.sleep(0.1)  # Small delay to prevent rate limiting
+        # Auto-refresh every 10 seconds when searches are active
+        st.empty()
+    else:
+        st.info("Aucune recherche en cours")
+
+    # ═══ Lancer une nouvelle recherche en arrière-plan ═══
+    st.divider()
+    st.subheader("➕ Lancer une nouvelle recherche")
+
+    with st.form("new_background_search"):
+        keywords_input = st.text_area(
+            "Mots-clés (un par ligne)",
+            placeholder="dropshipping\necommerce\nboutique en ligne",
+            height=100
+        )
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            countries = st.multiselect(
+                "Pays",
+                options=list(AVAILABLE_COUNTRIES.keys()),
+                default=DEFAULT_COUNTRIES,
+                format_func=lambda x: f"{x} - {AVAILABLE_COUNTRIES[x]}"
+            )
+        with col2:
+            cms_options = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Autre/Inconnu"]
+            selected_cms = st.multiselect("CMS", options=cms_options, default=["Shopify"])
+        with col3:
+            min_ads = st.slider("Min. ads", 1, 50, 3)
+
+        submitted = st.form_submit_button("🚀 Lancer en arrière-plan", use_container_width=True)
+
+        if submitted:
+            keywords = [k.strip() for k in keywords_input.split("\n") if k.strip()]
+            if not keywords:
+                st.error("Veuillez entrer au moins un mot-clé")
+            elif not countries:
+                st.error("Veuillez sélectionner au moins un pays")
+            elif not selected_cms:
+                st.error("Veuillez sélectionner au moins un CMS")
+            else:
+                # Créer la recherche
+                search_id = worker.submit_search(
+                    keywords=keywords,
+                    cms_filter=selected_cms,
+                    ads_min=min_ads,
+                    countries=",".join(countries),
+                    languages="fr"
+                )
+                st.success(f"✅ Recherche #{search_id} ajoutée à la file d'attente!")
+                st.info("Vous pouvez quitter cette page, la recherche continuera en arrière-plan.")
+                time.sleep(1)
+                st.rerun()
+
+    # ═══ Historique récent ═══
+    st.divider()
+    st.subheader("📜 Historique récent")
+
+    recent_searches = get_user_searches(db, include_completed=True, limit=10)
+    completed_searches = [s for s in recent_searches if s.status in ("completed", "failed", "cancelled")]
+
+    if completed_searches:
+        for search in completed_searches[:5]:
+            keywords = json.loads(search.keywords) if search.keywords else []
+            keywords_display = ", ".join(keywords[:3])
+
+            status_icon = {
+                "completed": "✅",
+                "failed": "❌",
+                "cancelled": "⚫"
+            }.get(search.status, "❓")
+
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.write(f"{status_icon} **{search.created_at:%d/%m %H:%M}** - {keywords_display}")
+                if search.error_message:
+                    st.caption(f"Erreur: {search.error_message[:100]}")
+            with col2:
+                if search.search_log_id:
+                    if st.button("📊 Voir", key=f"view_{search.id}"):
+                        st.session_state.current_page = "Search Logs"
+                        st.session_state.view_search_log_id = search.search_log_id
+                        st.rerun()
+    else:
+        st.info("Aucune recherche terminée récemment")
+
+    # ═══ Stats du worker ═══
+    with st.expander("📊 Statistiques du worker"):
+        stats = worker.get_stats()
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Worker actif", "Oui" if stats["worker_active"] else "Non")
+        with col2:
+            st.metric("Workers max", stats["max_workers"])
+        with col3:
+            st.metric("En mémoire", stats["active_in_memory"])
+
+        queue_stats = stats.get("queue_stats", {})
+        st.write("**File d'attente:**")
+        st.json(queue_stats)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # PAGE: SEARCH LOGS
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -5116,6 +5310,27 @@ def main():
     )
 
     init_session_state()
+
+    # Initialiser le worker de recherches en arrière-plan
+    try:
+        from app.background_worker import init_worker
+        from app.database import recover_interrupted_searches, DatabaseManager, ensure_tables_exist
+
+        # Initialiser les tables si nécessaire
+        db = get_database()
+        if db:
+            ensure_tables_exist(db)
+            # Récupérer les recherches interrompues au démarrage
+            interrupted = recover_interrupted_searches(db)
+            if interrupted > 0:
+                st.toast(f"⚠️ {interrupted} recherche(s) interrompue(s) détectée(s)", icon="⚠️")
+
+        # Démarrer le worker (singleton, ne démarre qu'une fois)
+        init_worker(max_workers=2)
+    except Exception as e:
+        # Ne pas bloquer l'app si le worker échoue
+        print(f"[Worker] Erreur initialisation: {e}")
+
     apply_dark_mode()  # Appliquer le thème sombre si activé
     apply_custom_css()  # Appliquer les styles personnalisés
     render_sidebar()
@@ -5156,6 +5371,8 @@ def main():
         render_scheduled_scans()
     elif page == "Search Logs":
         render_search_logs()
+    elif page == "Background Searches":
+        render_background_searches()
     else:
         render_dashboard()
 
