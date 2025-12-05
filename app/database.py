@@ -136,6 +136,114 @@ class WinningAds(Base):
     )
 
 
+class Tag(Base):
+    """Table tags - Tags personnalisés pour organiser les pages"""
+    __tablename__ = "tags"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(50), unique=True, nullable=False)
+    color = Column(String(20), default="#3B82F6")  # Couleur hex
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PageTag(Base):
+    """Table page_tags - Association pages <-> tags"""
+    __tablename__ = "page_tags"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    page_id = Column(String(50), nullable=False, index=True)
+    tag_id = Column(Integer, nullable=False, index=True)
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_page_tag_unique', 'page_id', 'tag_id', unique=True),
+    )
+
+
+class PageNote(Base):
+    """Table page_notes - Notes sur les pages"""
+    __tablename__ = "page_notes"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    page_id = Column(String(50), nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Favorite(Base):
+    """Table favorites - Pages favorites"""
+    __tablename__ = "favorites"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    page_id = Column(String(50), unique=True, nullable=False, index=True)
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Collection(Base):
+    """Table collections - Dossiers/Collections de pages"""
+    __tablename__ = "collections"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    description = Column(Text)
+    color = Column(String(20), default="#6366F1")
+    icon = Column(String(10), default="📁")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CollectionPage(Base):
+    """Table collection_pages - Association collections <-> pages"""
+    __tablename__ = "collection_pages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    collection_id = Column(Integer, nullable=False, index=True)
+    page_id = Column(String(50), nullable=False, index=True)
+    added_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_collection_page_unique', 'collection_id', 'page_id', unique=True),
+    )
+
+
+class SavedFilter(Base):
+    """Table saved_filters - Filtres de recherche sauvegardés"""
+    __tablename__ = "saved_filters"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    filter_type = Column(String(50), default="pages")  # pages, ads, winning
+    filters_json = Column(Text)  # JSON des filtres
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ScheduledScan(Base):
+    """Table scheduled_scans - Scans programmés"""
+    __tablename__ = "scheduled_scans"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    keywords = Column(Text)  # Keywords à rechercher
+    countries = Column(String(100), default="FR")
+    languages = Column(String(100), default="fr")
+    frequency = Column(String(20), default="daily")  # daily, weekly, monthly
+    is_active = Column(Integer, default=1)  # 1=actif, 0=inactif
+    last_run = Column(DateTime)
+    next_run = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserSettings(Base):
+    """Table user_settings - Paramètres utilisateur"""
+    __tablename__ = "user_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    setting_key = Column(String(50), unique=True, nullable=False)
+    setting_value = Column(Text)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # GESTION DE LA CONNEXION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1093,3 +1201,521 @@ def get_winning_ads_by_page(
         ).all()
 
         return {r[0]: r[1] for r in results}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAGS - Gestion des tags personnalisés
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_all_tags(db: DatabaseManager) -> List[Dict]:
+    """Récupère tous les tags"""
+    with db.get_session() as session:
+        tags = session.query(Tag).order_by(Tag.name).all()
+        return [{"id": t.id, "name": t.name, "color": t.color} for t in tags]
+
+
+def create_tag(db: DatabaseManager, name: str, color: str = "#3B82F6") -> Optional[int]:
+    """Crée un nouveau tag"""
+    with db.get_session() as session:
+        existing = session.query(Tag).filter(Tag.name == name).first()
+        if existing:
+            return None
+        tag = Tag(name=name, color=color)
+        session.add(tag)
+        session.flush()
+        return tag.id
+
+
+def delete_tag(db: DatabaseManager, tag_id: int) -> bool:
+    """Supprime un tag et ses associations"""
+    with db.get_session() as session:
+        # Supprimer les associations
+        session.query(PageTag).filter(PageTag.tag_id == tag_id).delete()
+        # Supprimer le tag
+        deleted = session.query(Tag).filter(Tag.id == tag_id).delete()
+        return deleted > 0
+
+
+def add_tag_to_page(db: DatabaseManager, page_id: str, tag_id: int) -> bool:
+    """Ajoute un tag à une page"""
+    with db.get_session() as session:
+        existing = session.query(PageTag).filter(
+            PageTag.page_id == page_id,
+            PageTag.tag_id == tag_id
+        ).first()
+        if existing:
+            return False
+        pt = PageTag(page_id=page_id, tag_id=tag_id)
+        session.add(pt)
+        return True
+
+
+def remove_tag_from_page(db: DatabaseManager, page_id: str, tag_id: int) -> bool:
+    """Retire un tag d'une page"""
+    with db.get_session() as session:
+        deleted = session.query(PageTag).filter(
+            PageTag.page_id == page_id,
+            PageTag.tag_id == tag_id
+        ).delete()
+        return deleted > 0
+
+
+def get_page_tags(db: DatabaseManager, page_id: str) -> List[Dict]:
+    """Récupère les tags d'une page"""
+    with db.get_session() as session:
+        results = session.query(Tag).join(
+            PageTag, Tag.id == PageTag.tag_id
+        ).filter(PageTag.page_id == page_id).all()
+        return [{"id": t.id, "name": t.name, "color": t.color} for t in results]
+
+
+def get_pages_by_tag(db: DatabaseManager, tag_id: int) -> List[str]:
+    """Récupère les page_ids ayant un tag spécifique"""
+    with db.get_session() as session:
+        results = session.query(PageTag.page_id).filter(PageTag.tag_id == tag_id).all()
+        return [r[0] for r in results]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NOTES - Gestion des notes sur les pages
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_page_notes(db: DatabaseManager, page_id: str) -> List[Dict]:
+    """Récupère les notes d'une page"""
+    with db.get_session() as session:
+        notes = session.query(PageNote).filter(
+            PageNote.page_id == page_id
+        ).order_by(PageNote.created_at.desc()).all()
+        return [{
+            "id": n.id,
+            "content": n.content,
+            "created_at": n.created_at,
+            "updated_at": n.updated_at
+        } for n in notes]
+
+
+def add_page_note(db: DatabaseManager, page_id: str, content: str) -> int:
+    """Ajoute une note à une page"""
+    with db.get_session() as session:
+        note = PageNote(page_id=page_id, content=content)
+        session.add(note)
+        session.flush()
+        return note.id
+
+
+def update_page_note(db: DatabaseManager, note_id: int, content: str) -> bool:
+    """Met à jour une note"""
+    with db.get_session() as session:
+        note = session.query(PageNote).filter(PageNote.id == note_id).first()
+        if note:
+            note.content = content
+            note.updated_at = datetime.utcnow()
+            return True
+        return False
+
+
+def delete_page_note(db: DatabaseManager, note_id: int) -> bool:
+    """Supprime une note"""
+    with db.get_session() as session:
+        deleted = session.query(PageNote).filter(PageNote.id == note_id).delete()
+        return deleted > 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FAVORITES - Gestion des favoris
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_favorites(db: DatabaseManager) -> List[str]:
+    """Récupère tous les page_ids favoris"""
+    with db.get_session() as session:
+        favs = session.query(Favorite.page_id).order_by(Favorite.added_at.desc()).all()
+        return [f[0] for f in favs]
+
+
+def is_favorite(db: DatabaseManager, page_id: str) -> bool:
+    """Vérifie si une page est en favori"""
+    with db.get_session() as session:
+        return session.query(Favorite).filter(Favorite.page_id == page_id).first() is not None
+
+
+def add_favorite(db: DatabaseManager, page_id: str) -> bool:
+    """Ajoute une page aux favoris"""
+    with db.get_session() as session:
+        existing = session.query(Favorite).filter(Favorite.page_id == page_id).first()
+        if existing:
+            return False
+        fav = Favorite(page_id=page_id)
+        session.add(fav)
+        return True
+
+
+def remove_favorite(db: DatabaseManager, page_id: str) -> bool:
+    """Retire une page des favoris"""
+    with db.get_session() as session:
+        deleted = session.query(Favorite).filter(Favorite.page_id == page_id).delete()
+        return deleted > 0
+
+
+def toggle_favorite(db: DatabaseManager, page_id: str) -> bool:
+    """Bascule le statut favori d'une page. Retourne True si maintenant favori."""
+    if is_favorite(db, page_id):
+        remove_favorite(db, page_id)
+        return False
+    else:
+        add_favorite(db, page_id)
+        return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COLLECTIONS - Gestion des dossiers/collections
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_collections(db: DatabaseManager) -> List[Dict]:
+    """Récupère toutes les collections avec le nombre de pages"""
+    from sqlalchemy import func
+
+    with db.get_session() as session:
+        collections = session.query(Collection).order_by(Collection.name).all()
+        result = []
+        for c in collections:
+            count = session.query(func.count(CollectionPage.id)).filter(
+                CollectionPage.collection_id == c.id
+            ).scalar()
+            result.append({
+                "id": c.id,
+                "name": c.name,
+                "description": c.description,
+                "color": c.color,
+                "icon": c.icon,
+                "page_count": count or 0,
+                "created_at": c.created_at
+            })
+        return result
+
+
+def create_collection(
+    db: DatabaseManager,
+    name: str,
+    description: str = "",
+    color: str = "#6366F1",
+    icon: str = "📁"
+) -> int:
+    """Crée une nouvelle collection"""
+    with db.get_session() as session:
+        coll = Collection(name=name, description=description, color=color, icon=icon)
+        session.add(coll)
+        session.flush()
+        return coll.id
+
+
+def update_collection(
+    db: DatabaseManager,
+    collection_id: int,
+    name: str = None,
+    description: str = None,
+    color: str = None,
+    icon: str = None
+) -> bool:
+    """Met à jour une collection"""
+    with db.get_session() as session:
+        coll = session.query(Collection).filter(Collection.id == collection_id).first()
+        if not coll:
+            return False
+        if name is not None:
+            coll.name = name
+        if description is not None:
+            coll.description = description
+        if color is not None:
+            coll.color = color
+        if icon is not None:
+            coll.icon = icon
+        coll.updated_at = datetime.utcnow()
+        return True
+
+
+def delete_collection(db: DatabaseManager, collection_id: int) -> bool:
+    """Supprime une collection et ses associations"""
+    with db.get_session() as session:
+        session.query(CollectionPage).filter(CollectionPage.collection_id == collection_id).delete()
+        deleted = session.query(Collection).filter(Collection.id == collection_id).delete()
+        return deleted > 0
+
+
+def add_page_to_collection(db: DatabaseManager, collection_id: int, page_id: str) -> bool:
+    """Ajoute une page à une collection"""
+    with db.get_session() as session:
+        existing = session.query(CollectionPage).filter(
+            CollectionPage.collection_id == collection_id,
+            CollectionPage.page_id == page_id
+        ).first()
+        if existing:
+            return False
+        cp = CollectionPage(collection_id=collection_id, page_id=page_id)
+        session.add(cp)
+        return True
+
+
+def remove_page_from_collection(db: DatabaseManager, collection_id: int, page_id: str) -> bool:
+    """Retire une page d'une collection"""
+    with db.get_session() as session:
+        deleted = session.query(CollectionPage).filter(
+            CollectionPage.collection_id == collection_id,
+            CollectionPage.page_id == page_id
+        ).delete()
+        return deleted > 0
+
+
+def get_collection_pages(db: DatabaseManager, collection_id: int) -> List[str]:
+    """Récupère les page_ids d'une collection"""
+    with db.get_session() as session:
+        results = session.query(CollectionPage.page_id).filter(
+            CollectionPage.collection_id == collection_id
+        ).all()
+        return [r[0] for r in results]
+
+
+def get_page_collections(db: DatabaseManager, page_id: str) -> List[Dict]:
+    """Récupère les collections d'une page"""
+    with db.get_session() as session:
+        results = session.query(Collection).join(
+            CollectionPage, Collection.id == CollectionPage.collection_id
+        ).filter(CollectionPage.page_id == page_id).all()
+        return [{"id": c.id, "name": c.name, "color": c.color, "icon": c.icon} for c in results]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SAVED FILTERS - Filtres sauvegardés
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_saved_filters(db: DatabaseManager, filter_type: str = None) -> List[Dict]:
+    """Récupère les filtres sauvegardés"""
+    import json
+
+    with db.get_session() as session:
+        query = session.query(SavedFilter)
+        if filter_type:
+            query = query.filter(SavedFilter.filter_type == filter_type)
+        filters = query.order_by(SavedFilter.name).all()
+        return [{
+            "id": f.id,
+            "name": f.name,
+            "filter_type": f.filter_type,
+            "filters": json.loads(f.filters_json) if f.filters_json else {},
+            "created_at": f.created_at
+        } for f in filters]
+
+
+def save_filter(
+    db: DatabaseManager,
+    name: str,
+    filters: Dict,
+    filter_type: str = "pages"
+) -> int:
+    """Sauvegarde un filtre"""
+    import json
+
+    with db.get_session() as session:
+        sf = SavedFilter(
+            name=name,
+            filter_type=filter_type,
+            filters_json=json.dumps(filters)
+        )
+        session.add(sf)
+        session.flush()
+        return sf.id
+
+
+def delete_saved_filter(db: DatabaseManager, filter_id: int) -> bool:
+    """Supprime un filtre sauvegardé"""
+    with db.get_session() as session:
+        deleted = session.query(SavedFilter).filter(SavedFilter.id == filter_id).delete()
+        return deleted > 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SCHEDULED SCANS - Scans programmés
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_scheduled_scans(db: DatabaseManager, active_only: bool = False) -> List[Dict]:
+    """Récupère les scans programmés"""
+    with db.get_session() as session:
+        query = session.query(ScheduledScan)
+        if active_only:
+            query = query.filter(ScheduledScan.is_active == 1)
+        scans = query.order_by(ScheduledScan.name).all()
+        return [{
+            "id": s.id,
+            "name": s.name,
+            "keywords": s.keywords,
+            "countries": s.countries,
+            "languages": s.languages,
+            "frequency": s.frequency,
+            "is_active": s.is_active == 1,
+            "last_run": s.last_run,
+            "next_run": s.next_run,
+            "created_at": s.created_at
+        } for s in scans]
+
+
+def create_scheduled_scan(
+    db: DatabaseManager,
+    name: str,
+    keywords: str,
+    countries: str = "FR",
+    languages: str = "fr",
+    frequency: str = "daily"
+) -> int:
+    """Crée un nouveau scan programmé"""
+    from datetime import timedelta
+
+    # Calculer next_run
+    now = datetime.utcnow()
+    if frequency == "daily":
+        next_run = now + timedelta(days=1)
+    elif frequency == "weekly":
+        next_run = now + timedelta(weeks=1)
+    else:  # monthly
+        next_run = now + timedelta(days=30)
+
+    with db.get_session() as session:
+        scan = ScheduledScan(
+            name=name,
+            keywords=keywords,
+            countries=countries,
+            languages=languages,
+            frequency=frequency,
+            next_run=next_run
+        )
+        session.add(scan)
+        session.flush()
+        return scan.id
+
+
+def update_scheduled_scan(
+    db: DatabaseManager,
+    scan_id: int,
+    name: str = None,
+    keywords: str = None,
+    countries: str = None,
+    languages: str = None,
+    frequency: str = None,
+    is_active: bool = None
+) -> bool:
+    """Met à jour un scan programmé"""
+    with db.get_session() as session:
+        scan = session.query(ScheduledScan).filter(ScheduledScan.id == scan_id).first()
+        if not scan:
+            return False
+        if name is not None:
+            scan.name = name
+        if keywords is not None:
+            scan.keywords = keywords
+        if countries is not None:
+            scan.countries = countries
+        if languages is not None:
+            scan.languages = languages
+        if frequency is not None:
+            scan.frequency = frequency
+        if is_active is not None:
+            scan.is_active = 1 if is_active else 0
+        return True
+
+
+def delete_scheduled_scan(db: DatabaseManager, scan_id: int) -> bool:
+    """Supprime un scan programmé"""
+    with db.get_session() as session:
+        deleted = session.query(ScheduledScan).filter(ScheduledScan.id == scan_id).delete()
+        return deleted > 0
+
+
+def mark_scan_executed(db: DatabaseManager, scan_id: int) -> bool:
+    """Marque un scan comme exécuté et calcule le prochain run"""
+    from datetime import timedelta
+
+    with db.get_session() as session:
+        scan = session.query(ScheduledScan).filter(ScheduledScan.id == scan_id).first()
+        if not scan:
+            return False
+
+        now = datetime.utcnow()
+        scan.last_run = now
+
+        if scan.frequency == "daily":
+            scan.next_run = now + timedelta(days=1)
+        elif scan.frequency == "weekly":
+            scan.next_run = now + timedelta(weeks=1)
+        else:
+            scan.next_run = now + timedelta(days=30)
+
+        return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# USER SETTINGS - Paramètres utilisateur
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_setting(db: DatabaseManager, key: str, default: str = None) -> Optional[str]:
+    """Récupère un paramètre utilisateur"""
+    with db.get_session() as session:
+        setting = session.query(UserSettings).filter(UserSettings.setting_key == key).first()
+        return setting.setting_value if setting else default
+
+
+def set_setting(db: DatabaseManager, key: str, value: str) -> bool:
+    """Définit un paramètre utilisateur"""
+    with db.get_session() as session:
+        setting = session.query(UserSettings).filter(UserSettings.setting_key == key).first()
+        if setting:
+            setting.setting_value = value
+            setting.updated_at = datetime.utcnow()
+        else:
+            setting = UserSettings(setting_key=key, setting_value=value)
+            session.add(setting)
+        return True
+
+
+def get_all_settings(db: DatabaseManager) -> Dict[str, str]:
+    """Récupère tous les paramètres"""
+    with db.get_session() as session:
+        settings = session.query(UserSettings).all()
+        return {s.setting_key: s.setting_value for s in settings}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BULK ACTIONS - Actions groupées
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def bulk_add_to_blacklist(db: DatabaseManager, page_ids: List[str], raison: str = "") -> int:
+    """Ajoute plusieurs pages à la blacklist"""
+    count = 0
+    for pid in page_ids:
+        if add_to_blacklist(db, pid, raison=raison):
+            count += 1
+    return count
+
+
+def bulk_add_to_collection(db: DatabaseManager, collection_id: int, page_ids: List[str]) -> int:
+    """Ajoute plusieurs pages à une collection"""
+    count = 0
+    for pid in page_ids:
+        if add_page_to_collection(db, collection_id, pid):
+            count += 1
+    return count
+
+
+def bulk_add_tag(db: DatabaseManager, tag_id: int, page_ids: List[str]) -> int:
+    """Ajoute un tag à plusieurs pages"""
+    count = 0
+    for pid in page_ids:
+        if add_tag_to_page(db, pid, tag_id):
+            count += 1
+    return count
+
+
+def bulk_add_to_favorites(db: DatabaseManager, page_ids: List[str]) -> int:
+    """Ajoute plusieurs pages aux favoris"""
+    count = 0
+    for pid in page_ids:
+        if add_favorite(db, pid):
+            count += 1
+    return count

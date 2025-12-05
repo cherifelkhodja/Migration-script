@@ -42,7 +42,26 @@ from app.database import (
     get_evolution_stats, get_page_evolution_history, get_etat_from_ads_count,
     add_to_blacklist, remove_from_blacklist, get_blacklist, get_blacklist_ids,
     is_winning_ad, save_winning_ads, get_winning_ads, get_winning_ads_stats,
-    get_all_pages, get_winning_ads_by_page
+    get_all_pages, get_winning_ads_by_page,
+    # Tags
+    get_all_tags, create_tag, delete_tag, add_tag_to_page, remove_tag_from_page,
+    get_page_tags, get_pages_by_tag,
+    # Notes
+    get_page_notes, add_page_note, update_page_note, delete_page_note,
+    # Favorites
+    get_favorites, is_favorite, add_favorite, remove_favorite, toggle_favorite,
+    # Collections
+    get_collections, create_collection, update_collection, delete_collection,
+    add_page_to_collection, remove_page_from_collection, get_collection_pages, get_page_collections,
+    # Saved Filters
+    get_saved_filters, save_filter, delete_saved_filter,
+    # Scheduled Scans
+    get_scheduled_scans, create_scheduled_scan, update_scheduled_scan,
+    delete_scheduled_scan, mark_scan_executed,
+    # Settings
+    get_setting, set_setting, get_all_settings,
+    # Bulk actions
+    bulk_add_to_blacklist, bulk_add_to_collection, bulk_add_tag, bulk_add_to_favorites
 )
 
 
@@ -68,11 +87,67 @@ def init_session_state():
         'detection_thresholds': {
             'min_ads_suivi': MIN_ADS_SUIVI,
             'min_ads_liste': MIN_ADS_LISTE,
-        }
+        },
+        # Nouvelles fonctionnalités
+        'dark_mode': False,
+        'selected_pages': [],  # Pour les actions groupées
+        'bulk_mode': False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+
+def apply_dark_mode():
+    """Applique le thème sombre si activé"""
+    if st.session_state.get('dark_mode', False):
+        st.markdown("""
+        <style>
+            /* Dark mode styles */
+            .stApp {
+                background-color: #1a1a2e;
+                color: #eaeaea;
+            }
+            .stSidebar {
+                background-color: #16213e;
+            }
+            .stButton>button {
+                background-color: #0f3460;
+                color: white;
+                border: 1px solid #1a1a2e;
+            }
+            .stButton>button:hover {
+                background-color: #1a1a2e;
+                border-color: #e94560;
+            }
+            .stTextInput>div>div>input {
+                background-color: #16213e;
+                color: #eaeaea;
+            }
+            .stSelectbox>div>div {
+                background-color: #16213e;
+            }
+            div[data-testid="stMetricValue"] {
+                color: #eaeaea;
+            }
+            .stExpander {
+                background-color: #16213e;
+                border-color: #0f3460;
+            }
+            .stDataFrame {
+                background-color: #16213e;
+            }
+            div[data-testid="stMarkdownContainer"] p {
+                color: #eaeaea;
+            }
+            h1, h2, h3, h4, h5, h6 {
+                color: #eaeaea !important;
+            }
+            .stAlert {
+                background-color: #16213e;
+            }
+        </style>
+        """, unsafe_allow_html=True)
 
 
 def get_database() -> DatabaseManager:
@@ -632,7 +707,15 @@ def create_comparison_bars(
 def render_sidebar():
     """Affiche la sidebar avec navigation"""
     with st.sidebar:
-        st.markdown("## 📊 Meta Ads Analyzer")
+        # Header avec dark mode toggle
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.markdown("## 📊 Meta Ads")
+        with col2:
+            dark_mode = st.toggle("🌙", value=st.session_state.get('dark_mode', False), key="dark_toggle")
+            if dark_mode != st.session_state.get('dark_mode', False):
+                st.session_state.dark_mode = dark_mode
+                st.rerun()
 
         # Global Search
         search_query = st.text_input(
@@ -685,7 +768,25 @@ def render_sidebar():
             st.rerun()
 
         st.markdown("---")
-        st.markdown("### More")
+        st.markdown("### Organisation")
+
+        if st.button("⭐ Favoris", use_container_width=True,
+                     type="primary" if st.session_state.current_page == "Favoris" else "secondary"):
+            st.session_state.current_page = "Favoris"
+            st.rerun()
+
+        if st.button("📁 Collections", use_container_width=True,
+                     type="primary" if st.session_state.current_page == "Collections" else "secondary"):
+            st.session_state.current_page = "Collections"
+            st.rerun()
+
+        if st.button("🏷️ Tags", use_container_width=True,
+                     type="primary" if st.session_state.current_page == "Tags" else "secondary"):
+            st.session_state.current_page = "Tags"
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("### Analyse")
 
         if st.button("📈 Monitoring", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Monitoring" else "secondary"):
@@ -702,6 +803,22 @@ def render_sidebar():
             st.session_state.current_page = "Winning Ads"
             st.rerun()
 
+        if st.button("🎨 Creative Analysis", use_container_width=True,
+                     type="primary" if st.session_state.current_page == "Creative Analysis" else "secondary"):
+            st.session_state.current_page = "Creative Analysis"
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("### Automation")
+
+        if st.button("🕐 Scans Programmés", use_container_width=True,
+                     type="primary" if st.session_state.current_page == "Scheduled Scans" else "secondary"):
+            st.session_state.current_page = "Scheduled Scans"
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("### Config")
+
         if st.button("🚫 Blacklist", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Blacklist" else "secondary"):
             st.session_state.current_page = "Blacklist"
@@ -716,9 +833,9 @@ def render_sidebar():
         st.markdown("---")
         db = get_database()
         if db:
-            st.success("🟢 Database connected")
+            st.success("🟢 DB OK")
         else:
-            st.error("🔴 Database offline")
+            st.error("🔴 DB offline")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1680,6 +1797,8 @@ def render_pages_shops():
                         col1, col2 = st.columns([3, 1])
 
                         with col1:
+                            pid = page.get('page_id')
+
                             st.write(f"**Site:** {page.get('lien_site', 'N/A')}")
                             st.write(f"**CMS:** {page.get('cms', 'N/A')} | **Produits:** {page.get('nombre_produits', 0)}")
                             st.write(f"**Score:** {score}/100 | **Winning Ads:** {winning}")
@@ -1688,13 +1807,62 @@ def render_pages_shops():
                             if page.get('thematique'):
                                 st.write(f"**Thématique:** {page.get('thematique', '')}")
 
+                            # Afficher les tags
+                            page_tags = get_page_tags(db, pid)
+                            if page_tags:
+                                tag_html = " ".join([f"<span style='background-color:{t['color']};color:white;padding:2px 8px;border-radius:10px;margin-right:5px;font-size:11px;'>{t['name']}</span>" for t in page_tags])
+                                st.markdown(tag_html, unsafe_allow_html=True)
+
+                            # Notes
+                            st.markdown("---")
+                            notes = get_page_notes(db, pid)
+                            if notes:
+                                st.caption(f"📝 {len(notes)} note(s)")
+                                for note in notes[:2]:
+                                    st.caption(f"• {note['content'][:50]}...")
+
+                            # Ajouter une note
+                            with st.popover("📝 Ajouter note"):
+                                new_note = st.text_area("Note", key=f"note_{pid}", placeholder="Votre note...")
+                                if st.button("Sauvegarder", key=f"save_note_{pid}"):
+                                    if new_note:
+                                        add_page_note(db, pid, new_note)
+                                        st.success("Note ajoutée!")
+                                        st.rerun()
+
                         with col2:
-                            pid = page.get('page_id')
+                            # Favori
+                            is_fav = is_favorite(db, pid)
+                            fav_icon = "⭐" if is_fav else "☆"
+                            if st.button(f"{fav_icon} Favori", key=f"fav_{pid}"):
+                                toggle_favorite(db, pid)
+                                st.rerun()
+
                             if page.get('lien_fb_ad_library'):
                                 st.link_button("📘 Ads Library", page['lien_fb_ad_library'])
 
                             # Bouton copie Page ID
                             st.code(pid, language=None)
+
+                            # Ajouter à une collection
+                            collections = get_collections(db)
+                            if collections:
+                                with st.popover("📁 Collection"):
+                                    for coll in collections:
+                                        if st.button(f"{coll['icon']} {coll['name']}", key=f"addcoll_{pid}_{coll['id']}"):
+                                            add_page_to_collection(db, coll['id'], pid)
+                                            st.success(f"Ajouté à {coll['name']}")
+                                            st.rerun()
+
+                            # Ajouter un tag
+                            all_tags = get_all_tags(db)
+                            if all_tags:
+                                with st.popover("🏷️ Tag"):
+                                    for tag in all_tags:
+                                        if st.button(f"{tag['name']}", key=f"addtag_{pid}_{tag['id']}"):
+                                            add_tag_to_page(db, pid, tag['id'])
+                                            st.success(f"Tag ajouté!")
+                                            st.rerun()
 
                             if st.button("🚫 Blacklist", key=f"bl_page_{pid}"):
                                 if add_to_blacklist(db, pid, page.get('page_name', ''), "Blacklisté depuis Pages/Shops"):
@@ -2740,6 +2908,455 @@ def render_settings():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# PAGE: FAVORIS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def render_favorites():
+    """Page Favoris - Pages favorites"""
+    st.title("⭐ Favoris")
+    st.markdown("Vos pages favorites pour un accès rapide")
+
+    db = get_database()
+    if not db:
+        st.warning("Base de données non connectée")
+        return
+
+    try:
+        favorite_ids = get_favorites(db)
+
+        if favorite_ids:
+            st.info(f"⭐ {len(favorite_ids)} page(s) en favoris")
+
+            # Récupérer les détails des pages favorites
+            pages = []
+            for fav_id in favorite_ids:
+                page_results = search_pages(db, search_term=fav_id, limit=1)
+                if page_results:
+                    pages.append(page_results[0])
+
+            if pages:
+                for page in pages:
+                    pid = page.get("page_id")
+                    with st.expander(f"⭐ **{page.get('page_name', 'N/A')}** - {page.get('etat', 'N/A')} ({page.get('nombre_ads_active', 0)} ads)"):
+                        col1, col2, col3 = st.columns([2, 1, 1])
+
+                        with col1:
+                            st.write(f"**Site:** {page.get('lien_site', 'N/A')}")
+                            st.write(f"**CMS:** {page.get('cms', 'N/A')} | **Produits:** {page.get('nombre_produits', 0)}")
+
+                            # Tags
+                            tags = get_page_tags(db, pid)
+                            if tags:
+                                tag_html = " ".join([f"<span style='background-color:{t['color']};color:white;padding:2px 8px;border-radius:10px;margin-right:5px;font-size:12px;'>{t['name']}</span>" for t in tags])
+                                st.markdown(tag_html, unsafe_allow_html=True)
+
+                            # Notes
+                            notes = get_page_notes(db, pid)
+                            if notes:
+                                st.caption(f"📝 {len(notes)} note(s)")
+
+                        with col2:
+                            if page.get('lien_fb_ad_library'):
+                                st.link_button("📘 Ads Library", page['lien_fb_ad_library'])
+
+                        with col3:
+                            if st.button("❌ Retirer", key=f"unfav_{pid}"):
+                                remove_favorite(db, pid)
+                                st.success("Retiré des favoris")
+                                st.rerun()
+        else:
+            st.info("Aucune page en favoris. Ajoutez des pages depuis la page Pages/Shops.")
+
+    except Exception as e:
+        st.error(f"Erreur: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PAGE: COLLECTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def render_collections():
+    """Page Collections - Dossiers de pages"""
+    st.title("📁 Collections")
+    st.markdown("Organisez vos pages en dossiers thématiques")
+
+    db = get_database()
+    if not db:
+        st.warning("Base de données non connectée")
+        return
+
+    # Créer une nouvelle collection
+    with st.expander("➕ Nouvelle collection", expanded=False):
+        with st.form("new_collection"):
+            col1, col2 = st.columns(2)
+            with col1:
+                coll_name = st.text_input("Nom *", placeholder="Ex: Concurrents mode")
+            with col2:
+                coll_icon = st.selectbox("Icône", ["📁", "🎯", "🔥", "💎", "🚀", "⭐", "🏆", "📊"])
+
+            coll_desc = st.text_area("Description", placeholder="Description optionnelle...")
+            coll_color = st.color_picker("Couleur", "#6366F1")
+
+            if st.form_submit_button("Créer", type="primary"):
+                if coll_name:
+                    create_collection(db, coll_name, coll_desc, coll_color, coll_icon)
+                    st.success(f"Collection '{coll_name}' créée!")
+                    st.rerun()
+                else:
+                    st.error("Nom requis")
+
+    st.markdown("---")
+
+    # Liste des collections
+    collections = get_collections(db)
+
+    if collections:
+        for coll in collections:
+            coll_id = coll["id"]
+            with st.expander(f"{coll['icon']} **{coll['name']}** ({coll['page_count']} pages)"):
+                st.caption(coll.get("description", ""))
+
+                # Pages de la collection
+                page_ids = get_collection_pages(db, coll_id)
+                if page_ids:
+                    for pid in page_ids[:10]:  # Limiter à 10
+                        page_results = search_pages(db, search_term=pid, limit=1)
+                        if page_results:
+                            page = page_results[0]
+                            col1, col2 = st.columns([4, 1])
+                            with col1:
+                                st.write(f"• {page.get('page_name', pid)} - {page.get('etat', 'N/A')}")
+                            with col2:
+                                if st.button("❌", key=f"rm_{coll_id}_{pid}"):
+                                    remove_page_from_collection(db, coll_id, pid)
+                                    st.rerun()
+                else:
+                    st.caption("Aucune page dans cette collection")
+
+                # Actions
+                st.markdown("---")
+                col1, col2 = st.columns(2)
+                with col2:
+                    if st.button("🗑️ Supprimer collection", key=f"del_coll_{coll_id}"):
+                        delete_collection(db, coll_id)
+                        st.success("Collection supprimée")
+                        st.rerun()
+    else:
+        st.info("Aucune collection. Créez-en une pour organiser vos pages.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PAGE: TAGS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def render_tags():
+    """Page Tags - Gestion des tags"""
+    st.title("🏷️ Tags")
+    st.markdown("Créez et gérez vos tags personnalisés")
+
+    db = get_database()
+    if not db:
+        st.warning("Base de données non connectée")
+        return
+
+    # Créer un nouveau tag
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        new_tag_name = st.text_input("Nouveau tag", placeholder="Ex: À surveiller")
+    with col2:
+        new_tag_color = st.color_picker("Couleur", "#3B82F6")
+    with col3:
+        st.write("")
+        st.write("")
+        if st.button("➕ Créer", type="primary"):
+            if new_tag_name:
+                result = create_tag(db, new_tag_name.strip(), new_tag_color)
+                if result:
+                    st.success(f"Tag '{new_tag_name}' créé!")
+                    st.rerun()
+                else:
+                    st.error("Ce tag existe déjà")
+            else:
+                st.error("Nom requis")
+
+    st.markdown("---")
+
+    # Liste des tags
+    tags = get_all_tags(db)
+
+    if tags:
+        st.subheader(f"📋 {len(tags)} tag(s)")
+
+        for tag in tags:
+            tag_id = tag["id"]
+            col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+
+            with col1:
+                st.markdown(
+                    f"<span style='background-color:{tag['color']};color:white;padding:5px 15px;border-radius:15px;'>{tag['name']}</span>",
+                    unsafe_allow_html=True
+                )
+
+            with col2:
+                # Nombre de pages avec ce tag
+                page_ids = get_pages_by_tag(db, tag_id)
+                st.caption(f"{len(page_ids)} page(s)")
+
+            with col3:
+                if st.button("👁️ Voir", key=f"view_tag_{tag_id}"):
+                    st.session_state.filter_tag_id = tag_id
+                    st.session_state.current_page = "Pages / Shops"
+                    st.rerun()
+
+            with col4:
+                if st.button("🗑️", key=f"del_tag_{tag_id}"):
+                    delete_tag(db, tag_id)
+                    st.success("Tag supprimé")
+                    st.rerun()
+    else:
+        st.info("Aucun tag créé. Créez votre premier tag ci-dessus.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PAGE: CREATIVE ANALYSIS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def render_creative_analysis():
+    """Page Creative Analysis - Analyse des créatives publicitaires"""
+    st.title("🎨 Creative Analysis")
+    st.markdown("Analysez les tendances créatives des annonces")
+
+    db = get_database()
+    if not db:
+        st.warning("Base de données non connectée")
+        return
+
+    info_card(
+        "Comment utiliser cette analyse ?",
+        """
+        Cette page analyse le contenu textuel des annonces pour identifier :<br>
+        • Les <b>mots-clés</b> les plus utilisés dans les titres et textes<br>
+        • Les <b>emojis</b> les plus populaires<br>
+        • Les <b>call-to-actions</b> (CTA) les plus fréquents<br>
+        • Les <b>longueurs de texte</b> optimales
+        """,
+        "🎨"
+    )
+
+    try:
+        # Récupérer les winning ads pour analyse
+        winning_ads = get_winning_ads(db, limit=500, days=30)
+
+        if not winning_ads:
+            st.warning("Pas assez de données. Lancez des recherches pour collecter des annonces.")
+            return
+
+        st.success(f"📊 Analyse basée sur {len(winning_ads)} winning ads")
+
+        # Analyse des textes
+        all_bodies = []
+        all_titles = []
+        all_captions = []
+        emojis = []
+
+        import re
+
+        for ad in winning_ads:
+            body = ad.get("ad_creative_bodies", "") or ""
+            title = ad.get("ad_creative_link_titles", "") or ""
+            caption = ad.get("ad_creative_link_captions", "") or ""
+
+            all_bodies.append(body)
+            all_titles.append(title)
+            all_captions.append(caption)
+
+            # Extraire emojis
+            emoji_pattern = re.compile("["
+                u"\U0001F600-\U0001F64F"
+                u"\U0001F300-\U0001F5FF"
+                u"\U0001F680-\U0001F6FF"
+                u"\U0001F1E0-\U0001F1FF"
+                u"\U00002702-\U000027B0"
+                u"\U000024C2-\U0001F251"
+                "]+", flags=re.UNICODE)
+            found_emojis = emoji_pattern.findall(body + " " + title)
+            emojis.extend(found_emojis)
+
+        # Statistiques
+        col1, col2, col3, col4 = st.columns(4)
+
+        avg_body_len = sum(len(b) for b in all_bodies) / len(all_bodies) if all_bodies else 0
+        avg_title_len = sum(len(t) for t in all_titles) / len(all_titles) if all_titles else 0
+
+        col1.metric("📝 Longueur moyenne texte", f"{avg_body_len:.0f} car.")
+        col2.metric("📌 Longueur moyenne titre", f"{avg_title_len:.0f} car.")
+        col3.metric("😀 Total emojis trouvés", len(emojis))
+        col4.metric("📊 Ads analysées", len(winning_ads))
+
+        st.markdown("---")
+
+        # Top mots-clés
+        col1, col2 = st.columns(2)
+
+        with col1:
+            chart_header("🔤 Mots-clés fréquents", "Mots les plus utilisés dans les textes")
+
+            # Compter les mots
+            all_text = " ".join(all_bodies + all_titles).lower()
+            words = re.findall(r'\b[a-zàâäéèêëïîôùûüç]{4,}\b', all_text)
+
+            # Stopwords français basiques
+            stopwords = {"pour", "dans", "avec", "vous", "votre", "nous", "cette", "plus", "tout", "tous", "faire", "comme", "être", "avoir", "sans"}
+            words = [w for w in words if w not in stopwords]
+
+            word_counts = Counter(words).most_common(10)
+
+            if word_counts:
+                labels = [w[0] for w in word_counts]
+                values = [w[1] for w in word_counts]
+                fig = create_horizontal_bar_chart(labels, values, colors=[CHART_COLORS["primary"]] * len(labels))
+                st.plotly_chart(fig, key="word_freq", use_container_width=True)
+
+        with col2:
+            chart_header("😀 Emojis populaires", "Emojis les plus utilisés")
+
+            emoji_counts = Counter(emojis).most_common(10)
+
+            if emoji_counts:
+                for emoji, count in emoji_counts:
+                    st.write(f"{emoji} : {count} fois")
+            else:
+                st.caption("Pas assez d'emojis trouvés")
+
+        # CTAs fréquents
+        st.markdown("---")
+        chart_header("🎯 Call-to-Actions détectés", "Phrases d'action les plus fréquentes")
+
+        cta_patterns = [
+            "acheter maintenant", "commander", "découvrir", "profiter", "en savoir plus",
+            "cliquez", "obtenez", "télécharger", "essayer", "réserver",
+            "shop now", "buy now", "order now", "get yours", "learn more",
+            "livraison gratuite", "offre limitée", "promo", "soldes", "-50%", "-30%"
+        ]
+
+        cta_counts = {}
+        combined_text = " ".join(all_bodies + all_titles + all_captions).lower()
+
+        for cta in cta_patterns:
+            count = combined_text.count(cta.lower())
+            if count > 0:
+                cta_counts[cta] = count
+
+        if cta_counts:
+            sorted_ctas = sorted(cta_counts.items(), key=lambda x: x[1], reverse=True)[:8]
+            for cta, count in sorted_ctas:
+                st.write(f"• **{cta}** : {count} occurrence(s)")
+        else:
+            st.caption("Aucun CTA commun détecté")
+
+    except Exception as e:
+        st.error(f"Erreur: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PAGE: SCHEDULED SCANS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def render_scheduled_scans():
+    """Page Scans Programmés - Automatisation des recherches"""
+    st.title("🕐 Scans Programmés")
+    st.markdown("Automatisez vos recherches récurrentes")
+
+    db = get_database()
+    if not db:
+        st.warning("Base de données non connectée")
+        return
+
+    info_card(
+        "Comment fonctionnent les scans programmés ?",
+        """
+        Les scans programmés vous permettent de :<br>
+        • Définir des recherches automatiques par mots-clés<br>
+        • Choisir la fréquence (quotidien, hebdomadaire, mensuel)<br>
+        • Recevoir automatiquement les nouvelles pages détectées<br><br>
+        <b>Note :</b> Pour l'exécution automatique, un scheduler externe (cron) est nécessaire.
+        """,
+        "🕐"
+    )
+
+    # Créer un nouveau scan
+    with st.expander("➕ Nouveau scan programmé", expanded=False):
+        with st.form("new_scan"):
+            scan_name = st.text_input("Nom du scan *", placeholder="Ex: Veille mode femme")
+            scan_keywords = st.text_area("Mots-clés *", placeholder="Un mot-clé par ligne\nEx:\nrobe été\nmode femme\nsummer dress")
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                scan_countries = st.multiselect("Pays", AVAILABLE_COUNTRIES, default=["FR"])
+            with col2:
+                scan_languages = st.multiselect("Langues", AVAILABLE_LANGUAGES, default=["fr"])
+            with col3:
+                scan_frequency = st.selectbox("Fréquence", ["daily", "weekly", "monthly"], format_func=lambda x: {"daily": "Quotidien", "weekly": "Hebdomadaire", "monthly": "Mensuel"}[x])
+
+            if st.form_submit_button("Créer le scan", type="primary"):
+                if scan_name and scan_keywords:
+                    create_scheduled_scan(
+                        db,
+                        scan_name,
+                        scan_keywords,
+                        ",".join(scan_countries),
+                        ",".join(scan_languages),
+                        scan_frequency
+                    )
+                    st.success(f"Scan '{scan_name}' créé!")
+                    st.rerun()
+                else:
+                    st.error("Nom et mots-clés requis")
+
+    st.markdown("---")
+
+    # Liste des scans
+    scans = get_scheduled_scans(db)
+
+    if scans:
+        st.subheader(f"📋 {len(scans)} scan(s) programmé(s)")
+
+        for scan in scans:
+            scan_id = scan["id"]
+            status_icon = "🟢" if scan["is_active"] else "🔴"
+            freq_label = {"daily": "Quotidien", "weekly": "Hebdomadaire", "monthly": "Mensuel"}.get(scan["frequency"], scan["frequency"])
+
+            with st.expander(f"{status_icon} **{scan['name']}** - {freq_label}"):
+                col1, col2 = st.columns([3, 1])
+
+                with col1:
+                    st.write(f"**Mots-clés:** {scan['keywords'][:100]}...")
+                    st.write(f"**Pays:** {scan['countries']} | **Langues:** {scan['languages']}")
+
+                    if scan["last_run"]:
+                        st.caption(f"Dernier run: {scan['last_run'].strftime('%Y-%m-%d %H:%M')}")
+                    if scan["next_run"]:
+                        st.caption(f"Prochain run: {scan['next_run'].strftime('%Y-%m-%d %H:%M')}")
+
+                with col2:
+                    # Toggle actif/inactif
+                    new_status = st.toggle("Actif", value=scan["is_active"], key=f"toggle_{scan_id}")
+                    if new_status != scan["is_active"]:
+                        update_scheduled_scan(db, scan_id, is_active=new_status)
+                        st.rerun()
+
+                    if st.button("🗑️ Supprimer", key=f"del_scan_{scan_id}"):
+                        delete_scheduled_scan(db, scan_id)
+                        st.success("Scan supprimé")
+                        st.rerun()
+
+                    if st.button("▶️ Exécuter", key=f"run_scan_{scan_id}"):
+                        st.info("Fonctionnalité en cours de développement")
+    else:
+        st.info("Aucun scan programmé. Créez-en un pour automatiser vos recherches.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2753,6 +3370,7 @@ def main():
     )
 
     init_session_state()
+    apply_dark_mode()  # Appliquer le thème sombre si activé
     render_sidebar()
 
     # Router
@@ -2778,6 +3396,17 @@ def main():
         render_blacklist()
     elif page == "Settings":
         render_settings()
+    # Nouvelles pages
+    elif page == "Favoris":
+        render_favorites()
+    elif page == "Collections":
+        render_collections()
+    elif page == "Tags":
+        render_tags()
+    elif page == "Creative Analysis":
+        render_creative_analysis()
+    elif page == "Scheduled Scans":
+        render_scheduled_scans()
     else:
         render_dashboard()
 
