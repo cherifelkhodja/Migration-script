@@ -412,14 +412,34 @@ class SearchProgressTracker:
             "ads_saved": 0
         }
 
+        # Stats détaillées par phase (pour affichage en temps réel)
+        self.phase_stats = {
+            1: {"name": "🔍 Recherche Meta API", "stats": {}},
+            2: {"name": "📋 Regroupement", "stats": {}},
+            3: {"name": "🌐 Sites web", "stats": {}},
+            4: {"name": "🔍 Détection CMS", "stats": {}},
+            5: {"name": "📊 Comptage ads", "stats": {}},
+            6: {"name": "🔬 Analyse web", "stats": {}},
+            7: {"name": "🏆 Winning Ads", "stats": {}},
+            8: {"name": "💾 Sauvegarde", "stats": {}},
+        }
+
         # Log détaillé des étapes
         self.detail_logs = []
 
         # Placeholders pour mise à jour dynamique
         with self.container:
-            self.status_box = st.empty()
-            self.progress_bar = st.progress(0)
-            self.detail_log_box = st.empty()  # Pour le log détaillé
+            # Layout: Progress à gauche, Stats à droite
+            self.col_progress, self.col_stats = st.columns([3, 2])
+
+            with self.col_progress:
+                self.status_box = st.empty()
+                self.progress_bar = st.progress(0)
+                self.detail_log_box = st.empty()
+
+            with self.col_stats:
+                self.stats_panel = st.empty()
+
             self.summary_box = st.empty()
 
     def format_time(self, seconds: float) -> str:
@@ -499,16 +519,76 @@ class SearchProgressTracker:
         step_info = f"{step_name}: {current}/{total} ({int(progress * 100)}%)"
         self._render_status_box(step_info, extra_info or "", eta_str)
 
-    def complete_phase(self, result_summary: str, details: dict = None):
-        """Marque une phase comme terminée"""
+    def update_phase_stats(self, stats: dict):
+        """Met à jour les stats de la phase courante"""
+        if self.current_phase in self.phase_stats:
+            self.phase_stats[self.current_phase]["stats"] = stats
+            self._render_stats_panel()
+
+    def _render_stats_panel(self):
+        """Affiche le panneau de statistiques en temps réel"""
+        with self.stats_panel.container():
+            st.markdown("### 📊 Résumé en temps réel")
+
+            # Afficher les stats de chaque phase complétée
+            for phase_num, phase_info in self.phase_stats.items():
+                stats = phase_info.get("stats", {})
+                if not stats:
+                    continue
+
+                phase_name = phase_info.get("name", f"Phase {phase_num}")
+
+                # Trouver le temps de cette phase
+                phase_time = ""
+                for p in self.phases_completed:
+                    if p.get("num") == phase_num:
+                        phase_time = f" ({p.get('time_formatted', '')})"
+                        break
+
+                with st.expander(f"{phase_name}{phase_time}", expanded=(phase_num == self.current_phase)):
+                    # Afficher les stats sous forme de métriques
+                    stat_items = list(stats.items())
+
+                    # Grouper par 2 colonnes
+                    for i in range(0, len(stat_items), 2):
+                        cols = st.columns(2)
+                        for j, col in enumerate(cols):
+                            if i + j < len(stat_items):
+                                key, value = stat_items[i + j]
+                                with col:
+                                    # Formater la valeur
+                                    if isinstance(value, int) and value >= 1000:
+                                        display_val = f"{value:,}".replace(",", " ")
+                                    elif isinstance(value, float):
+                                        display_val = f"{value:.1f}"
+                                    elif isinstance(value, dict):
+                                        # Pour les sous-dictionnaires (ex: CMS breakdown)
+                                        display_val = ", ".join(f"{k}: {v}" for k, v in value.items())
+                                    elif isinstance(value, list):
+                                        display_val = ", ".join(str(v) for v in value[:5])
+                                        if len(value) > 5:
+                                            display_val += f" (+{len(value)-5})"
+                                    else:
+                                        display_val = str(value)
+
+                                    st.metric(key, display_val)
+
+    def complete_phase(self, result_summary: str, details: dict = None, stats: dict = None):
+        """Marque une phase comme terminée avec ses statistiques"""
         phase_elapsed = time.time() - self.phase_start
+
+        # Mettre à jour les stats de la phase
+        if stats:
+            self.phase_stats[self.current_phase]["stats"] = stats
+
         phase_data = {
             "num": self.current_phase,
             "name": self.current_phase_name,
             "time": phase_elapsed,
             "time_formatted": self.format_time(phase_elapsed),
             "result": result_summary,
-            "details": details or {}
+            "details": details or {},
+            "stats": stats or {}
         }
         self.phases_completed.append(phase_data)
 
@@ -517,6 +597,9 @@ class SearchProgressTracker:
         # Afficher phase terminée
         with self.status_box.container():
             st.success(f"✅ **Phase {self.current_phase}:** {self.current_phase_name} — {result_summary} ({self.format_time(phase_elapsed)})")
+
+        # Mettre à jour le panneau de stats
+        self._render_stats_panel()
 
         # Sauvegarder en base de données
         self._save_phases_to_db()
@@ -1964,10 +2047,17 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
             tracker.log_detail("❌", f"'{kw}' - Erreur: {str(e)[:50]}")
 
     tracker.clear_detail_logs()
+
+    # Stats détaillées Phase 1
+    phase1_stats = {
+        "Mots-clés recherchés": len(keywords),
+        "Annonces trouvées": len(all_ads),
+        "Annonces uniques": len(seen_ad_ids),
+    }
     tracker.complete_phase(f"{len(all_ads)} annonces trouvées", details={
         "keywords_searched": len(keywords),
         "ads_found": len(all_ads)
-    })
+    }, stats=phase1_stats)
     tracker.update_metric("total_ads_found", len(all_ads))
 
     # ═══ PHASE 2: Regroupement par page ═══
@@ -2030,6 +2120,15 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
 
     tracker.clear_detail_logs()
 
+    # Stats détaillées Phase 2
+    phase2_stats = {
+        "Pages trouvées": len(pages),
+        f"Pages ≥{min_ads} ads": len(pages_filtered),
+        "Pages filtrées": len(pages) - len(pages_filtered),
+        "Pages blacklistées": len(blacklisted_pages_found),
+        "Ads blacklist ignorées": blacklisted_ads_count,
+    }
+
     # Afficher les détails du filtrage
     phase2_details = f"{len(pages_filtered)} pages avec ≥{min_ads} ads"
     if blacklisted_ads_count > 0:
@@ -2039,7 +2138,7 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
         "pages_after_filter": len(pages_filtered),
         "blacklisted_ads": blacklisted_ads_count,
         "blacklisted_pages": len(blacklisted_pages_found)
-    })
+    }, stats=phase2_stats)
     tracker.update_metric("total_pages_found", len(pages))
     tracker.update_metric("pages_after_filter", len(pages_filtered))
     tracker.update_metric("blacklisted_ads_skipped", blacklisted_ads_count)
@@ -2083,7 +2182,16 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
 
     sites_found = sum(1 for d in pages_filtered.values() if d["website"])
     cached_sites = sum(1 for d in pages_filtered.values() if d.get("_from_cache"))
-    tracker.complete_phase(f"{sites_found} sites ({cached_sites} en cache)")
+    sites_new = sites_found - cached_sites
+
+    # Stats détaillées Phase 3
+    phase3_stats = {
+        "Sites trouvés": sites_found,
+        "Sites en cache": cached_sites,
+        "Nouveaux sites": sites_new,
+        "Sans site web": len(pages_filtered) - sites_found,
+    }
+    tracker.complete_phase(f"{sites_found} sites ({cached_sites} en cache)", stats=phase3_stats)
 
     # ═══ PHASE 4: Détection CMS (multithreaded + cache) ═══
     tracker.start_phase(4, "🔍 Détection CMS (parallèle)", total_phases=8)
@@ -2143,6 +2251,12 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
 
     tracker.clear_detail_logs()
 
+    # Compter tous les CMS (y compris ceux en cache)
+    all_cms_counts = {}
+    for pid, data in pages_with_sites.items():
+        cms_name = data.get("cms", "Unknown")
+        all_cms_counts[cms_name] = all_cms_counts.get(cms_name, 0) + 1
+
     # Filter by CMS
     def cms_matches(cms_name):
         if cms_name in selected_cms:
@@ -2152,7 +2266,22 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
         return False
 
     pages_with_cms = {pid: data for pid, data in pages_with_sites.items() if cms_matches(data.get("cms", "Unknown"))}
-    tracker.complete_phase(f"{len(pages_with_cms)} pages avec CMS sélectionnés")
+
+    # Stats détaillées Phase 4
+    phase4_stats = {
+        "Pages analysées": len(pages_with_sites),
+        "CMS en cache": cms_cached_count,
+        "CMS détectés": len(pages_need_cms),
+    }
+    # Ajouter les CMS trouvés
+    for cms_name in selected_cms:
+        if cms_name in all_cms_counts:
+            phase4_stats[f"🏷️ {cms_name}"] = all_cms_counts[cms_name]
+
+    phase4_stats["Pages CMS sélectionnés"] = len(pages_with_cms)
+    phase4_stats["Pages exclues (autre CMS)"] = len(pages_with_sites) - len(pages_with_cms)
+
+    tracker.complete_phase(f"{len(pages_with_cms)} pages avec CMS sélectionnés", stats=phase4_stats)
 
     # ═══ PHASE 5: Comptage des annonces ═══
     tracker.start_phase(5, "📊 Comptage des annonces (batch)", total_phases=8)
@@ -2188,7 +2317,30 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
         time.sleep(META_DELAY_BETWEEN_BATCHES)  # Pause entre les batches
 
     pages_final = {pid: data for pid, data in pages_with_cms.items() if data["ads_active_total"] >= min_ads}
-    tracker.complete_phase(f"{len(pages_final)} pages finales")
+
+    # Stats détaillées Phase 5
+    total_ads_counted = sum(d.get("ads_active_total", 0) for d in pages_final.values())
+    avg_ads = total_ads_counted // len(pages_final) if pages_final else 0
+
+    # Répartition par état
+    etat_counts = {}
+    for data in pages_final.values():
+        ads_count = data.get("ads_active_total", 0)
+        etat = get_etat_from_ads_count(ads_count)
+        etat_counts[etat] = etat_counts.get(etat, 0) + 1
+
+    phase5_stats = {
+        "Pages comptées": len(pages_with_cms),
+        "Pages finales": len(pages_final),
+        "Total ads actives": total_ads_counted,
+        "Moyenne ads/page": avg_ads,
+    }
+    # Ajouter répartition par état
+    for etat in ["XXL", "XL", "L", "M", "S", "XS"]:
+        if etat in etat_counts:
+            phase5_stats[f"État {etat}"] = etat_counts[etat]
+
+    tracker.complete_phase(f"{len(pages_final)} pages finales", stats=phase5_stats)
 
     if not pages_final:
         st.warning("Aucune page finale trouvée")
@@ -2244,7 +2396,18 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
                 if completed % 5 == 0:
                     tracker.update_step("Analyse web", completed, len(pages_need_analysis))
 
-    tracker.complete_phase(f"{len(web_results)} sites analysés ({cached_analysis} cache)")
+    # Stats détaillées Phase 6
+    total_products = sum(r.get("product_count", 0) for r in web_results.values())
+    avg_products = total_products // len(web_results) if web_results else 0
+
+    phase6_stats = {
+        "Sites analysés": len(web_results),
+        "En cache": cached_analysis,
+        "Nouvelles analyses": len(pages_need_analysis),
+        "Total produits": total_products,
+        "Moyenne produits/site": avg_products,
+    }
+    tracker.complete_phase(f"{len(web_results)} sites analysés ({cached_analysis} cache)", stats=phase6_stats)
 
     # ═══ PHASE 7: Détection des Winning Ads ═══
     tracker.start_phase(7, "🏆 Détection des Winning Ads", total_phases=8)
@@ -2275,11 +2438,28 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
             winning_ads_by_page[pid] = page_winning_count
             data["winning_ads_count"] = page_winning_count
 
+    # Compter par critère
+    criteria_counts = {}
+    for w in winning_ads_data:
+        criteria = w.get("matched_criteria", "Unknown")
+        criteria_counts[criteria] = criteria_counts.get(criteria, 0) + 1
+
+    # Stats détaillées Phase 7
+    phase7_stats = {
+        "Ads analysées": total_ads_checked,
+        "Winning ads": len(winning_ads_data),
+        "Pages avec winning": len(winning_ads_by_page),
+        "Taux de winning": f"{(len(winning_ads_data)/total_ads_checked*100):.1f}%" if total_ads_checked else "0%",
+    }
+    # Ajouter les critères
+    for criteria, count in sorted(criteria_counts.items(), key=lambda x: -x[1]):
+        phase7_stats[f"🎯 {criteria}"] = count
+
     tracker.complete_phase(f"{len(winning_ads_data)} winning ads sur {len(winning_ads_by_page)} pages", details={
         "winning_ads_count": len(winning_ads_data),
         "pages_with_winning": len(winning_ads_by_page),
         "total_ads_checked": total_ads_checked
-    })
+    }, stats=phase7_stats)
     tracker.update_metric("winning_ads_count", len(winning_ads_data))
 
     # Save to session first (needed for preview mode)
@@ -2326,13 +2506,22 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
                 msg = f"{pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads, {winning_saved} winning"
                 if winning_skipped > 0:
                     msg += f" ({winning_skipped} doublons)"
+
+                # Stats détaillées Phase 8
+                phase8_stats = {
+                    "Pages sauvées": pages_saved,
+                    "Suivi pages": suivi_saved,
+                    "Annonces sauvées": ads_saved,
+                    "Winning ads sauvées": winning_saved,
+                    "Winning doublons ignorés": winning_skipped,
+                }
                 tracker.complete_phase(msg, details={
                     "pages_saved": pages_saved,
                     "suivi_saved": suivi_saved,
                     "ads_saved": ads_saved,
                     "winning_saved": winning_saved,
                     "winning_skipped": winning_skipped
-                })
+                }, stats=phase8_stats)
                 tracker.update_metric("pages_saved", pages_saved)
                 tracker.update_metric("ads_saved", ads_saved)
 
