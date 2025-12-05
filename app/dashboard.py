@@ -372,7 +372,7 @@ def render_search_history_selector(key_prefix: str = ""):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# COMPOSANT FILTRES RÉUTILISABLE (Thématique, Sous-thématique, Pays)
+# COMPOSANT FILTRES RÉUTILISABLE (Thématique, Classification, Pays)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def render_classification_filters(
@@ -390,7 +390,7 @@ def render_classification_filters(
         db: DatabaseManager
         key_prefix: Préfixe pour les clés Streamlit (éviter conflits)
         show_thematique: Afficher le filtre thématique
-        show_subcategory: Afficher le filtre sous-thématique
+        show_subcategory: Afficher le filtre classification
         show_pays: Afficher le filtre pays
         columns: Nombre de colonnes pour l'affichage
 
@@ -442,10 +442,10 @@ def render_classification_filters(
                 result["thematique"] = selected_thematique
         col_idx += 1
 
-    # Filtre Sous-thématique
+    # Filtre Classification
     if show_subcategory:
         with cols[col_idx % len(cols)]:
-            # Les sous-catégories dépendent de la thématique sélectionnée
+            # Les classifications dépendent de la thématique sélectionnée
             if result["thematique"]:
                 subcategories = get_all_subcategories(db, category=result["thematique"])
             else:
@@ -453,7 +453,7 @@ def render_classification_filters(
 
             subcategory_options = ["Toutes"] + subcategories
             selected_subcategory = st.selectbox(
-                "📂 Sous-thématique",
+                "Classification",
                 subcategory_options,
                 index=0,
                 key=f"{key_prefix}_subcategory"
@@ -3077,21 +3077,21 @@ def render_pages_shops():
         etat_idx = etat_options.index(default_etat) if default_etat in etat_options else 0
         etat_filter = st.selectbox("État", etat_options, index=etat_idx)
 
-    # Ligne 2: Classification (Thématique, Sous-thématique, Pays, Limite)
+    # Ligne 2: Classification (Thématique, Classification, Pays, Limite)
     col4, col5, col6, col7 = st.columns(4)
 
     with col4:
         # Filtre par thématique/catégorie
         thematique_options = ["Toutes", "Non classifiées"] + get_taxonomy_categories(db)
-        thematique_filter = st.selectbox("🏷️ Thématique", thematique_options, index=0, key="pages_thematique")
+        thematique_filter = st.selectbox("Thématique", thematique_options, index=0, key="pages_thematique")
 
     with col5:
-        # Filtre par sous-thématique (dépend de thématique)
+        # Filtre par classification (dépend de thématique)
         if thematique_filter not in ["Toutes", "Non classifiées"]:
             subcategory_options = ["Toutes"] + get_all_subcategories(db, category=thematique_filter)
         else:
             subcategory_options = ["Toutes"] + get_all_subcategories(db)
-        subcategory_filter = st.selectbox("📂 Sous-thématique", subcategory_options, index=0, key="pages_subcategory")
+        subcategory_filter = st.selectbox("Classification", subcategory_options, index=0, key="pages_subcategory")
 
     with col6:
         # Filtre par pays
@@ -3356,28 +3356,31 @@ def render_pages_shops():
                 # Formater états avec badges emoji
                 df["etat_display"] = df["etat"].apply(lambda x: format_state_for_df(x) if x else "")
 
-                # Formater classification avec badge
+                # Formater thématique
+                df["thematique_display"] = df["thematique"].apply(lambda x: x if x else "—")
+
+                # Formater classification avec badge de confiance
                 def format_classification(row):
                     subcat = row.get("subcategory", "")
                     conf = row.get("classification_confidence", 0)
                     if subcat:
-                        # Badge de confiance
+                        # Badge de confiance (sans emoji)
                         if conf and conf >= 0.8:
-                            return f"✓ {subcat}"
+                            return f"{subcat} ({int(conf*100)}%)"
                         elif conf and conf >= 0.5:
-                            return f"~ {subcat}"
+                            return f"{subcat} ({int(conf*100)}%)"
                         else:
-                            return f"? {subcat}"
+                            return subcat
                     return "—"
 
                 df["classification_display"] = df.apply(format_classification, axis=1)
 
-                # Colonnes à afficher
-                display_cols = ["score_display", "page_name", "lien_site", "cms", "etat_display", "nombre_ads_active", "winning_ads", "classification_display"]
+                # Colonnes à afficher (avec thématique et classification)
+                display_cols = ["score_display", "page_name", "lien_site", "cms", "etat_display", "nombre_ads_active", "winning_ads", "thematique_display", "classification_display"]
                 df_display = df[[c for c in display_cols if c in df.columns]]
 
                 # Renommer colonnes
-                col_names = ["Score", "Nom", "Site", "CMS", "État", "Ads", "🏆", "🏷️ Catég."]
+                col_names = ["Score", "Nom", "Site", "CMS", "État", "Ads", "🏆", "Thématique", "Classification"]
                 df_display.columns = col_names[:len(df_display.columns)]
 
                 st.dataframe(
@@ -3406,26 +3409,48 @@ def render_pages_shops():
                             st.write(f"**Score:** {score}/100 | **Winning Ads:** {winning}")
                             if page.get('keywords'):
                                 st.write(f"**Keywords:** {page.get('keywords', '')}")
-                            if page.get('thematique'):
-                                st.write(f"**Thématique:** {page.get('thematique', '')}")
 
-                            # Classification Gemini (sous-catégorie)
-                            subcat = page.get('subcategory')
+                            # Classification éditable
+                            st.markdown("---")
+                            st.markdown("**Classification:**")
+                            edit_col1, edit_col2 = st.columns(2)
+
+                            current_thematique = page.get('thematique', '') or ''
+                            current_subcat = page.get('subcategory', '') or ''
                             conf = page.get('classification_confidence', 0)
-                            if subcat:
-                                # Badge coloré selon confiance
-                                if conf and conf >= 0.8:
-                                    conf_badge = "🟢"
-                                    conf_text = f"{int(conf*100)}%"
-                                elif conf and conf >= 0.5:
-                                    conf_badge = "🟡"
-                                    conf_text = f"{int(conf*100)}%"
+
+                            with edit_col1:
+                                thematique_options_edit = [""] + get_taxonomy_categories(db)
+                                current_idx = thematique_options_edit.index(current_thematique) if current_thematique in thematique_options_edit else 0
+                                new_thematique = st.selectbox(
+                                    "Thématique",
+                                    thematique_options_edit,
+                                    index=current_idx,
+                                    key=f"edit_them_{pid}"
+                                )
+
+                            with edit_col2:
+                                if new_thematique:
+                                    subcat_options_edit = [""] + get_all_subcategories(db, category=new_thematique)
                                 else:
-                                    conf_badge = "🔴"
-                                    conf_text = "faible"
-                                st.write(f"**🏷️ Classification:** {subcat} {conf_badge} ({conf_text})")
-                            else:
-                                st.caption("🏷️ Non classifié")
+                                    subcat_options_edit = [""] + get_all_subcategories(db)
+                                current_subcat_idx = subcat_options_edit.index(current_subcat) if current_subcat in subcat_options_edit else 0
+                                new_classification = st.selectbox(
+                                    "Classification",
+                                    subcat_options_edit,
+                                    index=current_subcat_idx,
+                                    key=f"edit_class_{pid}"
+                                )
+
+                            # Bouton sauvegarder si modifié
+                            if new_thematique != current_thematique or new_classification != current_subcat:
+                                if st.button("💾 Sauvegarder classification", key=f"save_class_{pid}"):
+                                    from app.database import update_page_classification
+                                    update_page_classification(db, pid, new_thematique, new_classification, confidence=1.0)
+                                    st.success("Classification mise à jour!")
+                                    st.rerun()
+                            elif conf:
+                                st.caption(f"Confiance: {int(conf*100)}%")
 
                             # Afficher les tags
                             page_tags = get_page_tags(db, pid)
@@ -4820,7 +4845,7 @@ def render_settings():
     # GESTION DE LA TAXONOMIE DE CLASSIFICATION
     # ═══════════════════════════════════════════════════════════════════════════
     st.markdown("---")
-    st.subheader("🏷️ Classification automatique (Gemini)")
+    st.subheader("Classification automatique (Gemini)")
     st.markdown("Gérez les catégories et sous-catégories pour la classification automatique des sites.")
 
     # Vérifier la clé API Gemini
@@ -5019,7 +5044,7 @@ def render_settings():
                             st.error(f"Erreur: {e}")
 
         with col2:
-            st.markdown("**🏷️ Classification Gemini**")
+            st.markdown("**Classification Gemini**")
             unclassified = migration_stats.get('unclassified', 0)
             st.caption(f"{unclassified} pages non classifiées")
             reclassify_all = st.checkbox("Re-classifier TOUTES les pages", key="migration_reclassify_all")
