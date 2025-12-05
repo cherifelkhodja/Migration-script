@@ -270,9 +270,11 @@ def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> 
     2. Sitemap "root" sans préfixe de langue -> version par défaut du site
     3. Éviter les sitemaps des autres langues
     """
-    def get_text(u):
+    def get_text_proxied(u):
+        """Récupère le texte d'une URL avec proxy si disponible"""
         try:
-            r = requests.get(u, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+            proxied_url, headers = get_proxied_url(u)
+            r = requests.get(proxied_url, headers=headers, timeout=REQUEST_TIMEOUT)
             return r.text if r and r.status_code == 200 else None
         except:
             return None
@@ -290,7 +292,7 @@ def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> 
     other_languages.discard(country_lower)  # Ne pas exclure notre pays
 
     # Récupérer le sitemap index
-    sm = get_text(f"{origin}/sitemap.xml")
+    sm = get_text_proxied(f"{origin}/sitemap.xml")
     if not sm:
         return _count_products_via_api(origin)
 
@@ -353,7 +355,7 @@ def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> 
             continue
         seen_urls.add(smu)
 
-        txt = get_text(smu)
+        txt = get_text_proxied(smu)
         if not txt:
             continue
 
@@ -372,11 +374,12 @@ def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> 
 
 
 def _count_products_via_api(origin: str) -> int:
-    """Compte les produits via l'API Shopify /products.json"""
+    """Compte les produits via l'API Shopify /products.json avec proxy"""
     try:
         # L'API retourne max 250 produits par page, on estime le total
         url = f"{origin}/products.json?limit=250"
-        r = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+        proxied_url, headers = get_proxied_url(url)
+        r = requests.get(proxied_url, headers=headers, timeout=REQUEST_TIMEOUT)
 
         if r.status_code != 200:
             return 0
@@ -391,7 +394,8 @@ def _count_products_via_api(origin: str) -> int:
             page = 2
             while page <= 10:  # Max 10 pages = 2500 produits
                 url = f"{origin}/products.json?limit=250&page={page}"
-                r = requests.get(url, headers=HEADERS, timeout=REQUEST_TIMEOUT)
+                proxied_url, headers = get_proxied_url(url)
+                r = requests.get(proxied_url, headers=headers, timeout=REQUEST_TIMEOUT)
                 if r.status_code != 200:
                     break
                 data = r.json()
