@@ -380,43 +380,62 @@ def fetch_site_content_sync_requests(
     page_id: str,
     url: str,
     page_name: str = "",
-    timeout: int = REQUEST_TIMEOUT
+    timeout: int = REQUEST_TIMEOUT,
+    use_scraperapi: bool = True
 ) -> SiteContent:
     """
     Récupère le contenu d'un site avec requests (synchrone, plus fiable).
+    Utilise ScraperAPI si configuré pour éviter les blocages.
 
     Args:
         page_id: ID de la page
         url: URL à scraper
         page_name: Nom de la page (non utilisé pour classification)
         timeout: Timeout en secondes
+        use_scraperapi: Utiliser ScraperAPI si disponible
 
     Returns:
         SiteContent avec les données extraites
     """
+    from app.config import SCRAPER_API_KEY, SCRAPER_API_URL
+
     original_url = url
 
     # S'assurer que l'URL a un schéma
     if not url.startswith(('http://', 'https://')):
         url = f'https://{url}'
 
-    # Headers réalistes
-    headers = {
-        'User-Agent': random.choice(USER_AGENTS),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Accept-Encoding': 'gzip, deflate',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Cache-Control': 'max-age=0',
-    }
+    # Utiliser ScraperAPI si configuré
+    if use_scraperapi and SCRAPER_API_KEY:
+        from urllib.parse import urlencode
+        scraper_params = {
+            "api_key": SCRAPER_API_KEY,
+            "url": url,
+            "render": "false",
+            "country_code": "fr"
+        }
+        request_url = f"{SCRAPER_API_URL}?{urlencode(scraper_params)}"
+        headers = {}  # ScraperAPI gère les headers
+        logger.debug(f"🌐 ScraperAPI: {original_url[:50]}...")
+    else:
+        request_url = url
+        # Headers réalistes
+        headers = {
+            'User-Agent': random.choice(USER_AGENTS),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Cache-Control': 'max-age=0',
+        }
 
     try:
         response = requests.get(
-            url,
+            request_url,
             headers=headers,
-            timeout=timeout,
-            verify=False,  # Ignorer les erreurs SSL
+            timeout=timeout if not SCRAPER_API_KEY else 30,  # Timeout plus long pour ScraperAPI
+            verify=False,
             allow_redirects=True
         )
 

@@ -314,12 +314,22 @@ class MetaAdsClient:
             current_token = self._get_current_token()
             params["access_token"] = current_token
 
-            # Récupérer le proxy associé au token
+            # Récupérer le proxy associé au token (ou ScraperAPI par défaut)
             proxies = None
+            proxy_url = None
             if rotator:
                 proxy_url = rotator.get_current_proxy()
-                if proxy_url:
-                    proxies = {"http": proxy_url, "https": proxy_url}
+
+            # Si pas de proxy configuré, utiliser ScraperAPI
+            if not proxy_url:
+                try:
+                    from app.config import get_scraperapi_proxy
+                    proxy_url = get_scraperapi_proxy()
+                except ImportError:
+                    pass
+
+            if proxy_url:
+                proxies = {"http": proxy_url, "https": proxy_url}
 
             start_time = time.time()
             try:

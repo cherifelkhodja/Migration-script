@@ -92,8 +92,16 @@ FIELDS_ADS_COMPLETE = ",".join([
 REQUEST_TIMEOUT = 25
 
 # ScraperAPI pour proxy (optionnel - si pas de clé, requêtes directes)
+# Configurer SCRAPER_API_KEY dans les variables d'environnement Railway
 SCRAPER_API_KEY = os.getenv("SCRAPER_API_KEY", "")
 SCRAPER_API_URL = "http://api.scraperapi.com"
+
+# Proxy ScraperAPI pour les appels API (format: http://scraperapi:KEY@proxy-server.scraperapi.com:8001)
+def get_scraperapi_proxy() -> str:
+    """Retourne l'URL du proxy ScraperAPI pour les appels API"""
+    if SCRAPER_API_KEY:
+        return f"http://scraperapi:{SCRAPER_API_KEY}@proxy-server.scraperapi.com:8001"
+    return ""
 
 # User-Agents pour rotation (éviter les bans)
 USER_AGENTS = [
