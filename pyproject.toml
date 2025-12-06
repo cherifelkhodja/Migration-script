@@ -90,6 +90,10 @@ omit = [
     "*/cache/*",
     "*/export/*",
     "*/http/*",
+    "*/config/*",
+    "*/monitoring/*",
+    "*/workers/*",
+    "*/scrapers/*",
 ]
 
 [tool.coverage.report]

@@ -1,12 +1,11 @@
 """
-Module API Tracker - Shim de compatibilite.
+Module de monitoring et tracking des appels API.
 
-Ce module redirige vers src.infrastructure.monitoring pour la compatibilite
-avec le code existant.
+Fournit des outils pour tracer et analyser les appels API
+(Meta API, ScraperAPI, requetes web).
 """
 
-# Re-export depuis la nouvelle localisation
-from src.infrastructure.monitoring import (  # noqa: F401
+from src.infrastructure.monitoring.api_tracker import (
     APICall,
     APITracker,
     get_current_tracker,

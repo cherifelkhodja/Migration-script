@@ -1,9 +1,156 @@
 """
 Configuration de l'application.
 
-Ce module re-exporte les configurations depuis app.config
-pour integration dans l'architecture hexagonale.
+Ce module centralise toutes les configurations
+dans l'architecture hexagonale.
 """
 
-# Re-export depuis app.config (source de verite)
-from app.config import *  # noqa: F401, F403
+from src.infrastructure.config.settings import (  # noqa: F401
+    # Base de donnees
+    DATABASE_URL,
+    MIN_ADS_SUIVI,
+    MIN_ADS_LISTE,
+    # API Meta
+    BASE_URL,
+    ADS_ARCHIVE,
+    TIMEOUT,
+    LIMIT_SEARCH,
+    LIMIT_COUNT,
+    LIMIT_MIN,
+    MIN_ADS_INITIAL,
+    MIN_ADS_FOR_EXPORT,
+    MIN_ADS_FOR_ADS_CSV,
+    DEFAULT_STATE_THRESHOLDS,
+    WINNING_AD_CRITERIA,
+    # Parallelisation
+    WORKERS_WEB_ANALYSIS,
+    TIMEOUT_WEB,
+    TIMEOUT_SHOPIFY_CHECK,
+    # Throttling
+    META_DELAY_BETWEEN_KEYWORDS,
+    META_DELAY_SEQUENTIAL_NO_PROXY,
+    META_DELAY_BETWEEN_PAGES,
+    META_DELAY_BETWEEN_BATCHES,
+    META_DELAY_ON_ERROR,
+    META_PARALLEL_ENABLED,
+    META_MIN_DELAY_BETWEEN_PARALLEL,
+    WEB_DELAY_BETWEEN_REQUESTS,
+    WEB_DELAY_CMS_CHECK,
+    WEB_MAX_CONCURRENT,
+    THROTTLE_MULTIPLIER_ON_RATE_LIMIT,
+    FIELDS_ADS_COMPLETE,
+    # Analyse Web
+    REQUEST_TIMEOUT,
+    SCRAPER_API_KEY,
+    SCRAPER_API_URL,
+    get_scraperapi_proxy,
+    USER_AGENTS,
+    get_random_headers,
+    get_proxied_url,
+    is_proxy_enabled,
+    HEADERS,
+    DEFAULT_PAYMENTS,
+    TAXONOMY,
+    KEYWORD_OVERRIDES,
+    # Patterns theme
+    THEME_ASSET_CANDIDATES,
+    REQUEST_SNIPPET,
+    INLINE_NAME_PATTERNS,
+    ASSET_HEADER_PATTERNS,
+    # Patterns compiles
+    COMPILED_INLINE_PATTERNS,
+    COMPILED_ASSET_PATTERNS,
+    COMPILED_THEME_ID_PATTERN,
+    COMPILED_THEME_CLEAN_PATTERN,
+    VALID_TLDS_PATTERN,
+    COMPILED_URL_PATTERNS,
+    COMPILED_DOMAIN_VALIDATOR,
+    COMPILED_CAPTION_DOMAIN,
+    COMPILED_SITEMAP_LOC,
+    COMPILED_SITEMAP_URL_TAG,
+    COMPILED_SITEMAP_LANG_PREFIX,
+    COMPILED_CURRENCY_SHOPIFY,
+    COMPILED_CURRENCY_OG,
+    MAX_SITEMAPS_TO_PARSE,
+    MAX_PRODUCTS_FROM_SITEMAP,
+    # Pays et langues
+    DEFAULT_COUNTRIES,
+    DEFAULT_LANGUAGES,
+    AVAILABLE_COUNTRIES,
+    AVAILABLE_LANGUAGES,
+)
+
+__all__ = [
+    # Base de donnees
+    "DATABASE_URL",
+    "MIN_ADS_SUIVI",
+    "MIN_ADS_LISTE",
+    # API Meta
+    "BASE_URL",
+    "ADS_ARCHIVE",
+    "TIMEOUT",
+    "LIMIT_SEARCH",
+    "LIMIT_COUNT",
+    "LIMIT_MIN",
+    "MIN_ADS_INITIAL",
+    "MIN_ADS_FOR_EXPORT",
+    "MIN_ADS_FOR_ADS_CSV",
+    "DEFAULT_STATE_THRESHOLDS",
+    "WINNING_AD_CRITERIA",
+    # Parallelisation
+    "WORKERS_WEB_ANALYSIS",
+    "TIMEOUT_WEB",
+    "TIMEOUT_SHOPIFY_CHECK",
+    # Throttling
+    "META_DELAY_BETWEEN_KEYWORDS",
+    "META_DELAY_SEQUENTIAL_NO_PROXY",
+    "META_DELAY_BETWEEN_PAGES",
+    "META_DELAY_BETWEEN_BATCHES",
+    "META_DELAY_ON_ERROR",
+    "META_PARALLEL_ENABLED",
+    "META_MIN_DELAY_BETWEEN_PARALLEL",
+    "WEB_DELAY_BETWEEN_REQUESTS",
+    "WEB_DELAY_CMS_CHECK",
+    "WEB_MAX_CONCURRENT",
+    "THROTTLE_MULTIPLIER_ON_RATE_LIMIT",
+    "FIELDS_ADS_COMPLETE",
+    # Analyse Web
+    "REQUEST_TIMEOUT",
+    "SCRAPER_API_KEY",
+    "SCRAPER_API_URL",
+    "get_scraperapi_proxy",
+    "USER_AGENTS",
+    "get_random_headers",
+    "get_proxied_url",
+    "is_proxy_enabled",
+    "HEADERS",
+    "DEFAULT_PAYMENTS",
+    "TAXONOMY",
+    "KEYWORD_OVERRIDES",
+    # Patterns theme
+    "THEME_ASSET_CANDIDATES",
+    "REQUEST_SNIPPET",
+    "INLINE_NAME_PATTERNS",
+    "ASSET_HEADER_PATTERNS",
+    # Patterns compiles
+    "COMPILED_INLINE_PATTERNS",
+    "COMPILED_ASSET_PATTERNS",
+    "COMPILED_THEME_ID_PATTERN",
+    "COMPILED_THEME_CLEAN_PATTERN",
+    "VALID_TLDS_PATTERN",
+    "COMPILED_URL_PATTERNS",
+    "COMPILED_DOMAIN_VALIDATOR",
+    "COMPILED_CAPTION_DOMAIN",
+    "COMPILED_SITEMAP_LOC",
+    "COMPILED_SITEMAP_URL_TAG",
+    "COMPILED_SITEMAP_LANG_PREFIX",
+    "COMPILED_CURRENCY_SHOPIFY",
+    "COMPILED_CURRENCY_OG",
+    "MAX_SITEMAPS_TO_PARSE",
+    "MAX_PRODUCTS_FROM_SITEMAP",
+    # Pays et langues
+    "DEFAULT_COUNTRIES",
+    "DEFAULT_LANGUAGES",
+    "AVAILABLE_COUNTRIES",
+    "AVAILABLE_LANGUAGES",
+]
