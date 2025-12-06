@@ -2800,13 +2800,23 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
             elif not has_thematique:
                 pages_no_thematique += 1
 
-    # Log détaillé
+    # Collecter les IDs par catégorie
+    cached_page_ids = [pid for pid, w in web_results.items() if w.get("_from_cache")]
+    pages_to_analyze_ids = [pid for pid, data in pages_need_analysis]
+
+    # Log détaillé avec IDs
     print(f"[UI Search] Phase 6 - Cache:")
-    print(f"   ✅ {pages_cached} pages en cache valide (scan < 1j + thématique)")
+    print(f"   ✅ {pages_cached} pages en cache valide:")
+    for pid in cached_page_ids[:10]:
+        print(f"      → {pid}")
+    if len(cached_page_ids) > 10:
+        print(f"      ... et {len(cached_page_ids) - 10} autres")
+
     print(f"   🔄 {len(pages_need_analysis)} pages à analyser:")
-    print(f"      - {pages_expired} expirées (scan > 1 jour)")
-    print(f"      - {pages_no_thematique} sans thématique")
-    print(f"      - {len(pages_need_analysis) - pages_expired - pages_no_thematique} nouvelles")
+    for pid in pages_to_analyze_ids[:10]:
+        print(f"      → {pid}")
+    if len(pages_to_analyze_ids) > 10:
+        print(f"      ... et {len(pages_to_analyze_ids) - 10} autres")
 
     st.info(f"🔬 {len(pages_need_analysis)} sites à analyser ({pages_cached} en cache)")
 

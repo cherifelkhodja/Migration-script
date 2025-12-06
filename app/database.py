@@ -1046,6 +1046,8 @@ def save_pages_recherche(
     count = 0
     new_count = 0
     existing_count = 0
+    new_page_ids = []
+    existing_page_ids = []
 
     with db.get_session() as session:
         for pid, data in pages_final.items():
@@ -1132,6 +1134,7 @@ def save_pages_recherche(
                     existing_page.last_search_log_id = search_log_id
                     existing_page.was_created_in_last_search = False
                 existing_count += 1
+                existing_page_ids.append(str(pid))
             else:
                 # Nouvelle page - insertion
                 keywords_str = " | ".join(new_keywords) if new_keywords else ""
@@ -1176,11 +1179,23 @@ def save_pages_recherche(
                 )
                 session.add(new_page)
                 new_count += 1
+                new_page_ids.append(str(pid))
 
             count += 1
 
-    # Log détaillé
-    print(f"[DB] Pages sauvées: {count} total ({new_count} nouvelles, {existing_count} mises à jour)")
+    # Log détaillé avec IDs
+    print(f"[DB] Pages sauvées: {count} total")
+    print(f"   🆕 Nouvelles ({new_count}):")
+    for pid in new_page_ids[:10]:
+        print(f"      → {pid}")
+    if len(new_page_ids) > 10:
+        print(f"      ... et {len(new_page_ids) - 10} autres")
+
+    print(f"   📝 Doublons/mises à jour ({existing_count}):")
+    for pid in existing_page_ids[:10]:
+        print(f"      → {pid}")
+    if len(existing_page_ids) > 10:
+        print(f"      ... et {len(existing_page_ids) - 10} autres")
 
     # Retourner tuple (total, new, existing)
     return (count, new_count, existing_count)
@@ -2187,6 +2202,8 @@ def save_winning_ads(
     scan_time = datetime.utcnow()
     new_count = 0
     updated_count = 0
+    new_ad_ids = []
+    updated_ad_ids = []
 
     with db.get_session() as session:
         for data in deduplicated_data:
@@ -2238,6 +2255,7 @@ def save_winning_ads(
                     existing.search_log_id = search_log_id
                     existing.is_new = False
                 updated_count += 1
+                updated_ad_ids.append(ad_id)
             else:
                 # Créer une nouvelle entrée avec gestion des race conditions
                 winning_entry = WinningAds(
@@ -2263,6 +2281,7 @@ def save_winning_ads(
                         session.add(winning_entry)
                         session.flush()
                     new_count += 1
+                    new_ad_ids.append(ad_id)
                 except IntegrityError:
                     # Race condition: l'ad a été insérée par un autre processus
                     # Le savepoint est automatiquement rollback, on fait une mise à jour
@@ -2278,6 +2297,21 @@ def save_winning_ads(
                             existing.search_log_id = search_log_id
                             existing.is_new = False
                         updated_count += 1
+                        updated_ad_ids.append(ad_id)
+
+    # Log détaillé avec IDs
+    print(f"[DB] Winning Ads sauvées:")
+    print(f"   🆕 Nouvelles ({new_count}):")
+    for aid in new_ad_ids[:10]:
+        print(f"      → {aid}")
+    if len(new_ad_ids) > 10:
+        print(f"      ... et {len(new_ad_ids) - 10} autres")
+
+    print(f"   🔄 Doublons/mises à jour ({updated_count}):")
+    for aid in updated_ad_ids[:10]:
+        print(f"      → {aid}")
+    if len(updated_ad_ids) > 10:
+        print(f"      ... et {len(updated_ad_ids) - 10} autres")
 
     return (new_count, updated_count)
 
