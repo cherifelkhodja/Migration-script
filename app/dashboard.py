@@ -5910,18 +5910,25 @@ def render_settings():
                     with st.spinner("Test en cours..."):
                         try:
                             import google.generativeai as genai
+                        except ImportError:
+                            st.error("❌ Librairie `google-generativeai` non installée")
+                            st.code("pip install -U google-generativeai", language="bash")
+                            st.caption("Installez cette librairie puis redémarrez l'application.")
+                            genai = None
 
-                            # Configurer l'API
-                            genai.configure(api_key=gemini_key)
+                        if genai:
+                            try:
+                                # Configurer l'API
+                                genai.configure(api_key=gemini_key)
 
-                            # Récupérer le modèle configuré
-                            test_model_name = get_app_setting(db, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT)
+                                # Récupérer le modèle configuré
+                                test_model_name = get_app_setting(db, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT)
 
-                            # Créer le modèle
-                            model = genai.GenerativeModel(test_model_name)
+                                # Créer le modèle
+                                model = genai.GenerativeModel(test_model_name)
 
-                            # Test simple avec une classification exemple
-                            test_prompt = """Tu es un expert en classification de sites e-commerce.
+                                # Test simple avec une classification exemple
+                                test_prompt = """Tu es un expert en classification de sites e-commerce.
 Classifie ce site fictif de test dans une catégorie.
 
 Site: "SuperShoes.com" - Vente de chaussures de sport et baskets pour hommes et femmes.
@@ -5931,26 +5938,26 @@ Réponds uniquement avec:
 - Confiance: [haute/moyenne/basse]
 - Raison: [1 phrase]"""
 
-                            response = model.generate_content(test_prompt)
+                                response = model.generate_content(test_prompt)
 
-                            if response and response.text:
-                                st.success(f"✅ API Gemini fonctionne!")
-                                st.markdown(f"**Modèle testé:** `{test_model_name}`")
-                                st.markdown("**Réponse de test:**")
-                                st.code(response.text[:500])
-                            else:
-                                st.warning("⚠️ API accessible mais réponse vide")
+                                if response and response.text:
+                                    st.success(f"✅ API Gemini fonctionne!")
+                                    st.markdown(f"**Modèle testé:** `{test_model_name}`")
+                                    st.markdown("**Réponse de test:**")
+                                    st.code(response.text[:500])
+                                else:
+                                    st.warning("⚠️ API accessible mais réponse vide")
 
-                        except Exception as e:
-                            error_msg = str(e)
-                            if "API_KEY" in error_msg or "401" in error_msg:
-                                st.error("❌ Clé API invalide ou expirée")
-                            elif "model" in error_msg.lower() or "404" in error_msg:
-                                st.error(f"❌ Modèle '{test_model_name}' non trouvé. Vérifiez le nom du modèle.")
-                            elif "quota" in error_msg.lower() or "429" in error_msg:
-                                st.error("❌ Quota API dépassé")
-                            else:
-                                st.error(f"❌ Erreur: {error_msg[:200]}")
+                            except Exception as e:
+                                error_msg = str(e)
+                                if "API_KEY" in error_msg or "401" in error_msg:
+                                    st.error("❌ Clé API invalide ou expirée")
+                                elif "model" in error_msg.lower() or "404" in error_msg:
+                                    st.error(f"❌ Modèle '{test_model_name}' non trouvé. Vérifiez le nom du modèle.")
+                                elif "quota" in error_msg.lower() or "429" in error_msg:
+                                    st.error("❌ Quota API dépassé")
+                                else:
+                                    st.error(f"❌ Erreur: {error_msg[:200]}")
 
         with test_col2:
             st.info("Le test envoie une requête simple pour vérifier que la clé API et le modèle sont valides.")
