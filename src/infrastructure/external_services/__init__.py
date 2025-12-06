@@ -7,31 +7,64 @@ Ce module expose les adapters pour les services externes
 
 from src.infrastructure.external_services.meta_ads_adapter import MetaAdsSearchAdapter
 
-# Bridges vers app/
-try:
-    from app.meta_api import MetaAPIClient
-except ImportError:
-    MetaAPIClient = None  # type: ignore
+# Gemini Classifier (migre depuis app/)
+from src.infrastructure.external_services.gemini_classifier import (
+    SiteContent,
+    ClassificationResult,
+    GeminiClassifier,
+    extract_site_content_sync,
+    extract_product_links,
+    fetch_site_content,
+    scrape_sites_batch,
+    fetch_site_content_sync_requests,
+    scrape_sites_sync,
+    classify_pages_async,
+    classify_pages_sync,
+    classify_and_save,
+    classify_with_extracted_content,
+    classify_pages_batch,
+)
 
-try:
-    from app.gemini_classifier import GeminiClassifier
-except ImportError:
-    GeminiClassifier = None  # type: ignore
-
-try:
-    from app.web_analyzer import WebAnalyzer
-except ImportError:
-    WebAnalyzer = None  # type: ignore
-
-try:
-    from app.shopify_detector import ShopifyDetector
-except ImportError:
-    ShopifyDetector = None  # type: ignore
+# Meta API (migre depuis app/)
+from src.infrastructure.external_services.meta_api import (
+    TokenRotator,
+    MetaAdsClient,
+    get_token_rotator,
+    init_token_rotator,
+    clear_token_rotator,
+    search_keywords_parallel,
+    extract_website_from_ads,
+    extract_currency_from_ads,
+    cached_search_ads,
+    cached_fetch_ads_for_page,
+)
 
 __all__ = [
     "MetaAdsSearchAdapter",
-    "MetaAPIClient",
+    # Gemini Classifier
+    "SiteContent",
+    "ClassificationResult",
     "GeminiClassifier",
-    "WebAnalyzer",
-    "ShopifyDetector",
+    "extract_site_content_sync",
+    "extract_product_links",
+    "fetch_site_content",
+    "scrape_sites_batch",
+    "fetch_site_content_sync_requests",
+    "scrape_sites_sync",
+    "classify_pages_async",
+    "classify_pages_sync",
+    "classify_and_save",
+    "classify_with_extracted_content",
+    "classify_pages_batch",
+    # Meta API
+    "TokenRotator",
+    "MetaAdsClient",
+    "get_token_rotator",
+    "init_token_rotator",
+    "clear_token_rotator",
+    "search_keywords_parallel",
+    "extract_website_from_ads",
+    "extract_currency_from_ads",
+    "cached_search_ads",
+    "cached_fetch_ads_for_page",
 ]

@@ -14,10 +14,17 @@ from src.application.use_cases.analyze_website import AnalyzeWebsiteUseCase
 from src.application.use_cases.classify_sites import ClassifySitesUseCase
 from src.application.use_cases.detect_winning_ads import DetectWinningAdsUseCase
 from src.application.use_cases.search_ads import SearchAdsUseCase
+from src.application.use_cases.search_executor import (
+    BackgroundProgressTracker,
+    execute_background_search,
+)
 
 __all__ = [
     "SearchAdsUseCase",
     "AnalyzeWebsiteUseCase",
     "ClassifySitesUseCase",
     "DetectWinningAdsUseCase",
+    # Search Executor (migre depuis app/)
+    "BackgroundProgressTracker",
+    "execute_background_search",
 ]
