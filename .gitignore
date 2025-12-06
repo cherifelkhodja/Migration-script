@@ -26,3 +26,11 @@ résultats/
 
 # Logs
 *.log
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
+
+# Pytest
+.pytest_cache/
