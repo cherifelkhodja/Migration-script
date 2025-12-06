@@ -1564,6 +1564,27 @@ def render_sidebar():
 
         st.markdown("---")
 
+        # ═══ RECHERCHE RAPIDE GLOBALE ═══
+        global_search = st.text_input("🔍", placeholder="Recherche rapide...", key="global_search", label_visibility="collapsed")
+
+        if global_search and len(global_search) >= 2:
+            db = get_database()
+            if db:
+                # Rechercher dans les pages
+                results = search_pages(db, search_term=global_search, limit=10)
+                if results:
+                    st.markdown(f"**{len(results)} page(s) trouvée(s)**")
+                    for page in results[:5]:
+                        page_name = page.get("page_name", "")[:25]
+                        if st.button(f"📄 {page_name}", key=f"quick_{page.get('page_id')}", use_container_width=True):
+                            st.session_state.selected_page_id = page.get("page_id")
+                            st.session_state.current_page = "Pages / Shops"
+                            st.rerun()
+                else:
+                    st.caption("Aucun résultat")
+
+        st.markdown("---")
+
         # Main Navigation
         st.markdown("### Main")
 
@@ -6125,6 +6146,68 @@ def render_creative_analysis():
                 st.write(f"• **{cta}** : {count} occurrence(s)")
         else:
             st.caption("Aucun CTA commun détecté")
+
+        # ═══════════════════════════════════════════════════════════════════════════
+        # GALERIE DES CRÉATIFS
+        # ═══════════════════════════════════════════════════════════════════════════
+        st.markdown("---")
+        chart_header(
+            "🖼️ Galerie des créatifs",
+            "Aperçu visuel des publicités performantes",
+            "Cliquez sur une ad pour voir les détails"
+        )
+
+        # Filtrer les ads avec des URLs d'aperçu
+        ads_with_preview = [ad for ad in winning_ads if ad.get("ad_snapshot_url")]
+
+        if ads_with_preview:
+            # Contrôles de la galerie
+            col_filter, col_sort = st.columns(2)
+            with col_filter:
+                gallery_limit = st.slider("Nombre d'ads", 6, 30, 12, 6, key="gallery_limit")
+            with col_sort:
+                sort_by = st.selectbox("Trier par", ["Reach", "Âge (récent)", "Page"], key="gallery_sort")
+
+            # Trier
+            if sort_by == "Reach":
+                ads_with_preview = sorted(ads_with_preview, key=lambda x: x.get("eu_total_reach", 0) or 0, reverse=True)
+            elif sort_by == "Âge (récent)":
+                ads_with_preview = sorted(ads_with_preview, key=lambda x: x.get("ad_age_days", 999))
+
+            # Affichage en grille
+            cols_per_row = 3
+            ads_to_show = ads_with_preview[:gallery_limit]
+
+            for i in range(0, len(ads_to_show), cols_per_row):
+                cols = st.columns(cols_per_row)
+                for j, col in enumerate(cols):
+                    if i + j < len(ads_to_show):
+                        ad = ads_to_show[i + j]
+                        with col:
+                            # Card de l'ad
+                            reach = ad.get("eu_total_reach", 0) or 0
+                            reach_str = f"{reach/1000:.0f}K" if reach >= 1000 else str(reach)
+                            age = ad.get("ad_age_days", 0)
+                            page_name = (ad.get("page_name", "N/A") or "N/A")[:20]
+
+                            st.markdown(f"""
+                            <div style="border: 1px solid #333; border-radius: 8px; padding: 10px; margin-bottom: 10px;">
+                                <div style="font-size: 12px; color: #888;">📊 {reach_str} reach • {age}j</div>
+                                <div style="font-size: 14px; font-weight: bold; margin: 5px 0;">{page_name}</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            # Texte de l'ad (aperçu)
+                            body = ad.get("ad_creative_bodies", "") or ""
+                            if body:
+                                st.caption(body[:80] + ("..." if len(body) > 80 else ""))
+
+                            # Lien vers l'ad
+                            ad_url = ad.get("ad_snapshot_url", "")
+                            if ad_url:
+                                st.link_button("👁️ Voir", ad_url, use_container_width=True)
+        else:
+            st.info("Aucune ad avec aperçu disponible")
 
     except Exception as e:
         st.error(f"Erreur: {e}")
