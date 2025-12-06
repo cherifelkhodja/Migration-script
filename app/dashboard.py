@@ -2171,7 +2171,7 @@ def render_keyword_search():
                 languages=",".join(languages) if languages else ""  # Vide si pas de langues
             )
 
-            st.success(f"✅ Tâche #{search_id} ajoutée à la file d'attente!")
+            st.success(f"✅ Recherche #{search_id} ajoutée à la file d'attente!")
             st.info("💡 Vous pouvez quitter cette page, la recherche continuera en arrière-plan. Consultez les résultats dans **Recherches en cours**.")
 
             # Proposer d'aller voir les recherches en arrière-plan
@@ -6991,7 +6991,6 @@ def render_background_searches():
 
     st.title("🔄 Recherches en cours")
     st.markdown("Suivi en temps réel des recherches en arrière-plan.")
-    st.caption("💡 Les numéros de tâche (Tâche #X) sont différents des numéros de recherche dans l'historique (Recherche #Y). Une fois terminée, la recherche apparaît dans **Historique**.")
 
     db = get_database()
     if not db:
@@ -7023,7 +7022,7 @@ def render_background_searches():
 
             col1, col2, col3 = st.columns([4, 1, 1])
             with col1:
-                st.write(f"**Tâche #{search.id}** - {search.created_at:%d/%m %H:%M} - Phase {search.current_phase}/9")
+                st.write(f"**Recherche #{search.id}** - {search.created_at:%d/%m %H:%M} - Phase {search.current_phase}/9")
                 st.caption(f"Mots-clés: {keywords_display}")
             with col2:
                 if st.button("🔄 Reprendre", key=f"resume_{search.id}"):
@@ -7074,7 +7073,7 @@ def render_background_searches():
                     # Titre avec phase et temps écoulé
                     header_col1, header_col2 = st.columns([3, 1])
                     with header_col1:
-                        st.markdown(f"### 🟢 Tâche #{search['id']} - En cours")
+                        st.markdown(f"### 🟢 Recherche #{search['id']} - En cours")
                     with header_col2:
                         if search.get("started_at"):
                             started = search["started_at"]
@@ -7127,7 +7126,7 @@ def render_background_searches():
 
                 else:
                     # Recherche en attente
-                    st.markdown(f"### 🟡 Tâche #{search['id']} - En attente")
+                    st.markdown(f"### 🟡 Recherche #{search['id']} - En attente")
                     st.write(f"**Mots-clés:** {keywords_display}")
 
                     if search.get("created_at"):
