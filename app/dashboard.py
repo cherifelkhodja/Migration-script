@@ -2566,13 +2566,17 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
     cached_sites = sum(1 for d in pages_filtered.values() if d.get("_from_cache"))
     sites_new = sites_found - cached_sites
 
-    # Log détaillé des pages sans URL
+    # Log détaillé Phase 3
+    print(f"[UI Search] Phase 3 - Extraction sites web:")
+    print(f"   🌐 Sites trouvés: {sites_found}")
+    print(f"   💾 En cache (URL de BDD): {cached_sites}")
+    print(f"   🆕 Nouveaux (URL extraite des ads): {sites_new}")
+    print(f"   ❌ Sans URL: {len(pages_without_url)}")
     if pages_without_url:
-        print(f"[UI Search] ⚠️ {len(pages_without_url)} pages sans URL trouvée:")
-        for p in pages_without_url[:10]:  # Max 10 pour pas spammer
-            print(f"   → {p}")
-        if len(pages_without_url) > 10:
-            print(f"   ... et {len(pages_without_url) - 10} autres")
+        for p in pages_without_url[:5]:
+            print(f"      → {p}")
+        if len(pages_without_url) > 5:
+            print(f"      ... et {len(pages_without_url) - 5} autres")
 
     # Stats détaillées Phase 3
     phase3_stats = {
@@ -2602,6 +2606,12 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
             data["_cms_cached"] = False
 
     cms_cached_count = len(pages_with_sites) - len(pages_need_cms)
+
+    # Log détaillé Phase 4
+    print(f"[UI Search] Phase 4 - Détection CMS:")
+    print(f"   🔍 Sites à analyser: {len(pages_need_cms)}")
+    print(f"   💾 CMS en cache (de BDD): {cms_cached_count}")
+
     st.info(f"🔍 {len(pages_need_cms)} sites à analyser ({cms_cached_count} CMS en cache)")
 
     # Fonction pour détection CMS parallèle
@@ -3015,11 +3025,12 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
                 phase8_stats = {
                     "Pages sauvées": pages_saved,
                     "🆕 Nouvelles pages": pages_new,
-                    "📝 Pages mises à jour": pages_existing,
+                    "📝 Doublons (mises à jour)": pages_existing,
+                    "💾 Pages en cache (phase 6)": pages_cached,
                     "Suivi pages": suivi_saved,
                     "Annonces sauvées": ads_saved,
                     "Winning ads sauvées": winning_saved,
-                    "Winning doublons ignorés": winning_skipped,
+                    "🔄 Winning doublons": winning_skipped,
                 }
                 tracker.complete_phase(msg, details={
                     "pages_saved": pages_saved,

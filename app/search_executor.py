@@ -374,14 +374,19 @@ def execute_background_search(
         if i % 10 == 0:
             tracker.update_step("Extraction URL", i + 1, len(pages_filtered))
 
-    # Log pages sans URL
-    if pages_without_url:
-        print(f"[Search #{search_id}] ⚠️ {len(pages_without_url)} pages sans URL:")
-        for pid, name in pages_without_url[:5]:
-            print(f"   → {pid} ({name[:30]})")
-
     sites_found = sum(1 for d in pages_filtered.values() if d["website"])
     cached_sites = sum(1 for d in pages_filtered.values() if d.get("_from_cache"))
+    sites_new = sites_found - cached_sites
+
+    # Log détaillé Phase 3
+    print(f"[Search #{search_id}] Phase 3 - Extraction sites web:")
+    print(f"   🌐 Sites trouvés: {sites_found}")
+    print(f"   💾 En cache (URL de BDD): {cached_sites}")
+    print(f"   🆕 Nouveaux (URL extraite des ads): {sites_new}")
+    print(f"   ❌ Sans URL: {len(pages_without_url)}")
+    if pages_without_url:
+        for pid, name in pages_without_url[:5]:
+            print(f"      → {pid} ({name[:30]})")
 
     phase3_stats = {
         "Sites trouvés": sites_found,
@@ -408,6 +413,11 @@ def execute_background_search(
             data["_cms_cached"] = False
 
     cms_cached_count = len(pages_with_sites) - len(pages_need_cms)
+
+    # Log détaillé Phase 4
+    print(f"[Search #{search_id}] Phase 4 - Détection CMS:")
+    print(f"   🔍 Sites à analyser: {len(pages_need_cms)}")
+    print(f"   💾 CMS en cache (de BDD): {cms_cached_count}")
 
     def detect_cms_worker(pid_data):
         pid, data = pid_data
@@ -781,11 +791,12 @@ def execute_background_search(
         phase8_stats = {
             "Pages sauvées": pages_saved,
             "🆕 Nouvelles pages": pages_new,
-            "📝 Pages mises à jour": pages_existing,
+            "📝 Doublons (mises à jour)": pages_existing,
+            "💾 Pages en cache (phase 6)": pages_cached,
             "Suivi pages": suivi_saved,
             "Annonces sauvées": ads_saved,
             "Winning ads sauvées": winning_saved,
-            "Winning doublons ignorés": winning_skipped,
+            "🔄 Winning doublons": winning_skipped,
         }
         tracker.complete_phase(f"{pages_saved} pages ({pages_new} 🆕, {pages_existing} 📝), {winning_saved} winning", stats=phase8_stats)
 
