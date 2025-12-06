@@ -4,9 +4,8 @@ Interface du service d'analyse de sites web.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict
 
-from src.domain.value_objects import CMS, Url
+from src.domain.value_objects import CMS
 
 
 @dataclass
@@ -30,15 +29,15 @@ class WebsiteAnalysisResult:
 
     url: str
     cms: CMS = field(default_factory=CMS.unknown)
-    theme: Optional[str] = None
+    theme: str | None = None
     product_count: int = 0
-    payment_methods: List[str] = field(default_factory=list)
-    currency: Optional[str] = None
+    payment_methods: list[str] = field(default_factory=list)
+    currency: str | None = None
     site_title: str = ""
     site_description: str = ""
     site_h1: str = ""
     site_keywords: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def is_success(self) -> bool:
@@ -75,8 +74,8 @@ class CMSDetectionResult:
 
     cms: CMS
     confidence: float = 1.0
-    theme: Optional[str] = None
-    evidence: List[str] = field(default_factory=list)
+    theme: str | None = None
+    evidence: list[str] = field(default_factory=list)
 
 
 class WebsiteAnalyzerService(ABC):
@@ -108,10 +107,10 @@ class WebsiteAnalyzerService(ABC):
     @abstractmethod
     def analyze_batch(
         self,
-        urls: List[str],
+        urls: list[str],
         country_code: str = "FR",
         max_concurrent: int = 5,
-    ) -> Dict[str, WebsiteAnalysisResult]:
+    ) -> dict[str, WebsiteAnalysisResult]:
         """
         Analyse plusieurs sites en parallele.
 
@@ -157,7 +156,7 @@ class WebsiteAnalyzerService(ABC):
         pass
 
     @abstractmethod
-    def detect_payments(self, url: str) -> List[str]:
+    def detect_payments(self, url: str) -> list[str]:
         """
         Detecte les moyens de paiement.
 
@@ -170,7 +169,7 @@ class WebsiteAnalyzerService(ABC):
         pass
 
     @abstractmethod
-    def extract_metadata(self, url: str) -> Dict[str, str]:
+    def extract_metadata(self, url: str) -> dict[str, str]:
         """
         Extrait les metadonnees d'un site.
 

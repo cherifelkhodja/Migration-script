@@ -3,13 +3,11 @@ Value Objects pour la thematique et la classification des sites.
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Dict
 
 from src.domain.exceptions import InvalidThematiqueError
 
-
 # Taxonomie par defaut des categories e-commerce
-DEFAULT_TAXONOMY: Dict[str, List[str]] = {
+DEFAULT_TAXONOMY: dict[str, list[str]] = {
     "Mode & Accessoires": [
         "Bijoux", "Montres", "Maillots de bain", "Sacs a main", "Lunettes",
         "Chaussures", "Vetements homme", "Vetements femme", "Vetements sport"
@@ -71,7 +69,7 @@ class Thematique:
     """
 
     category: str
-    subcategory: Optional[str] = None
+    subcategory: str | None = None
 
     def __post_init__(self) -> None:
         """Valide la thematique apres initialisation."""
@@ -82,8 +80,8 @@ class Thematique:
     def from_classification(
         cls,
         category: str,
-        subcategory: Optional[str] = None,
-        taxonomy: Optional[Dict[str, List[str]]] = None
+        subcategory: str | None = None,
+        taxonomy: dict[str, list[str]] | None = None
     ) -> "Thematique":
         """
         Cree une Thematique avec validation contre la taxonomie.
@@ -201,7 +199,7 @@ class ThematiqueClassification:
     def from_gemini(
         cls,
         category: str,
-        subcategory: Optional[str],
+        subcategory: str | None,
         confidence: float
     ) -> "ThematiqueClassification":
         """
@@ -243,7 +241,7 @@ class ThematiqueClassification:
         return self.thematique.category
 
     @property
-    def subcategory(self) -> Optional[str]:
+    def subcategory(self) -> str | None:
         """Raccourci vers la sous-categorie."""
         return self.thematique.subcategory
 

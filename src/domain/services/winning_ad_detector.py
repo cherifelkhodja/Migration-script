@@ -2,12 +2,12 @@
 Service de detection des Winning Ads.
 """
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date
-from typing import List, Optional, Tuple, Iterator
 
 from src.domain.entities.ad import Ad
-from src.domain.entities.winning_ad import WinningAd, DEFAULT_WINNING_CRITERIA
+from src.domain.entities.winning_ad import DEFAULT_WINNING_CRITERIA, WinningAd
 
 
 @dataclass
@@ -22,7 +22,7 @@ class WinningAdDetectionResult:
         criteria_distribution: Distribution par critere.
     """
 
-    winning_ads: List[WinningAd]
+    winning_ads: list[WinningAd]
     total_ads_analyzed: int
     criteria_distribution: dict
 
@@ -38,7 +38,7 @@ class WinningAdDetectionResult:
             return 0.0
         return self.count / self.total_ads_analyzed
 
-    def by_criteria(self, criteria: str) -> List[WinningAd]:
+    def by_criteria(self, criteria: str) -> list[WinningAd]:
         """Retourne les winning ads pour un critere donne."""
         return [w for w in self.winning_ads if w.matched_criteria == criteria]
 
@@ -58,7 +58,7 @@ class WinningAdDetector:
 
     def __init__(
         self,
-        criteria: Optional[List[Tuple[int, int]]] = None
+        criteria: list[tuple[int, int]] | None = None
     ) -> None:
         """
         Initialise le detecteur.
@@ -72,9 +72,9 @@ class WinningAdDetector:
     def detect(
         self,
         ad: Ad,
-        reference_date: Optional[date] = None,
-        search_log_id: Optional[int] = None,
-    ) -> Optional[WinningAd]:
+        reference_date: date | None = None,
+        search_log_id: int | None = None,
+    ) -> WinningAd | None:
         """
         Detecte si une annonce est une winning ad.
 
@@ -95,9 +95,9 @@ class WinningAdDetector:
 
     def detect_all(
         self,
-        ads: List[Ad],
-        reference_date: Optional[date] = None,
-        search_log_id: Optional[int] = None,
+        ads: list[Ad],
+        reference_date: date | None = None,
+        search_log_id: int | None = None,
     ) -> WinningAdDetectionResult:
         """
         Detecte toutes les winning ads dans une liste.
@@ -129,7 +129,7 @@ class WinningAdDetector:
     def detect_iter(
         self,
         ads: Iterator[Ad],
-        reference_date: Optional[date] = None,
+        reference_date: date | None = None,
     ) -> Iterator[WinningAd]:
         """
         Detecte les winning ads de maniere iterative (lazy).
@@ -146,7 +146,7 @@ class WinningAdDetector:
             if winning:
                 yield winning
 
-    def is_winning(self, ad: Ad, reference_date: Optional[date] = None) -> bool:
+    def is_winning(self, ad: Ad, reference_date: date | None = None) -> bool:
         """
         Verifie rapidement si une annonce est winning.
 
@@ -159,7 +159,7 @@ class WinningAdDetector:
         """
         return self.detect(ad, reference_date) is not None
 
-    def get_applicable_criteria(self, ad: Ad) -> List[str]:
+    def get_applicable_criteria(self, ad: Ad) -> list[str]:
         """
         Retourne tous les criteres applicables a une annonce.
 

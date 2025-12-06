@@ -2,19 +2,17 @@
 Use Case: Recherche d'annonces par mots-cles.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, Dict, Set, Callable
 
-from src.domain.entities.page import Page
-from src.domain.entities.ad import Ad
-from src.domain.value_objects import PageId, Etat
+from src.application.ports.repositories.page_repository import PageRepository
 from src.application.ports.services.ads_search_service import (
     AdsSearchService,
     SearchParameters,
-    SearchResult,
 )
-from src.application.ports.repositories.page_repository import PageRepository
+from src.domain.entities.ad import Ad
+from src.domain.entities.page import Page
 
 
 @dataclass
@@ -31,11 +29,11 @@ class SearchAdsRequest:
         exclude_blacklisted: Exclure les pages blacklistees.
     """
 
-    keywords: List[str]
-    countries: List[str] = field(default_factory=lambda: ["FR"])
-    languages: List[str] = field(default_factory=lambda: ["fr"])
+    keywords: list[str]
+    countries: list[str] = field(default_factory=lambda: ["FR"])
+    languages: list[str] = field(default_factory=lambda: ["fr"])
     min_ads: int = 1
-    cms_filter: List[str] = field(default_factory=list)
+    cms_filter: list[str] = field(default_factory=list)
     exclude_blacklisted: bool = True
 
 
@@ -51,8 +49,8 @@ class PageWithAds:
     """
 
     page: Page
-    ads: List[Ad]
-    keywords_found: Set[str] = field(default_factory=set)
+    ads: list[Ad]
+    keywords_found: set[str] = field(default_factory=set)
 
     @property
     def ads_count(self) -> int:
@@ -74,13 +72,13 @@ class SearchAdsResponse:
         keywords_stats: Statistiques par mot-cle.
     """
 
-    pages: List[PageWithAds]
+    pages: list[PageWithAds]
     total_ads_found: int
     unique_ads_count: int
     pages_before_filter: int
     pages_after_filter: int
     search_duration_ms: int
-    keywords_stats: Dict[str, int]
+    keywords_stats: dict[str, int]
 
     @property
     def pages_count(self) -> int:
@@ -108,8 +106,8 @@ class SearchAdsUseCase:
     def __init__(
         self,
         ads_service: AdsSearchService,
-        page_repository: Optional[PageRepository] = None,
-        blacklist: Optional[Set[str]] = None,
+        page_repository: PageRepository | None = None,
+        blacklist: set[str] | None = None,
     ) -> None:
         """
         Initialise le use case.
@@ -126,7 +124,7 @@ class SearchAdsUseCase:
     def execute(
         self,
         request: SearchAdsRequest,
-        progress_callback: Optional[ProgressCallback] = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> SearchAdsResponse:
         """
         Execute la recherche d'annonces.
@@ -154,7 +152,7 @@ class SearchAdsUseCase:
         )
 
         # 2. Regrouper par page
-        pages_dict: Dict[str, PageWithAds] = {}
+        pages_dict: dict[str, PageWithAds] = {}
 
         for ad in search_result.ads:
             page_id = str(ad.page_id)
@@ -203,7 +201,7 @@ class SearchAdsUseCase:
             keywords_stats=search_result.ads_by_keyword,
         )
 
-    def set_blacklist(self, blacklist: Set[str]) -> None:
+    def set_blacklist(self, blacklist: set[str]) -> None:
         """Met a jour la blacklist."""
         self._blacklist = blacklist
 

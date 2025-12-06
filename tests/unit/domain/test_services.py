@@ -2,17 +2,16 @@
 Tests unitaires pour les Services du domaine.
 """
 
-import pytest
 from datetime import date, timedelta
+
+import pytest
 
 from src.domain.entities.ad import Ad
 from src.domain.entities.page import Page
-from src.domain.entities.winning_ad import WinningAd
-from src.domain.services.winning_ad_detector import WinningAdDetector
 from src.domain.services.page_state_calculator import PageStateCalculator
-from src.domain.value_objects import PageId, AdId, Reach
+from src.domain.services.winning_ad_detector import WinningAdDetector
+from src.domain.value_objects import AdId, PageId, Reach
 from src.domain.value_objects.etat import EtatLevel
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TESTS - WinningAdDetector

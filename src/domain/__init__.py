@@ -16,10 +16,10 @@ Principes:
 
 from src.domain.exceptions import (
     DomainException,
-    InvalidPageIdError,
     InvalidAdIdError,
-    InvalidEtatError,
     InvalidCMSError,
+    InvalidEtatError,
+    InvalidPageIdError,
 )
 
 __all__ = [

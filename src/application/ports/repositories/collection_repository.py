@@ -3,7 +3,6 @@ Interface du repository de Collections.
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
 
 from src.domain.entities.collection import Collection
 from src.domain.value_objects import PageId
@@ -15,22 +14,22 @@ class CollectionRepository(ABC):
     """
 
     @abstractmethod
-    def get_by_id(self, collection_id: int) -> Optional[Collection]:
+    def get_by_id(self, collection_id: int) -> Collection | None:
         """Recupere une collection par son ID."""
         pass
 
     @abstractmethod
-    def get_by_name(self, name: str) -> Optional[Collection]:
+    def get_by_name(self, name: str) -> Collection | None:
         """Recupere une collection par son nom."""
         pass
 
     @abstractmethod
-    def find_all(self) -> List[Collection]:
+    def find_all(self) -> list[Collection]:
         """Recupere toutes les collections."""
         pass
 
     @abstractmethod
-    def find_containing_page(self, page_id: PageId) -> List[Collection]:
+    def find_containing_page(self, page_id: PageId) -> list[Collection]:
         """Recupere les collections contenant une page."""
         pass
 

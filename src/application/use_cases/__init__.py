@@ -10,10 +10,10 @@ Chaque Use Case:
     - Ne connait pas les details d'implementation
 """
 
-from src.application.use_cases.search_ads import SearchAdsUseCase
 from src.application.use_cases.analyze_website import AnalyzeWebsiteUseCase
 from src.application.use_cases.classify_sites import ClassifySitesUseCase
 from src.application.use_cases.detect_winning_ads import DetectWinningAdsUseCase
+from src.application.use_cases.search_ads import SearchAdsUseCase
 
 __all__ = [
     "SearchAdsUseCase",

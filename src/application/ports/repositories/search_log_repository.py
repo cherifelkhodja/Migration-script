@@ -3,8 +3,7 @@ Interface du repository de logs de recherche.
 """
 
 from abc import ABC, abstractmethod
-from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any
 
 
 class SearchLogRepository(ABC):
@@ -15,11 +14,11 @@ class SearchLogRepository(ABC):
     @abstractmethod
     def create(
         self,
-        keywords: List[str],
+        keywords: list[str],
         countries: str,
         languages: str,
         min_ads: int,
-        selected_cms: List[str],
+        selected_cms: list[str],
     ) -> int:
         """
         Cree un nouveau log de recherche.
@@ -34,7 +33,7 @@ class SearchLogRepository(ABC):
         self,
         log_id: int,
         status: str,
-        error_message: Optional[str] = None,
+        error_message: str | None = None,
     ) -> bool:
         """Met a jour le statut d'un log."""
         pass
@@ -54,12 +53,12 @@ class SearchLogRepository(ABC):
         pass
 
     @abstractmethod
-    def get_by_id(self, log_id: int) -> Optional[Dict[str, Any]]:
+    def get_by_id(self, log_id: int) -> dict[str, Any] | None:
         """Recupere un log par son ID."""
         pass
 
     @abstractmethod
-    def find_recent(self, limit: int = 20) -> List[Dict[str, Any]]:
+    def find_recent(self, limit: int = 20) -> list[dict[str, Any]]:
         """Recupere les logs recents."""
         pass
 
@@ -68,7 +67,7 @@ class SearchLogRepository(ABC):
         self,
         status: str,
         limit: int = 20
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Recupere les logs par statut."""
         pass
 

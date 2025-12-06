@@ -2,18 +2,14 @@
 Tests unitaires supplementaires pour atteindre 85% de couverture.
 """
 
-import pytest
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from src.domain.entities.ad import Ad
 from src.domain.entities.collection import Collection
-from src.domain.entities.winning_ad import WinningAd
 from src.domain.entities.page import Page
-from src.domain.value_objects import (
-    PageId, AdId, Reach, Currency, Url, Etat, CMS, Thematique
-)
+from src.domain.entities.winning_ad import WinningAd
+from src.domain.value_objects import AdId, Currency, Etat, PageId, Reach, Thematique, Url
 from src.domain.value_objects.etat import EtatLevel
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TESTS - Collection (Couverture supplementaire)
@@ -184,7 +180,7 @@ class TestReachAdditional:
         """Test format avec precision."""
         reach = Reach(1500)
         result = reach.format(precision=2)
-        assert "1.50K" == result
+        assert result == "1.50K"
 
     def test_int_conversion(self):
         """Test conversion en int."""

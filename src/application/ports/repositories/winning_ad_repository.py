@@ -3,8 +3,8 @@ Interface du repository de Winning Ads.
 """
 
 from abc import ABC, abstractmethod
-from datetime import date, datetime
-from typing import List, Optional, Dict, Any
+from datetime import date
+from typing import Any
 
 from src.domain.entities.winning_ad import WinningAd
 from src.domain.value_objects import AdId, PageId
@@ -23,7 +23,7 @@ class WinningAdRepository(ABC):
     # ═══════════════════════════════════════════════════════════════════
 
     @abstractmethod
-    def get_by_ad_id(self, ad_id: AdId) -> Optional[WinningAd]:
+    def get_by_ad_id(self, ad_id: AdId) -> WinningAd | None:
         """
         Recupere une winning ad par l'ID de l'annonce.
 
@@ -55,7 +55,7 @@ class WinningAdRepository(ABC):
         offset: int = 0,
         order_by: str = "detected_at",
         descending: bool = True,
-    ) -> List[WinningAd]:
+    ) -> list[WinningAd]:
         """
         Recupere toutes les winning ads avec pagination.
 
@@ -75,7 +75,7 @@ class WinningAdRepository(ABC):
         self,
         page_id: PageId,
         limit: int = 100,
-    ) -> List[WinningAd]:
+    ) -> list[WinningAd]:
         """
         Recupere les winning ads d'une page.
 
@@ -93,7 +93,7 @@ class WinningAdRepository(ABC):
         self,
         criteria: str,
         limit: int = 100,
-    ) -> List[WinningAd]:
+    ) -> list[WinningAd]:
         """
         Recupere les winning ads par critere.
 
@@ -111,7 +111,7 @@ class WinningAdRepository(ABC):
         self,
         days: int = 7,
         limit: int = 100,
-    ) -> List[WinningAd]:
+    ) -> list[WinningAd]:
         """
         Recupere les winning ads detectees recemment.
 
@@ -129,7 +129,7 @@ class WinningAdRepository(ABC):
         self,
         search_log_id: int,
         limit: int = 100,
-    ) -> List[WinningAd]:
+    ) -> list[WinningAd]:
         """
         Recupere les winning ads d'une recherche.
 
@@ -143,7 +143,7 @@ class WinningAdRepository(ABC):
         pass
 
     @abstractmethod
-    def count(self, filters: Optional[Dict[str, Any]] = None) -> int:
+    def count(self, filters: dict[str, Any] | None = None) -> int:
         """
         Compte les winning ads.
 
@@ -173,7 +173,7 @@ class WinningAdRepository(ABC):
         pass
 
     @abstractmethod
-    def save_many(self, winning_ads: List[WinningAd]) -> tuple:
+    def save_many(self, winning_ads: list[WinningAd]) -> tuple:
         """
         Sauvegarde plusieurs winning ads en batch.
 
@@ -216,7 +216,7 @@ class WinningAdRepository(ABC):
     # ═══════════════════════════════════════════════════════════════════
 
     @abstractmethod
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """
         Recupere les statistiques.
 
@@ -226,7 +226,7 @@ class WinningAdRepository(ABC):
         pass
 
     @abstractmethod
-    def get_criteria_distribution(self) -> Dict[str, int]:
+    def get_criteria_distribution(self) -> dict[str, int]:
         """
         Recupere la distribution par critere.
 
@@ -236,7 +236,7 @@ class WinningAdRepository(ABC):
         pass
 
     @abstractmethod
-    def get_daily_counts(self, days: int = 30) -> Dict[date, int]:
+    def get_daily_counts(self, days: int = 30) -> dict[date, int]:
         """
         Recupere les comptes journaliers.
 

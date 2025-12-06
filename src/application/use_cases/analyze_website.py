@@ -2,15 +2,13 @@
 Use Case: Analyse de sites web.
 """
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Dict
+from dataclasses import dataclass
 
-from src.domain.entities.page import Page
-from src.domain.value_objects import CMS, Url
 from src.application.ports.services.website_analyzer_service import (
-    WebsiteAnalyzerService,
     WebsiteAnalysisResult,
+    WebsiteAnalyzerService,
 )
+from src.domain.entities.page import Page
 
 
 @dataclass
@@ -25,7 +23,7 @@ class AnalyzeWebsiteRequest:
         max_concurrent: Nombre max de requetes paralleles.
     """
 
-    pages: List[Page]
+    pages: list[Page]
     country_code: str = "FR"
     skip_if_cached: bool = True
     max_concurrent: int = 5
@@ -60,11 +58,11 @@ class AnalyzeWebsiteResponse:
         cms_distribution: Distribution par CMS.
     """
 
-    results: List[PageAnalysisResult]
+    results: list[PageAnalysisResult]
     analyzed_count: int
     cached_count: int
     error_count: int
-    cms_distribution: Dict[str, int]
+    cms_distribution: dict[str, int]
 
     @property
     def success_count(self) -> int:
@@ -110,8 +108,8 @@ class AnalyzeWebsiteUseCase:
         Returns:
             Reponse avec les resultats d'analyse.
         """
-        results: List[PageAnalysisResult] = []
-        cms_distribution: Dict[str, int] = {}
+        results: list[PageAnalysisResult] = []
+        cms_distribution: dict[str, int] = {}
         error_count = 0
         cached_count = 0
 

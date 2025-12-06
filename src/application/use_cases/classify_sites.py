@@ -2,17 +2,16 @@
 Use Case: Classification thematique des sites.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Callable
 
-from src.domain.entities.page import Page
-from src.domain.value_objects import ThematiqueClassification, Thematique
+from src.application.ports.repositories.page_repository import PageRepository
 from src.application.ports.services.classification_service import (
     ClassificationService,
     SiteContent,
-    ClassificationBatchResult,
 )
-from src.application.ports.repositories.page_repository import PageRepository
+from src.domain.entities.page import Page
+from src.domain.value_objects import ThematiqueClassification
 
 
 @dataclass
@@ -26,8 +25,8 @@ class ClassifySitesRequest:
         skip_if_classified: Passer si deja classifie.
     """
 
-    pages: Optional[List[Page]] = None
-    contents: Optional[List[SiteContent]] = None
+    pages: list[Page] | None = None
+    contents: list[SiteContent] | None = None
     skip_if_classified: bool = True
 
 
@@ -44,13 +43,13 @@ class ClassifySitesResponse:
         saved_count: Nombre de mises a jour en BDD.
     """
 
-    classifications: Dict[str, ThematiqueClassification]
+    classifications: dict[str, ThematiqueClassification]
     total_classified: int
     high_confidence_count: int
     error_count: int
     saved_count: int = 0
 
-    def get_classification(self, page_id: str) -> Optional[ThematiqueClassification]:
+    def get_classification(self, page_id: str) -> ThematiqueClassification | None:
         """Recupere la classification d'une page."""
         return self.classifications.get(page_id)
 
@@ -75,7 +74,7 @@ class ClassifySitesUseCase:
     def __init__(
         self,
         classification_service: ClassificationService,
-        page_repository: Optional[PageRepository] = None,
+        page_repository: PageRepository | None = None,
     ) -> None:
         """
         Initialise le use case.
@@ -90,7 +89,7 @@ class ClassifySitesUseCase:
     def execute(
         self,
         request: ClassifySitesRequest,
-        progress_callback: Optional[ProgressCallback] = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> ClassifySitesResponse:
         """
         Execute la classification des sites.
@@ -103,7 +102,7 @@ class ClassifySitesUseCase:
             Reponse avec les classifications.
         """
         # Preparer les contenus
-        contents: List[SiteContent] = []
+        contents: list[SiteContent] = []
 
         if request.contents:
             contents = request.contents
@@ -140,7 +139,7 @@ class ClassifySitesUseCase:
         )
 
         # Convertir les resultats
-        classifications: Dict[str, ThematiqueClassification] = {}
+        classifications: dict[str, ThematiqueClassification] = {}
         error_count = 0
         high_confidence_count = 0
 
@@ -191,6 +190,6 @@ class ClassifySitesUseCase:
         result = self._classifier.classify(content)
         return result.classification
 
-    def get_taxonomy(self) -> Dict[str, List[str]]:
+    def get_taxonomy(self) -> dict[str, list[str]]:
         """Retourne la taxonomie utilisee."""
         return self._classifier.get_taxonomy()

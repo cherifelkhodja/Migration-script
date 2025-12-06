@@ -2,22 +2,21 @@
 Tests unitaires pour les Exceptions du domaine.
 """
 
-import pytest
 
 from src.domain.exceptions import (
-    DomainException,
-    InvalidPageIdError,
-    InvalidAdIdError,
-    InvalidEtatError,
-    InvalidCMSError,
-    InvalidUrlError,
-    InvalidThematiqueError,
-    WinningAdCriteriaError,
-    PageNotFoundError,
     AdNotFoundError,
-    SearchError,
-    RateLimitError,
     ClassificationError,
+    DomainException,
+    InvalidAdIdError,
+    InvalidCMSError,
+    InvalidEtatError,
+    InvalidPageIdError,
+    InvalidThematiqueError,
+    InvalidUrlError,
+    PageNotFoundError,
+    RateLimitError,
+    SearchError,
+    WinningAdCriteriaError,
 )
 
 

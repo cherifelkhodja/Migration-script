@@ -2,13 +2,12 @@
 Value Object pour les URLs.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse, urlunparse
-import re
 
 from src.domain.exceptions import InvalidUrlError
-
 
 # Pattern pour valider les domaines
 DOMAIN_PATTERN = re.compile(

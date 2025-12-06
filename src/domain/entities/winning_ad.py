@@ -3,16 +3,15 @@ Entite WinningAd - Annonce performante.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, date
-from typing import Optional, Tuple, List
+from datetime import date, datetime
+from typing import Optional
 
 from src.domain.entities.ad import Ad
 from src.domain.value_objects import AdId, PageId, Reach
 
-
 # Criteres par defaut pour qualifier une "Winning Ad"
 # Format: (max_age_days, min_reach)
-DEFAULT_WINNING_CRITERIA: List[Tuple[int, int]] = [
+DEFAULT_WINNING_CRITERIA: list[tuple[int, int]] = [
     (4, 15000),    # <= 4 jours et > 15k reach
     (5, 20000),    # <= 5 jours et > 20k reach
     (6, 30000),    # <= 6 jours et > 30k reach
@@ -54,7 +53,7 @@ class WinningAd:
     matched_criteria: str
     detected_at: datetime = field(default_factory=datetime.now)
     reach_at_detection: int = 0
-    search_log_id: Optional[int] = None
+    search_log_id: int | None = None
 
     def __post_init__(self) -> None:
         """Initialise les champs calcules."""
@@ -65,9 +64,9 @@ class WinningAd:
     def detect(
         cls,
         ad: Ad,
-        criteria: Optional[List[Tuple[int, int]]] = None,
-        reference_date: Optional[date] = None,
-        search_log_id: Optional[int] = None,
+        criteria: list[tuple[int, int]] | None = None,
+        reference_date: date | None = None,
+        search_log_id: int | None = None,
     ) -> Optional["WinningAd"]:
         """
         Detecte si une annonce est une Winning Ad.
@@ -112,7 +111,7 @@ class WinningAd:
     def is_winning(
         cls,
         ad: Ad,
-        criteria: Optional[List[Tuple[int, int]]] = None,
+        criteria: list[tuple[int, int]] | None = None,
     ) -> bool:
         """
         Verifie rapidement si une annonce est winning.
@@ -152,7 +151,7 @@ class WinningAd:
         return self.ad.age_days
 
     @property
-    def creation_date(self) -> Optional[date]:
+    def creation_date(self) -> date | None:
         """Date de creation de l'annonce."""
         return self.ad.creation_date
 

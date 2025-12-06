@@ -10,17 +10,16 @@ Types de ports:
 """
 
 from src.application.ports.repositories import (
-    PageRepository,
     AdRepository,
-    WinningAdRepository,
     CollectionRepository,
+    PageRepository,
     SearchLogRepository,
+    WinningAdRepository,
 )
-
 from src.application.ports.services import (
     AdsSearchService,
-    WebsiteAnalyzerService,
     ClassificationService,
+    WebsiteAnalyzerService,
 )
 
 __all__ = [

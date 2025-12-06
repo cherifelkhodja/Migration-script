@@ -3,9 +3,8 @@ Configuration et fixtures pytest.
 """
 
 import sys
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
-from typing import List
 
 import pytest
 
@@ -13,14 +12,19 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.domain.entities.ad import Ad
+from src.domain.entities.collection import Collection
 from src.domain.entities.page import Page
 from src.domain.entities.winning_ad import WinningAd
-from src.domain.entities.collection import Collection
 from src.domain.value_objects import (
-    PageId, AdId, Etat, CMS, Thematique,
-    ThematiqueClassification, Url, Reach, Currency
+    CMS,
+    AdId,
+    Currency,
+    PageId,
+    Reach,
+    Thematique,
+    ThematiqueClassification,
+    Url,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # FIXTURES - VALUE OBJECTS
@@ -136,7 +140,7 @@ def sample_collection(valid_page_id: PageId) -> Collection:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 @pytest.fixture
-def multiple_ads() -> List[Ad]:
+def multiple_ads() -> list[Ad]:
     """Liste d'annonces pour les tests."""
     ads = []
     for i in range(10):
@@ -153,7 +157,7 @@ def multiple_ads() -> List[Ad]:
 
 
 @pytest.fixture
-def multiple_pages() -> List[Page]:
+def multiple_pages() -> list[Page]:
     """Liste de pages pour les tests."""
     pages = []
     cms_types = ["Shopify", "WooCommerce", "PrestaShop", "Unknown"]

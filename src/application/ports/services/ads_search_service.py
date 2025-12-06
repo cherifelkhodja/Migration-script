@@ -3,8 +3,8 @@ Interface du service de recherche d'annonces Meta.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import List, Optional, Callable, Dict
 
 from src.domain.entities.ad import Ad
 from src.domain.value_objects import PageId
@@ -22,9 +22,9 @@ class SearchParameters:
         min_ads: Nombre minimum d'annonces pour filtrage.
     """
 
-    keywords: List[str]
-    countries: List[str] = field(default_factory=lambda: ["FR"])
-    languages: List[str] = field(default_factory=lambda: ["fr"])
+    keywords: list[str]
+    countries: list[str] = field(default_factory=lambda: ["FR"])
+    languages: list[str] = field(default_factory=lambda: ["fr"])
     min_ads: int = 1
 
 
@@ -40,8 +40,8 @@ class SearchResult:
         pages_found: Nombre de pages uniques.
     """
 
-    ads: List[Ad]
-    ads_by_keyword: Dict[str, int]
+    ads: list[Ad]
+    ads_by_keyword: dict[str, int]
     total_unique_ads: int
     pages_found: int
 
@@ -57,7 +57,7 @@ class PageAdsResult:
         page_id: ID de la page.
     """
 
-    ads: List[Ad]
+    ads: list[Ad]
     total_count: int
     page_id: PageId
 
@@ -78,7 +78,7 @@ class AdsSearchService(ABC):
     def search_by_keywords(
         self,
         params: SearchParameters,
-        progress_callback: Optional[ProgressCallback] = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> SearchResult:
         """
         Recherche des annonces par mots-cles.
@@ -100,8 +100,8 @@ class AdsSearchService(ABC):
     def fetch_ads_for_page(
         self,
         page_id: PageId,
-        countries: List[str],
-        languages: Optional[List[str]] = None,
+        countries: list[str],
+        languages: list[str] | None = None,
     ) -> PageAdsResult:
         """
         Recupere toutes les annonces d'une page.
@@ -122,10 +122,10 @@ class AdsSearchService(ABC):
     @abstractmethod
     def fetch_ads_for_pages_batch(
         self,
-        page_ids: List[PageId],
-        countries: List[str],
-        languages: Optional[List[str]] = None,
-    ) -> Dict[str, PageAdsResult]:
+        page_ids: list[PageId],
+        countries: list[str],
+        languages: list[str] | None = None,
+    ) -> dict[str, PageAdsResult]:
         """
         Recupere les annonces de plusieurs pages en batch.
 
@@ -140,7 +140,7 @@ class AdsSearchService(ABC):
         pass
 
     @abstractmethod
-    def extract_website_from_ads(self, ads: List[Ad]) -> Optional[str]:
+    def extract_website_from_ads(self, ads: list[Ad]) -> str | None:
         """
         Extrait l'URL du site web depuis les annonces.
 
@@ -153,7 +153,7 @@ class AdsSearchService(ABC):
         pass
 
     @abstractmethod
-    def extract_currency_from_ads(self, ads: List[Ad]) -> Optional[str]:
+    def extract_currency_from_ads(self, ads: list[Ad]) -> str | None:
         """
         Extrait la devise depuis les annonces.
 
@@ -176,7 +176,7 @@ class AdsSearchService(ABC):
         pass
 
     @abstractmethod
-    def get_token_info(self) -> Dict[str, any]:
+    def get_token_info(self) -> dict[str, any]:
         """
         Retourne les informations sur les tokens API.
 

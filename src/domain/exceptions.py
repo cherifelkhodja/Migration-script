@@ -5,13 +5,13 @@ Ces exceptions representent des violations des regles metier
 et sont independantes de l'infrastructure.
 """
 
-from typing import Any, Optional
+from typing import Any
 
 
 class DomainException(Exception):
     """Exception de base pour toutes les erreurs du domaine."""
 
-    def __init__(self, message: str, code: Optional[str] = None) -> None:
+    def __init__(self, message: str, code: str | None = None) -> None:
         """
         Initialise une exception du domaine.
 
@@ -85,7 +85,7 @@ class InvalidCMSError(DomainException):
 class InvalidUrlError(DomainException):
     """Leve quand une URL est invalide."""
 
-    def __init__(self, value: Any, reason: Optional[str] = None) -> None:
+    def __init__(self, value: Any, reason: str | None = None) -> None:
         message = f"URL invalide: '{value}'."
         if reason:
             message += f" Raison: {reason}"
@@ -96,7 +96,7 @@ class InvalidUrlError(DomainException):
 class InvalidThematiqueError(DomainException):
     """Leve quand une thematique est invalide."""
 
-    def __init__(self, category: str, subcategory: Optional[str] = None) -> None:
+    def __init__(self, category: str, subcategory: str | None = None) -> None:
         message = f"Thematique invalide: categorie='{category}'"
         if subcategory:
             message += f", sous-categorie='{subcategory}'"
@@ -143,7 +143,7 @@ class AdNotFoundError(DomainException):
 class SearchError(DomainException):
     """Leve quand une recherche echoue."""
 
-    def __init__(self, message: str, keyword: Optional[str] = None) -> None:
+    def __init__(self, message: str, keyword: str | None = None) -> None:
         full_message = message
         if keyword:
             full_message = f"Recherche '{keyword}': {message}"
@@ -157,7 +157,7 @@ class RateLimitError(DomainException):
     def __init__(
         self,
         service: str,
-        retry_after_seconds: Optional[int] = None
+        retry_after_seconds: int | None = None
     ) -> None:
         message = f"Limite de taux atteinte pour {service}."
         if retry_after_seconds:
@@ -170,7 +170,7 @@ class RateLimitError(DomainException):
 class ClassificationError(DomainException):
     """Leve quand la classification echoue."""
 
-    def __init__(self, message: str, page_id: Optional[str] = None) -> None:
+    def __init__(self, message: str, page_id: str | None = None) -> None:
         full_message = message
         if page_id:
             full_message = f"Classification page '{page_id}': {message}"

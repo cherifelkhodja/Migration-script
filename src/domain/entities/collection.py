@@ -4,7 +4,6 @@ Entite Collection - Groupe de pages creee par l'utilisateur.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, Set
 
 from src.domain.value_objects import PageId
 
@@ -32,10 +31,10 @@ class Collection:
         1
     """
 
-    id: Optional[int]
+    id: int | None
     name: str
     description: str = ""
-    page_ids: Set[PageId] = field(default_factory=set)
+    page_ids: set[PageId] = field(default_factory=set)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
@@ -48,7 +47,7 @@ class Collection:
         cls,
         name: str,
         description: str = "",
-        page_ids: Optional[List[str]] = None,
+        page_ids: list[str] | None = None,
     ) -> "Collection":
         """
         Factory pour creer une nouvelle Collection.
@@ -183,7 +182,7 @@ class Collection:
         return len(self.page_ids)
 
     @property
-    def page_ids_list(self) -> List[str]:
+    def page_ids_list(self) -> list[str]:
         """Retourne les IDs des pages sous forme de liste de strings."""
         return [str(pid) for pid in self.page_ids]
 

@@ -4,7 +4,7 @@ Interface du repository d'Annonces.
 
 from abc import ABC, abstractmethod
 from datetime import date
-from typing import List, Optional, Dict, Any
+from typing import Any
 
 from src.domain.entities.ad import Ad
 from src.domain.value_objects import AdId, PageId
@@ -23,7 +23,7 @@ class AdRepository(ABC):
     # ═══════════════════════════════════════════════════════════════════
 
     @abstractmethod
-    def get_by_id(self, ad_id: AdId) -> Optional[Ad]:
+    def get_by_id(self, ad_id: AdId) -> Ad | None:
         """
         Recupere une annonce par son ID.
 
@@ -36,7 +36,7 @@ class AdRepository(ABC):
         pass
 
     @abstractmethod
-    def get_by_ids(self, ad_ids: List[AdId]) -> List[Ad]:
+    def get_by_ids(self, ad_ids: list[AdId]) -> list[Ad]:
         """
         Recupere plusieurs annonces par leurs IDs.
 
@@ -67,7 +67,7 @@ class AdRepository(ABC):
         page_id: PageId,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Ad]:
+    ) -> list[Ad]:
         """
         Recupere les annonces d'une page.
 
@@ -87,7 +87,7 @@ class AdRepository(ABC):
         days: int = 7,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Ad]:
+    ) -> list[Ad]:
         """
         Recupere les annonces recentes.
 
@@ -108,7 +108,7 @@ class AdRepository(ABC):
         end_date: date,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Ad]:
+    ) -> list[Ad]:
         """
         Recupere les annonces dans une plage de dates.
 
@@ -137,7 +137,7 @@ class AdRepository(ABC):
         pass
 
     @abstractmethod
-    def count(self, filters: Optional[Dict[str, Any]] = None) -> int:
+    def count(self, filters: dict[str, Any] | None = None) -> int:
         """
         Compte les annonces selon les filtres.
 
@@ -167,7 +167,7 @@ class AdRepository(ABC):
         pass
 
     @abstractmethod
-    def save_many(self, ads: List[Ad]) -> int:
+    def save_many(self, ads: list[Ad]) -> int:
         """
         Sauvegarde plusieurs annonces en batch.
 

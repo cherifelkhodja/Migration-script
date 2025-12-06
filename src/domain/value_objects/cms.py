@@ -4,7 +4,6 @@ Value Object pour le systeme de gestion de contenu (CMS) d'un site.
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional
 
 
 class CMSType(Enum):
@@ -68,7 +67,7 @@ class CMS:
 
     type: CMSType
     confidence: float = 1.0
-    theme: Optional[str] = None
+    theme: str | None = None
 
     def __post_init__(self) -> None:
         """Valide le CMS apres initialisation."""
@@ -84,7 +83,7 @@ class CMS:
         cls,
         value: str,
         confidence: float = 1.0,
-        theme: Optional[str] = None
+        theme: str | None = None
     ) -> "CMS":
         """
         Cree un CMS depuis une chaine.
@@ -109,7 +108,7 @@ class CMS:
     def shopify(
         cls,
         confidence: float = 1.0,
-        theme: Optional[str] = None
+        theme: str | None = None
     ) -> "CMS":
         """Factory pour creer un CMS Shopify."""
         return cls(type=CMSType.SHOPIFY, confidence=confidence, theme=theme)

@@ -4,10 +4,10 @@ Interface du repository de Pages.
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any
 
 from src.domain.entities.page import Page
-from src.domain.value_objects import PageId, Etat, CMS
+from src.domain.value_objects import PageId
 
 
 class PageRepository(ABC):
@@ -23,7 +23,7 @@ class PageRepository(ABC):
     # ═══════════════════════════════════════════════════════════════════
 
     @abstractmethod
-    def get_by_id(self, page_id: PageId) -> Optional[Page]:
+    def get_by_id(self, page_id: PageId) -> Page | None:
         """
         Recupere une page par son ID.
 
@@ -36,7 +36,7 @@ class PageRepository(ABC):
         pass
 
     @abstractmethod
-    def get_by_ids(self, page_ids: List[PageId]) -> List[Page]:
+    def get_by_ids(self, page_ids: list[PageId]) -> list[Page]:
         """
         Recupere plusieurs pages par leurs IDs.
 
@@ -68,7 +68,7 @@ class PageRepository(ABC):
         offset: int = 0,
         order_by: str = "updated_at",
         descending: bool = True,
-    ) -> List[Page]:
+    ) -> list[Page]:
         """
         Recupere toutes les pages avec pagination.
 
@@ -86,10 +86,10 @@ class PageRepository(ABC):
     @abstractmethod
     def find_by_etat(
         self,
-        etats: List[str],
+        etats: list[str],
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Page]:
+    ) -> list[Page]:
         """
         Recupere les pages par etat.
 
@@ -106,10 +106,10 @@ class PageRepository(ABC):
     @abstractmethod
     def find_by_cms(
         self,
-        cms_types: List[str],
+        cms_types: list[str],
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Page]:
+    ) -> list[Page]:
         """
         Recupere les pages par CMS.
 
@@ -127,10 +127,10 @@ class PageRepository(ABC):
     def find_by_category(
         self,
         category: str,
-        subcategory: Optional[str] = None,
+        subcategory: str | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Page]:
+    ) -> list[Page]:
         """
         Recupere les pages par categorie.
 
@@ -150,7 +150,7 @@ class PageRepository(ABC):
         self,
         older_than_days: int = 1,
         limit: int = 100,
-    ) -> List[Page]:
+    ) -> list[Page]:
         """
         Recupere les pages necessitant un nouveau scan.
 
@@ -164,7 +164,7 @@ class PageRepository(ABC):
         pass
 
     @abstractmethod
-    def find_unclassified(self, limit: int = 100) -> List[Page]:
+    def find_unclassified(self, limit: int = 100) -> list[Page]:
         """
         Recupere les pages non classifiees.
 
@@ -180,10 +180,10 @@ class PageRepository(ABC):
     def search(
         self,
         query: str,
-        filters: Optional[Dict[str, Any]] = None,
+        filters: dict[str, Any] | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Page]:
+    ) -> list[Page]:
         """
         Recherche de pages avec filtres.
 
@@ -199,7 +199,7 @@ class PageRepository(ABC):
         pass
 
     @abstractmethod
-    def count(self, filters: Optional[Dict[str, Any]] = None) -> int:
+    def count(self, filters: dict[str, Any] | None = None) -> int:
         """
         Compte les pages selon les filtres.
 
@@ -229,7 +229,7 @@ class PageRepository(ABC):
         pass
 
     @abstractmethod
-    def save_many(self, pages: List[Page]) -> int:
+    def save_many(self, pages: list[Page]) -> int:
         """
         Sauvegarde plusieurs pages en batch.
 
@@ -275,7 +275,7 @@ class PageRepository(ABC):
         self,
         page_id: PageId,
         category: str,
-        subcategory: Optional[str],
+        subcategory: str | None,
         confidence: float,
     ) -> bool:
         """
@@ -311,7 +311,7 @@ class PageRepository(ABC):
     # ═══════════════════════════════════════════════════════════════════
 
     @abstractmethod
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """
         Recupere les statistiques globales.
 
@@ -321,7 +321,7 @@ class PageRepository(ABC):
         pass
 
     @abstractmethod
-    def get_etat_distribution(self) -> Dict[str, int]:
+    def get_etat_distribution(self) -> dict[str, int]:
         """
         Recupere la distribution par etat.
 
@@ -331,7 +331,7 @@ class PageRepository(ABC):
         pass
 
     @abstractmethod
-    def get_cms_distribution(self) -> Dict[str, int]:
+    def get_cms_distribution(self) -> dict[str, int]:
         """
         Recupere la distribution par CMS.
 
@@ -341,7 +341,7 @@ class PageRepository(ABC):
         pass
 
     @abstractmethod
-    def get_category_distribution(self) -> Dict[str, int]:
+    def get_category_distribution(self) -> dict[str, int]:
         """
         Recupere la distribution par categorie.
 

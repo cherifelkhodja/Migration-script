@@ -2,19 +2,20 @@
 Tests unitaires pour les Entites du domaine.
 """
 
-import pytest
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
-from src.domain.entities.page import Page
+import pytest
+
 from src.domain.entities.ad import Ad
-from src.domain.entities.winning_ad import WinningAd, DEFAULT_WINNING_CRITERIA
 from src.domain.entities.collection import Collection
+from src.domain.entities.page import Page
+from src.domain.entities.winning_ad import WinningAd
 from src.domain.value_objects import (
-    PageId, AdId, Etat, CMS, Thematique,
-    ThematiqueClassification, Url, Reach, Currency
+    AdId,
+    PageId,
+    Reach,
 )
 from src.domain.value_objects.etat import EtatLevel
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TESTS - Page

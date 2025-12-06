@@ -3,7 +3,6 @@ Value Object pour la portee (reach) d'une annonce.
 """
 
 from dataclasses import dataclass
-from typing import Optional, Tuple
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,8 +27,8 @@ class Reach:
     """
 
     value: int
-    lower_bound: Optional[int] = None
-    upper_bound: Optional[int] = None
+    lower_bound: int | None = None
+    upper_bound: int | None = None
 
     def __post_init__(self) -> None:
         """Valide la portee apres initialisation."""
@@ -39,7 +38,7 @@ class Reach:
     @classmethod
     def from_meta_response(
         cls,
-        eu_total_reach: Optional[dict]
+        eu_total_reach: dict | None
     ) -> "Reach":
         """
         Cree un Reach depuis une reponse Meta API.
@@ -103,7 +102,7 @@ class Reach:
         return self.value >= 100000
 
     @property
-    def range(self) -> Optional[Tuple[int, int]]:
+    def range(self) -> tuple[int, int] | None:
         """Retourne la plage (lower, upper) si disponible."""
         if self.lower_bound is not None and self.upper_bound is not None:
             return (self.lower_bound, self.upper_bound)

@@ -3,8 +3,6 @@ Value Object pour les devises.
 """
 
 from dataclasses import dataclass
-from typing import Optional
-
 
 # Devises supportees avec leurs symboles
 CURRENCY_SYMBOLS = {

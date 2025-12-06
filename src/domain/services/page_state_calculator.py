@@ -3,10 +3,9 @@ Service de calcul de l'etat des pages.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
-from src.domain.value_objects.etat import Etat, EtatLevel, DEFAULT_THRESHOLDS
 from src.domain.entities.page import Page
+from src.domain.value_objects.etat import DEFAULT_THRESHOLDS, Etat, EtatLevel
 
 
 @dataclass
@@ -20,7 +19,7 @@ class PageStateStatistics:
         total_ads: Nombre total d'annonces.
     """
 
-    distribution: Dict[EtatLevel, int]
+    distribution: dict[EtatLevel, int]
     total_pages: int
     total_ads: int
 
@@ -37,7 +36,7 @@ class PageStateStatistics:
             return 0.0
         return (self.distribution.get(level, 0) / self.total_pages) * 100
 
-    def to_dict(self) -> Dict[str, int]:
+    def to_dict(self) -> dict[str, int]:
         """Convertit en dictionnaire avec les labels."""
         return {
             level.value: count
@@ -61,7 +60,7 @@ class PageStateCalculator:
 
     def __init__(
         self,
-        thresholds: Optional[Dict[EtatLevel, int]] = None
+        thresholds: dict[EtatLevel, int] | None = None
     ) -> None:
         """
         Initialise le calculateur.
@@ -95,7 +94,7 @@ class PageStateCalculator:
         """
         return self.calculate(page.active_ads_count)
 
-    def get_statistics(self, pages: List[Page]) -> PageStateStatistics:
+    def get_statistics(self, pages: list[Page]) -> PageStateStatistics:
         """
         Calcule les statistiques pour une liste de pages.
 
@@ -105,7 +104,7 @@ class PageStateCalculator:
         Returns:
             Statistiques de distribution.
         """
-        distribution = {level: 0 for level in EtatLevel}
+        distribution = dict.fromkeys(EtatLevel, 0)
         total_ads = 0
 
         for page in pages:
@@ -121,9 +120,9 @@ class PageStateCalculator:
 
     def filter_by_state(
         self,
-        pages: List[Page],
-        states: List[EtatLevel]
-    ) -> List[Page]:
+        pages: list[Page],
+        states: list[EtatLevel]
+    ) -> list[Page]:
         """
         Filtre les pages par etat.
 
@@ -141,9 +140,9 @@ class PageStateCalculator:
 
     def filter_minimum_state(
         self,
-        pages: List[Page],
+        pages: list[Page],
         minimum: EtatLevel
-    ) -> List[Page]:
+    ) -> list[Page]:
         """
         Filtre les pages avec un etat minimum.
 

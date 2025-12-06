@@ -3,10 +3,10 @@ Entite Ad - Annonce publicitaire Meta.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, date
-from typing import List, Optional, Dict, Any
+from datetime import date, datetime
+from typing import Any
 
-from src.domain.value_objects import AdId, PageId, Reach, Currency
+from src.domain.value_objects import AdId, Currency, PageId, Reach
 
 
 @dataclass
@@ -48,24 +48,24 @@ class Ad:
     id: AdId
     page_id: PageId
     page_name: str = ""
-    creation_date: Optional[date] = None
+    creation_date: date | None = None
     reach: Reach = field(default_factory=Reach.zero)
-    bodies: List[str] = field(default_factory=list)
-    link_titles: List[str] = field(default_factory=list)
-    link_captions: List[str] = field(default_factory=list)
+    bodies: list[str] = field(default_factory=list)
+    link_titles: list[str] = field(default_factory=list)
+    link_captions: list[str] = field(default_factory=list)
     snapshot_url: str = ""
-    currency: Optional[Currency] = None
-    languages: List[str] = field(default_factory=list)
-    platforms: List[str] = field(default_factory=list)
+    currency: Currency | None = None
+    languages: list[str] = field(default_factory=list)
+    platforms: list[str] = field(default_factory=list)
     target_ages: str = ""
     target_gender: str = ""
 
     # Champs internes
-    _keyword: Optional[str] = field(default=None, repr=False)
-    _raw_data: Optional[Dict[str, Any]] = field(default=None, repr=False)
+    _keyword: str | None = field(default=None, repr=False)
+    _raw_data: dict[str, Any] | None = field(default=None, repr=False)
 
     @classmethod
-    def from_meta_response(cls, data: Dict[str, Any]) -> "Ad":
+    def from_meta_response(cls, data: dict[str, Any]) -> "Ad":
         """
         Cree une Ad depuis une reponse de l'API Meta.
 
@@ -95,7 +95,7 @@ class Ad:
         reach = Reach.from_meta_response(data.get("eu_total_reach"))
 
         # Parser les listes
-        def to_list(val: Any) -> List[str]:
+        def to_list(val: Any) -> list[str]:
             if val is None:
                 return []
             if isinstance(val, list):
@@ -161,7 +161,7 @@ class Ad:
         return self.link_captions[0] if self.link_captions else ""
 
     @property
-    def extracted_domain(self) -> Optional[str]:
+    def extracted_domain(self) -> str | None:
         """
         Essaie d'extraire le domaine depuis les captions.
 

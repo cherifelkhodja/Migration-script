@@ -3,8 +3,8 @@ Interface du service de classification de sites.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import List, Optional, Dict
+from collections.abc import Callable
+from dataclasses import dataclass
 
 from src.domain.value_objects import ThematiqueClassification
 
@@ -61,7 +61,7 @@ class ClassificationResult:
 
     page_id: str
     classification: ThematiqueClassification
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def is_success(self) -> bool:
@@ -74,7 +74,7 @@ class ClassificationResult:
         return self.classification.category
 
     @property
-    def subcategory(self) -> Optional[str]:
+    def subcategory(self) -> str | None:
         """Raccourci vers la sous-categorie."""
         return self.classification.subcategory
 
@@ -96,12 +96,12 @@ class ClassificationBatchResult:
         high_confidence_count: Nombre avec confiance >= 0.7.
     """
 
-    results: Dict[str, ClassificationResult]
+    results: dict[str, ClassificationResult]
     total_classified: int = 0
     errors_count: int = 0
     high_confidence_count: int = 0
 
-    def get(self, page_id: str) -> Optional[ClassificationResult]:
+    def get(self, page_id: str) -> ClassificationResult | None:
         """Recupere un resultat par page_id."""
         return self.results.get(page_id)
 
@@ -137,8 +137,8 @@ class ClassificationService(ABC):
     @abstractmethod
     def classify_batch(
         self,
-        contents: List[SiteContent],
-        progress_callback: Optional[ClassificationProgressCallback] = None,
+        contents: list[SiteContent],
+        progress_callback: ClassificationProgressCallback | None = None,
     ) -> ClassificationBatchResult:
         """
         Classifie plusieurs sites en batch.
@@ -153,7 +153,7 @@ class ClassificationService(ABC):
         pass
 
     @abstractmethod
-    def get_taxonomy(self) -> Dict[str, List[str]]:
+    def get_taxonomy(self) -> dict[str, list[str]]:
         """
         Retourne la taxonomie utilisee.
 
@@ -173,7 +173,7 @@ class ClassificationService(ABC):
         pass
 
     @abstractmethod
-    def get_model_info(self) -> Dict[str, str]:
+    def get_model_info(self) -> dict[str, str]:
         """
         Retourne les informations sur le modele utilise.
 
@@ -184,4 +184,4 @@ class ClassificationService(ABC):
 
 
 # Import du type Callable pour l'annotation
-from typing import Callable
+from collections.abc import Callable

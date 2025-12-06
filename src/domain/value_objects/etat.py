@@ -4,7 +4,6 @@ Value Object pour l'etat d'une page (basé sur le nombre d'annonces).
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional
 
 from src.domain.exceptions import InvalidEtatError
 
@@ -26,7 +25,7 @@ class EtatLevel(Enum):
 
 
 # Seuils par defaut pour chaque niveau
-DEFAULT_THRESHOLDS: Dict[EtatLevel, int] = {
+DEFAULT_THRESHOLDS: dict[EtatLevel, int] = {
     EtatLevel.XS: 1,
     EtatLevel.S: 10,
     EtatLevel.M: 20,
@@ -70,7 +69,7 @@ class Etat:
     def from_ads_count(
         cls,
         ads_count: int,
-        thresholds: Optional[Dict[EtatLevel, int]] = None
+        thresholds: dict[EtatLevel, int] | None = None
     ) -> "Etat":
         """
         Cree un Etat depuis un nombre d'annonces.

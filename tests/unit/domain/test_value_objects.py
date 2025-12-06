@@ -2,19 +2,28 @@
 Tests unitaires pour les Value Objects du domaine.
 """
 
+
 import pytest
-from datetime import date
 
-from src.domain.value_objects import (
-    PageId, AdId, Etat, CMS, Thematique,
-    ThematiqueClassification, Url, Reach, Currency
-)
-from src.domain.value_objects.etat import EtatLevel
-from src.domain.value_objects.cms import CMSType
 from src.domain.exceptions import (
-    InvalidPageIdError, InvalidAdIdError, InvalidEtatError, InvalidUrlError
+    InvalidAdIdError,
+    InvalidEtatError,
+    InvalidPageIdError,
+    InvalidUrlError,
 )
-
+from src.domain.value_objects import (
+    CMS,
+    AdId,
+    Currency,
+    Etat,
+    PageId,
+    Reach,
+    Thematique,
+    ThematiqueClassification,
+    Url,
+)
+from src.domain.value_objects.cms import CMSType
+from src.domain.value_objects.etat import EtatLevel
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TESTS - PageId

@@ -3,16 +3,13 @@ Use Case: Detection des Winning Ads.
 """
 
 from dataclasses import dataclass
-from datetime import date
-from typing import List, Optional, Tuple, Dict
 
+from src.application.ports.repositories.winning_ad_repository import WinningAdRepository
 from src.domain.entities.ad import Ad
-from src.domain.entities.winning_ad import WinningAd, DEFAULT_WINNING_CRITERIA
+from src.domain.entities.winning_ad import DEFAULT_WINNING_CRITERIA, WinningAd
 from src.domain.services.winning_ad_detector import (
     WinningAdDetector,
-    WinningAdDetectionResult,
 )
-from src.application.ports.repositories.winning_ad_repository import WinningAdRepository
 
 
 @dataclass
@@ -26,9 +23,9 @@ class DetectWinningAdsRequest:
         custom_criteria: Criteres personnalises optionnels.
     """
 
-    ads: List[Ad]
-    search_log_id: Optional[int] = None
-    custom_criteria: Optional[List[Tuple[int, int]]] = None
+    ads: list[Ad]
+    search_log_id: int | None = None
+    custom_criteria: list[tuple[int, int]] | None = None
 
 
 @dataclass
@@ -45,10 +42,10 @@ class DetectWinningAdsResponse:
         skipped_count: Nombre de doublons ignores.
     """
 
-    winning_ads: List[WinningAd]
+    winning_ads: list[WinningAd]
     total_analyzed: int
     detection_rate: float
-    criteria_distribution: Dict[str, int]
+    criteria_distribution: dict[str, int]
     saved_count: int = 0
     skipped_count: int = 0
 
@@ -73,8 +70,8 @@ class DetectWinningAdsUseCase:
 
     def __init__(
         self,
-        winning_ad_repository: Optional[WinningAdRepository] = None,
-        criteria: Optional[List[Tuple[int, int]]] = None,
+        winning_ad_repository: WinningAdRepository | None = None,
+        criteria: list[tuple[int, int]] | None = None,
     ) -> None:
         """
         Initialise le use case.
@@ -150,6 +147,6 @@ class DetectWinningAdsUseCase:
         """
         return self._detector.explain(ad)
 
-    def get_criteria(self) -> List[Tuple[int, int]]:
+    def get_criteria(self) -> list[tuple[int, int]]:
         """Retourne les criteres utilises."""
         return self._default_criteria.copy()

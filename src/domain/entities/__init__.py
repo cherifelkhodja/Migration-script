@@ -12,10 +12,10 @@ Entites principales:
     - Collection: Groupe de pages creees par l'utilisateur
 """
 
-from src.domain.entities.page import Page
 from src.domain.entities.ad import Ad
-from src.domain.entities.winning_ad import WinningAd
 from src.domain.entities.collection import Collection
+from src.domain.entities.page import Page
+from src.domain.entities.winning_ad import WinningAd
 
 __all__ = [
     "Page",

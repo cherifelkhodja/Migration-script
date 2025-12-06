@@ -4,10 +4,15 @@ Entite Page - Page Facebook avec metadonnees e-commerce.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional, Set
 
 from src.domain.value_objects import (
-    PageId, Etat, CMS, Thematique, ThematiqueClassification, Url, Currency
+    CMS,
+    Currency,
+    Etat,
+    PageId,
+    Thematique,
+    ThematiqueClassification,
+    Url,
 )
 
 
@@ -50,18 +55,18 @@ class Page:
 
     id: PageId
     name: str
-    website: Optional[Url] = None
+    website: Url | None = None
     cms: CMS = field(default_factory=CMS.unknown)
-    etat: Optional[Etat] = None
+    etat: Etat | None = None
     active_ads_count: int = 0
     product_count: int = 0
-    classification: Optional[ThematiqueClassification] = None
-    currency: Optional[Currency] = None
-    payment_methods: List[str] = field(default_factory=list)
-    keywords: Set[str] = field(default_factory=set)
+    classification: ThematiqueClassification | None = None
+    currency: Currency | None = None
+    payment_methods: list[str] = field(default_factory=list)
+    keywords: set[str] = field(default_factory=set)
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
-    last_scan_at: Optional[datetime] = None
+    last_scan_at: datetime | None = None
 
     # Champs internes pour tracking
     _is_new: bool = field(default=True, repr=False)
@@ -78,8 +83,8 @@ class Page:
         cls,
         page_id: str,
         name: str,
-        website: Optional[str] = None,
-        cms: Optional[str] = None,
+        website: str | None = None,
+        cms: str | None = None,
         active_ads_count: int = 0,
     ) -> "Page":
         """
@@ -127,7 +132,7 @@ class Page:
             self.website = new_url
             self._mark_dirty()
 
-    def update_cms(self, cms_name: str, theme: Optional[str] = None) -> None:
+    def update_cms(self, cms_name: str, theme: str | None = None) -> None:
         """
         Met a jour le CMS detecte.
 
@@ -143,7 +148,7 @@ class Page:
     def update_classification(
         self,
         category: str,
-        subcategory: Optional[str] = None,
+        subcategory: str | None = None,
         confidence: float = 0.5,
         source: str = "unknown"
     ) -> None:
@@ -214,21 +219,21 @@ class Page:
         )
 
     @property
-    def category(self) -> Optional[str]:
+    def category(self) -> str | None:
         """Raccourci vers la categorie."""
         if self.classification:
             return self.classification.category
         return None
 
     @property
-    def subcategory(self) -> Optional[str]:
+    def subcategory(self) -> str | None:
         """Raccourci vers la sous-categorie."""
         if self.classification:
             return self.classification.subcategory
         return None
 
     @property
-    def domain(self) -> Optional[str]:
+    def domain(self) -> str | None:
         """Retourne le domaine du site."""
         if self.website:
             return self.website.domain
