@@ -244,6 +244,7 @@ AVAILABLE_COUNTRIES = {
     "NL": "Pays-Bas",
     "AT": "Autriche",
     "LU": "Luxembourg",
+    "PL": "Pologne",
 }
 
 AVAILABLE_LANGUAGES = {
@@ -254,4 +255,5 @@ AVAILABLE_LANGUAGES = {
     "it": "Italiano",
     "pt": "Português",
     "nl": "Nederlands",
+    "pl": "Polski",
 }

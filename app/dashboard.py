@@ -481,6 +481,8 @@ def render_classification_filters(
                 "AT": "🇦🇹 Autriche",
                 "CA": "🇨🇦 Canada",
                 "AU": "🇦🇺 Australie",
+                "LU": "🇱🇺 Luxembourg",
+                "PL": "🇵🇱 Pologne",
             }
             pays_display = ["Tous"] + [country_names.get(c, c) for c in countries]
             pays_values = [None] + countries
