@@ -1678,9 +1678,9 @@ def render_sidebar():
             st.session_state.current_page = "Search Ads"
             st.rerun()
 
-        if st.button("📜 Search Logs", width="stretch",
-                     type="primary" if st.session_state.current_page == "Search Logs" else "secondary"):
-            st.session_state.current_page = "Search Logs"
+        if st.button("📜 Historique", width="stretch",
+                     type="primary" if st.session_state.current_page == "Historique" else "secondary"):
+            st.session_state.current_page = "Historique"
             st.rerun()
 
         # Indicateur de recherches en arrière-plan
@@ -6984,7 +6984,7 @@ def render_background_searches():
 
     st.title("🔄 Recherches en cours")
     st.markdown("Suivi en temps réel des recherches en arrière-plan.")
-    st.caption("💡 Les numéros de tâche (Tâche #X) sont différents des numéros de recherche dans l'historique (Recherche #Y). Une fois terminée, la recherche apparaît dans **Search Logs**.")
+    st.caption("💡 Les numéros de tâche (Tâche #X) sont différents des numéros de recherche dans l'historique (Recherche #Y). Une fois terminée, la recherche apparaît dans **Historique**.")
 
     db = get_database()
     if not db:
@@ -7668,7 +7668,7 @@ def main():
         render_creative_analysis()
     elif page == "Scheduled Scans":
         render_scheduled_scans()
-    elif page == "Search Logs":
+    elif page == "Historique":
         render_search_logs()
     elif page == "Background Searches":
         render_background_searches()
