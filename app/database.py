@@ -1082,7 +1082,14 @@ def save_pages_recherche(
                 existing_page.lien_site = data.get("website", "") or existing_page.lien_site
                 existing_page.lien_fb_ad_library = fb_link
                 existing_page.keywords = merged_keywords
-                existing_page.thematique = web.get("thematique", "") or existing_page.thematique
+                # Classification Gemini prioritaire, sinon classification basique
+                if web.get("gemini_category"):
+                    existing_page.thematique = web.get("gemini_category", "")
+                    existing_page.subcategory = web.get("gemini_subcategory", "")
+                    existing_page.classification_confidence = web.get("gemini_confidence", 0.0)
+                    existing_page.classified_at = scan_time
+                else:
+                    existing_page.thematique = web.get("thematique", "") or existing_page.thematique
                 existing_page.type_produits = web.get("type_produits", "") or existing_page.type_produits
                 existing_page.moyens_paiements = web.get("payments", "") or existing_page.moyens_paiements
                 existing_page.pays = merged_pays
@@ -1114,13 +1121,22 @@ def save_pages_recherche(
                 keywords_str = " | ".join(new_keywords) if new_keywords else ""
                 pays_str = ",".join([c.upper().strip() for c in countries if c])
 
+                # Classification Gemini prioritaire, sinon classification basique
+                thematique_val = web.get("gemini_category") or web.get("thematique", "")
+                subcategory_val = web.get("gemini_subcategory", "")
+                confidence_val = web.get("gemini_confidence", 0.0) if web.get("gemini_category") else None
+                classified_at_val = scan_time if web.get("gemini_category") else None
+
                 new_page = PageRecherche(
                     page_id=str(pid),
                     page_name=data.get("page_name", ""),
                     lien_site=data.get("website", ""),
                     lien_fb_ad_library=fb_link,
                     keywords=keywords_str,
-                    thematique=web.get("thematique", ""),
+                    thematique=thematique_val,
+                    subcategory=subcategory_val,
+                    classification_confidence=confidence_val,
+                    classified_at=classified_at_val,
                     type_produits=web.get("type_produits", ""),
                     moyens_paiements=web.get("payments", ""),
                     pays=pays_str,
@@ -1136,7 +1152,7 @@ def save_pages_recherche(
                     updated_at=scan_time,
                     last_search_log_id=search_log_id,
                     was_created_in_last_search=True,
-                    # Données pour classification Gemini
+                    # Données pour classification Gemini (cache pour futures recherches)
                     site_title=web.get("site_title", "")[:255] if web.get("site_title") else None,
                     site_description=web.get("site_description", ""),
                     site_h1=web.get("site_h1", "")[:200] if web.get("site_h1") else None,

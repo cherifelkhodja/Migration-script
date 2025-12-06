@@ -239,7 +239,7 @@ def execute_background_search(
     print(f"[Search #{search_id}] {len(blacklist_ids)} pages en blacklist")
 
     # ═══ PHASE 1: Recherche par mots-clés (parallèle si proxies) ═══
-    tracker.start_phase(1, "Recherche par mots-clés", total_phases=9)
+    tracker.start_phase(1, "Recherche par mots-clés", total_phases=8)
 
     # Utiliser la recherche parallèle intelligente
     from app.meta_api import search_keywords_parallel
@@ -270,7 +270,7 @@ def execute_background_search(
     tracker.update_metric("total_ads_found", len(all_ads))
 
     # ═══ PHASE 2: Regroupement par page ═══
-    tracker.start_phase(2, "Regroupement par page", total_phases=9)
+    tracker.start_phase(2, "Regroupement par page", total_phases=8)
     pages = {}
     page_ads = defaultdict(list)
     name_counter = defaultdict(Counter)
@@ -337,7 +337,7 @@ def execute_background_search(
         return {"search_log_id": log_id, "status": "no_results", "pages": 0}
 
     # ═══ PHASE 3: Extraction sites web (avec cache) ═══
-    tracker.start_phase(3, "Extraction sites web", total_phases=9)
+    tracker.start_phase(3, "Extraction sites web", total_phases=8)
 
     cached_pages = get_cached_pages_info(db, list(pages_filtered.keys()), cache_days=4)
 
@@ -378,7 +378,7 @@ def execute_background_search(
     tracker.complete_phase(f"{sites_found} sites ({cached_sites} en cache)", stats=phase3_stats)
 
     # ═══ PHASE 4: Détection CMS (parallèle) ═══
-    tracker.start_phase(4, "Détection CMS", total_phases=9)
+    tracker.start_phase(4, "Détection CMS", total_phases=8)
     pages_with_sites = {pid: data for pid, data in pages_filtered.items() if data["website"]}
 
     pages_need_cms = []
@@ -439,7 +439,7 @@ def execute_background_search(
     tracker.complete_phase(f"{len(pages_with_cms)} pages avec CMS sélectionnés", stats=phase4_stats)
 
     # ═══ PHASE 5: Comptage des annonces ═══
-    tracker.start_phase(5, "Comptage des annonces", total_phases=9)
+    tracker.start_phase(5, "Comptage des annonces", total_phases=8)
 
     page_ids_list = list(pages_with_cms.keys())
     batch_size = 10
@@ -505,7 +505,7 @@ def execute_background_search(
         return {"search_log_id": log_id, "status": "no_results", "pages": 0}
 
     # ═══ PHASE 6: Analyse sites web (parallèle) ═══
-    tracker.start_phase(6, "Analyse sites web", total_phases=9)
+    tracker.start_phase(6, "Analyse sites web", total_phases=8)
     web_results = {}
 
     pages_need_analysis = []
@@ -553,15 +553,56 @@ def execute_background_search(
                 if completed % 5 == 0:
                     tracker.update_step("Analyse web", completed, len(pages_need_analysis))
 
+    # ═══ Classification Gemini (intégrée à la phase 6) ═══
+    classified_count = 0
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+
+    if gemini_key and web_results:
+        tracker.update_step("Classification Gemini", 0, 1)
+
+        try:
+            from app.gemini_classifier import classify_pages_batch
+
+            # Préparer les données pour classification
+            pages_to_classify = []
+            for pid, web_data in web_results.items():
+                # Ne classifier que les pages avec du contenu extrait
+                if web_data.get("site_title") or web_data.get("site_description") or web_data.get("site_h1"):
+                    pages_to_classify.append({
+                        "page_id": pid,
+                        "url": pages_final.get(pid, {}).get("website", ""),
+                        "site_title": web_data.get("site_title", ""),
+                        "site_description": web_data.get("site_description", ""),
+                        "site_h1": web_data.get("site_h1", ""),
+                        "site_keywords": web_data.get("site_keywords", "")
+                    })
+
+            if pages_to_classify:
+                # Classifier et stocker les résultats dans web_results
+                classification_results = classify_pages_batch(db, pages_to_classify)
+
+                for pid, classification in classification_results.items():
+                    if pid in web_results:
+                        web_results[pid]["gemini_category"] = classification.get("category", "")
+                        web_results[pid]["gemini_subcategory"] = classification.get("subcategory", "")
+                        web_results[pid]["gemini_confidence"] = classification.get("confidence", 0.0)
+
+                classified_count = len(classification_results)
+                print(f"[Search #{search_id}] Classification Gemini: {classified_count} pages")
+
+        except Exception as e:
+            print(f"[Search #{search_id}] Erreur classification Gemini: {e}")
+
     phase6_stats = {
         "Sites analysés": len(web_results),
         "En cache": cached_analysis,
         "Nouvelles analyses": len(pages_need_analysis),
+        "Classifiées (Gemini)": classified_count,
     }
-    tracker.complete_phase(f"{len(web_results)} sites analysés", stats=phase6_stats)
+    tracker.complete_phase(f"{len(web_results)} sites, {classified_count} classifiées", stats=phase6_stats)
 
     # ═══ PHASE 7: Détection des Winning Ads ═══
-    tracker.start_phase(7, "Détection Winning Ads", total_phases=9)
+    tracker.start_phase(7, "Détection Winning Ads", total_phases=8)
     scan_date = datetime.now()
     winning_ads_data = []
     winning_ads_by_page = {}
@@ -603,7 +644,7 @@ def execute_background_search(
     tracker.update_metric("winning_ads_count", len(winning_ads_data))
 
     # ═══ PHASE 8: Sauvegarde ═══
-    tracker.start_phase(8, "Sauvegarde", total_phases=9)
+    tracker.start_phase(8, "Sauvegarde", total_phases=8)
 
     pages_saved = 0
     suivi_saved = 0
@@ -703,62 +744,6 @@ def execute_background_search(
         print(f"[Search #{search_id}] Erreur sauvegarde: {e}")
         update_search_log(db, log_id, status="failed", error_message=str(e))
         raise
-
-    # ═══ PHASE 9: Classification automatique (Gemini) ═══
-    # Utilise les données pré-extraites en phase 6 pour éviter de re-scraper
-    classified_count = 0
-    gemini_key = os.getenv("GEMINI_API_KEY", "")
-
-    if gemini_key and pages_saved > 0:
-        tracker.start_phase(9, "Classification automatique (Gemini)", total_phases=9)
-
-        try:
-            from app.gemini_classifier import classify_with_extracted_content
-            from app.database import init_default_taxonomy
-
-            # Initialiser la taxonomie si nécessaire
-            init_default_taxonomy(db)
-
-            # Préparer les pages avec les données DÉJÀ EXTRAITES en phase 6
-            pages_to_classify = []
-            for pid, data in pages_final.items():
-                if data.get("website"):
-                    # Récupérer les données extraites pendant l'analyse web (phase 6)
-                    web_data = web_results.get(pid, {})
-                    pages_to_classify.append({
-                        "page_id": pid,
-                        "url": data.get("website", ""),
-                        "site_title": web_data.get("site_title", ""),
-                        "site_description": web_data.get("site_description", ""),
-                        "site_h1": web_data.get("site_h1", ""),
-                        "site_keywords": web_data.get("site_keywords", "")
-                    })
-
-            if pages_to_classify:
-                tracker.update_step("Classification", 1, 1, f"{len(pages_to_classify)} pages")
-
-                # Classifier avec les données pré-extraites (pas de re-scraping!)
-                result = classify_with_extracted_content(db, pages_to_classify)
-
-                classified_count = result.get("classified", 0)
-                errors_count = result.get("errors", 0)
-
-                phase9_stats = {
-                    "Pages à classifier": len(pages_to_classify),
-                    "Pages classifiées": classified_count,
-                    "Erreurs": errors_count,
-                }
-                tracker.complete_phase(f"{classified_count} pages classifiées", stats=phase9_stats)
-                print(f"[Search #{search_id}] Classification: {classified_count}/{len(pages_to_classify)} pages (sans re-scraping)")
-            else:
-                tracker.complete_phase("Aucune page avec URL à classifier", stats={"Pages": 0})
-
-        except Exception as e:
-            print(f"[Search #{search_id}] Erreur classification: {e}")
-            tracker.complete_phase(f"Erreur: {str(e)[:50]}", stats={"Erreur": str(e)[:100]})
-    elif not gemini_key:
-        # Pas de clé Gemini configurée - on skip silencieusement
-        print(f"[Search #{search_id}] Classification skippée (pas de clé GEMINI_API_KEY)")
 
     # Finaliser le log
     api_metrics = api_tracker.get_api_metrics_for_log()

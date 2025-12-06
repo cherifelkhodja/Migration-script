@@ -1114,3 +1114,137 @@ def classify_with_extracted_content(
         "high_confidence": high_confidence,
         "results": all_results
     }
+
+
+def classify_pages_batch(
+    db,
+    pages_data: List[Dict],
+    progress_callback: callable = None
+) -> Dict[str, Dict]:
+    """
+    Classifie des pages et retourne les résultats SANS mise à jour DB.
+    Utilisé pendant la phase 6 pour classifier immédiatement après scraping.
+
+    Args:
+        db: DatabaseManager (pour récupérer la taxonomie)
+        pages_data: Liste de dicts avec:
+            - page_id: ID de la page
+            - site_title: Titre extrait
+            - site_description: Meta description
+            - site_h1: Premier H1
+            - site_keywords: Meta keywords
+        progress_callback: Callback de progression (current, total, message)
+
+    Returns:
+        Dict {page_id: {"category": str, "subcategory": str, "confidence": float}}
+    """
+    from app.database import build_taxonomy_prompt, init_default_taxonomy
+
+    if not pages_data:
+        return {}
+
+    api_key = os.getenv('GEMINI_API_KEY')
+    if not api_key:
+        logger.warning("GEMINI_API_KEY non configurée - classification skippée")
+        return {}
+
+    # Initialiser la taxonomie si nécessaire
+    init_default_taxonomy(db)
+
+    # Récupérer la taxonomie
+    taxonomy_text = build_taxonomy_prompt(db)
+    if not taxonomy_text:
+        logger.warning("Aucune taxonomie configurée - classification skippée")
+        return {}
+
+    # Créer les SiteContent à partir des données extraites
+    scraped_contents = []
+    for page in pages_data:
+        content = SiteContent(
+            page_id=str(page.get('page_id', '')),
+            url=page.get('url', ''),
+            title=page.get('site_title', ''),
+            description=page.get('site_description', ''),
+            h1=page.get('site_h1', ''),
+            keywords=page.get('site_keywords', ''),
+            product_links=[]
+        )
+        scraped_contents.append(content)
+
+    # Filtrer les sites avec du contenu
+    valid_contents = [c for c in scraped_contents if c.has_content()]
+
+    logger.info(f"📊 Classification batch: {len(valid_contents)}/{len(pages_data)} sites avec contenu")
+
+    if not valid_contents:
+        # Retourner classification par défaut pour tous
+        return {
+            str(p.get('page_id', '')): {
+                "category": "Divers & Spécialisé",
+                "subcategory": "Généraliste",
+                "confidence": 0.0
+            }
+            for p in pages_data
+        }
+
+    if progress_callback:
+        progress_callback(0, len(valid_contents), "Classification Gemini...")
+
+    # Classifier par batches
+    classifier = GeminiClassifier(api_key, db=db)
+    all_results = []
+    batch_size = BATCH_SIZE
+
+    for i in range(0, len(valid_contents), batch_size):
+        batch = valid_contents[i:i + batch_size]
+        batch_num = i // batch_size + 1
+        total_batches = (len(valid_contents) + batch_size - 1) // batch_size
+
+        if progress_callback:
+            progress_callback(i, len(valid_contents), f"Gemini batch {batch_num}/{total_batches}")
+
+        try:
+            batch_results = classifier.classify_batch_sync(batch, taxonomy_text)
+            all_results.extend(batch_results)
+        except Exception as e:
+            logger.error(f"Erreur classification batch {batch_num}: {e}")
+            # Classification par défaut en cas d'erreur
+            for content in batch:
+                all_results.append(ClassificationResult(
+                    page_id=content.page_id,
+                    category="Divers & Spécialisé",
+                    subcategory="Généraliste",
+                    confidence_score=0.0,
+                    error=str(e)[:100]
+                ))
+
+        # Respecter le rate limit
+        if i + batch_size < len(valid_contents):
+            time.sleep(RATE_LIMIT_DELAY)
+
+    # Construire le dict de résultats
+    results_dict = {}
+
+    # Ajouter les résultats classifiés
+    for r in all_results:
+        results_dict[r.page_id] = {
+            "category": r.category,
+            "subcategory": r.subcategory,
+            "confidence": r.confidence_score
+        }
+
+    # Ajouter classification par défaut pour les sites sans contenu
+    valid_ids = {c.page_id for c in valid_contents}
+    for content in scraped_contents:
+        if content.page_id not in valid_ids and content.page_id not in results_dict:
+            results_dict[content.page_id] = {
+                "category": "Divers & Spécialisé",
+                "subcategory": "Généraliste",
+                "confidence": 0.0
+            }
+
+    if progress_callback:
+        progress_callback(len(valid_contents), len(valid_contents), f"{len(results_dict)} classifiées")
+
+    logger.info(f"✅ Classification terminée: {len(results_dict)} pages")
+    return results_dict
