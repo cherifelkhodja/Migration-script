@@ -498,6 +498,34 @@ def render_classification_filters(
     return result
 
 
+def render_date_filter(key_prefix: str = "") -> int:
+    """
+    Affiche un filtre de période réutilisable.
+
+    Args:
+        key_prefix: Préfixe pour les clés Streamlit
+
+    Returns:
+        Nombre de jours (0 = tous, sinon 1, 7, 30, 90)
+    """
+    options = {
+        "Toutes les données": 0,
+        "Dernières 24h": 1,
+        "7 derniers jours": 7,
+        "30 derniers jours": 30,
+        "90 derniers jours": 90
+    }
+
+    selected = st.selectbox(
+        "📅 Période",
+        options=list(options.keys()),
+        index=2,  # Par défaut: 30 derniers jours
+        key=f"{key_prefix}_date_filter"
+    )
+
+    return options[selected]
+
+
 def apply_classification_filters(query, filters: dict, model_class):
     """
     Applique les filtres de classification à une requête SQLAlchemy.
@@ -3606,9 +3634,15 @@ def render_watchlists():
         st.warning("Base de données non connectée")
         return
 
-    # Filtres de classification
+    # Filtres de classification + date
     st.markdown("#### 🔍 Filtres")
-    filters = render_classification_filters(db, key_prefix="watchlists", columns=3)
+    filter_col1, filter_col2 = st.columns([3, 1])
+
+    with filter_col1:
+        filters = render_classification_filters(db, key_prefix="watchlists", columns=3)
+
+    with filter_col2:
+        days_filter = render_date_filter(key_prefix="watchlists")
 
     # Afficher les filtres actifs
     active_filters = []
@@ -3618,6 +3652,8 @@ def render_watchlists():
         active_filters.append(f"📂 {filters['subcategory']}")
     if filters.get("pays"):
         active_filters.append(f"🌍 {filters['pays']}")
+    if days_filter > 0:
+        active_filters.append(f"📅 {days_filter}j")
 
     if active_filters:
         st.caption(f"Filtres actifs: {' • '.join(active_filters)}")
@@ -3635,22 +3671,29 @@ def render_watchlists():
                 db, etat="XXL", limit=20,
                 thematique=filters.get("thematique"),
                 subcategory=filters.get("subcategory"),
-                pays=filters.get("pays")
+                pays=filters.get("pays"),
+                days=days_filter if days_filter > 0 else None
             )
             top_pages.extend(search_pages(
                 db, etat="XL", limit=20,
                 thematique=filters.get("thematique"),
                 subcategory=filters.get("subcategory"),
-                pays=filters.get("pays")
+                pays=filters.get("pays"),
+                days=days_filter if days_filter > 0 else None
             ))
 
             if top_pages:
                 # Trier par nombre d'ads décroissant
                 top_pages_sorted = sorted(top_pages, key=lambda x: x.get("nombre_ads_active", 0), reverse=True)[:20]
                 df = pd.DataFrame(top_pages_sorted)
-                cols = ["page_name", "lien_site", "cms", "etat", "nombre_ads_active", "subcategory", "pays"]
+
+                # Formater la date
+                if "dernier_scan" in df.columns:
+                    df["dernier_scan"] = pd.to_datetime(df["dernier_scan"]).dt.strftime("%d/%m/%Y %H:%M")
+
+                cols = ["page_name", "lien_site", "cms", "etat", "nombre_ads_active", "dernier_scan", "subcategory", "pays"]
                 df_display = df[[c for c in cols if c in df.columns]]
-                df_display.columns = ["Page", "Site", "CMS", "État", "Ads Actives", "Catégorie", "Pays"]
+                df_display.columns = ["Page", "Site", "CMS", "État", "Ads Actives", "Dernier Scan", "Catégorie", "Pays"][:len(df_display.columns)]
                 st.dataframe(df_display, use_container_width=True, hide_index=True)
             else:
                 st.info("Aucune page XXL/XL trouvée")
@@ -3663,8 +3706,8 @@ def render_watchlists():
         st.caption("Ads avec le plus grand reach et durée de diffusion")
 
         try:
-            # Récupérer les meilleures winning ads
-            winning_ads = get_winning_ads(db, limit=50, days=30)
+            # Récupérer les meilleures winning ads (utilise le filtre de jours)
+            winning_ads = get_winning_ads(db, limit=50, days=days_filter if days_filter > 0 else 30)
 
             if winning_ads:
                 # Créer un DataFrame pour l'affichage
@@ -3689,11 +3732,16 @@ def render_watchlists():
                             bodies = [bodies] if bodies else []
                     ad_text = bodies[0][:80] + "..." if bodies and len(bodies[0]) > 80 else (bodies[0] if bodies else "N/A")
 
+                    # Formater la date
+                    date_scan = ad.get("date_scan")
+                    date_str = date_scan.strftime("%d/%m/%Y %H:%M") if date_scan else "-"
+
                     ads_data.append({
                         "Page": ad.get("page_name", "N/A"),
                         "Texte Ad": ad_text,
                         "Reach EU": reach_str,
                         "Âge (jours)": ad.get("ad_age_days", 0),
+                        "Date Scan": date_str,
                         "Critères": ad.get("matched_criteria", ""),
                         "Lien": ad.get("ad_snapshot_url", "")
                     })
@@ -3731,8 +3779,8 @@ def render_watchlists():
         st.caption("Classement des pages par nombre de winning ads")
 
         try:
-            # Récupérer le nombre de winning ads par page
-            winning_by_page = get_winning_ads_by_page(db, days=30)
+            # Récupérer le nombre de winning ads par page (utilise le filtre de jours)
+            winning_by_page = get_winning_ads_by_page(db, days=days_filter if days_filter > 0 else 30)
 
             if winning_by_page:
                 # Trier par nombre décroissant
@@ -3745,11 +3793,16 @@ def render_watchlists():
                     page_info = search_pages(db, page_id=page_id, limit=1)
                     if page_info:
                         p = page_info[0]
+                        # Formater la date
+                        dernier_scan = p.get("dernier_scan")
+                        date_str = dernier_scan.strftime("%d/%m/%Y") if dernier_scan else "-"
+
                         pages_data.append({
                             "Page": p.get("page_name", "N/A"),
                             "Site": p.get("lien_site", ""),
                             "Winning Ads": count,
                             "Ads Actives": p.get("nombre_ads_active", 0),
+                            "Dernier Scan": date_str,
                             "CMS": p.get("cms", "N/A"),
                             "État": p.get("etat", "N/A"),
                             "Catégorie": p.get("subcategory", ""),
@@ -3764,6 +3817,7 @@ def render_watchlists():
                             "Site": "",
                             "Winning Ads": count,
                             "Ads Actives": 0,
+                            "Dernier Scan": "-",
                             "CMS": "N/A",
                             "État": "N/A",
                             "Catégorie": "",
@@ -3773,7 +3827,7 @@ def render_watchlists():
                 if pages_data:
                     df = pd.DataFrame(pages_data)
                     # Afficher sans le page_id
-                    display_cols = ["Page", "Site", "Winning Ads", "Ads Actives", "CMS", "État", "Catégorie"]
+                    display_cols = ["Page", "Site", "Winning Ads", "Ads Actives", "Dernier Scan", "CMS", "État", "Catégorie"]
                     st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
 
                     # Top 3 en métrique
@@ -6209,7 +6263,7 @@ def render_search_logs():
         else:
             date_str = "-"
 
-        with st.expander(f"{status_emoji} **{date_str}** - {keywords[:50]}{'...' if len(keywords) > 50 else ''} ({duration_str})"):
+        with st.expander(f"{status_emoji} **#{log_id}** - {date_str} - {keywords[:50]}{'...' if len(keywords) > 50 else ''} ({duration_str})"):
             # Métriques principales
             m1, m2, m3, m4 = st.columns(4)
             with m1:

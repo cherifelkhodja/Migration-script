@@ -1202,6 +1202,8 @@ def search_pages(
     thematique: str = None,
     subcategory: str = None,
     pays: str = None,
+    page_id: str = None,
+    days: int = None,
     limit: int = 100
 ) -> List[Dict]:
     """
@@ -1215,11 +1217,17 @@ def search_pages(
         thematique: Filtre par catégorie principale
         subcategory: Filtre par sous-catégorie
         pays: Filtre par pays (ex: "FR", recherche dans le champ multi-valeurs)
+        page_id: Filtre par page_id spécifique
+        days: Filtre par période (derniers X jours)
         limit: Nombre max de résultats
     """
+    from datetime import timedelta
+
     with db.get_session() as session:
         query = session.query(PageRecherche)
 
+        if page_id:
+            query = query.filter(PageRecherche.page_id == page_id)
         if cms:
             query = query.filter(PageRecherche.cms == cms)
         if etat:
@@ -1242,6 +1250,9 @@ def search_pages(
         if pays:
             # Le champ pays est multi-valeurs "FR,DE,ES", on cherche avec LIKE
             query = query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+        if days:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            query = query.filter(PageRecherche.dernier_scan >= cutoff)
 
         pages = query.order_by(
             PageRecherche.nombre_ads_active.desc()
@@ -1264,7 +1275,8 @@ def search_pages(
                 "pays": p.pays,
                 "template": p.template,
                 "devise": p.devise,
-                "dernier_scan": p.dernier_scan
+                "dernier_scan": p.dernier_scan,
+                "updated_at": p.updated_at
             }
             for p in pages
         ]
@@ -1749,7 +1761,8 @@ def save_winning_ads(
     pages_final: Dict = None
 ) -> tuple:
     """
-    Sauvegarde les winning ads dans la base de données (avec déduplication)
+    Sauvegarde les winning ads dans la base de données.
+    Si une ad existe déjà, met à jour ses données au lieu de créer un doublon.
 
     Args:
         db: Instance DatabaseManager
@@ -1757,28 +1770,21 @@ def save_winning_ads(
         pages_final: Dictionnaire des pages (optionnel, pour récupérer le website)
 
     Returns:
-        Tuple (nombre sauvegardées, nombre de doublons ignorés)
+        Tuple (nombre nouvelles, nombre mises à jour)
     """
     if not winning_ads_data:
         return (0, 0)
 
     scan_time = datetime.utcnow()
-    saved_count = 0
-    skipped_count = 0
+    new_count = 0
+    updated_count = 0
 
     with db.get_session() as session:
-        # Récupérer tous les ad_id existants pour déduplication
-        existing_ad_ids = set(
-            row[0] for row in session.query(WinningAds.ad_id).all()
-        )
-
         for data in winning_ads_data:
             ad = data.get("ad", {})
             ad_id = str(ad.get("id", ""))
 
-            # Vérifier si l'ad existe déjà (déduplication)
-            if ad_id in existing_ad_ids:
-                skipped_count += 1
+            if not ad_id:
                 continue
 
             page_id = str(data.get("page_id", ad.get("page_id", "")))
@@ -1800,26 +1806,46 @@ def save_winning_ads(
                 except (ValueError, AttributeError):
                     pass
 
-            winning_entry = WinningAds(
-                ad_id=ad_id,
-                page_id=page_id,
-                page_name=ad.get("page_name", ""),
-                ad_creation_time=ad_creation,
-                ad_age_days=data.get("age_days"),
-                eu_total_reach=data.get("reach"),
-                matched_criteria=data.get("matched_criteria", ""),
-                ad_creative_bodies=to_str_list(ad.get("ad_creative_bodies")),
-                ad_creative_link_captions=to_str_list(ad.get("ad_creative_link_captions")),
-                ad_creative_link_titles=to_str_list(ad.get("ad_creative_link_titles")),
-                ad_snapshot_url=ad.get("ad_snapshot_url", ""),
-                lien_site=website,
-                date_scan=scan_time
-            )
-            session.add(winning_entry)
-            existing_ad_ids.add(ad_id)  # Ajouter au set pour éviter doublons dans le même batch
-            saved_count += 1
+            # Vérifier si l'ad existe déjà
+            existing = session.query(WinningAds).filter(WinningAds.ad_id == ad_id).first()
 
-    return (saved_count, skipped_count)
+            if existing:
+                # Mettre à jour l'ad existante
+                existing.page_id = page_id
+                existing.page_name = ad.get("page_name", existing.page_name)
+                existing.ad_creation_time = ad_creation or existing.ad_creation_time
+                existing.ad_age_days = data.get("age_days", existing.ad_age_days)
+                existing.eu_total_reach = data.get("reach", existing.eu_total_reach)
+                existing.matched_criteria = data.get("matched_criteria", existing.matched_criteria)
+                existing.ad_creative_bodies = to_str_list(ad.get("ad_creative_bodies")) or existing.ad_creative_bodies
+                existing.ad_creative_link_captions = to_str_list(ad.get("ad_creative_link_captions")) or existing.ad_creative_link_captions
+                existing.ad_creative_link_titles = to_str_list(ad.get("ad_creative_link_titles")) or existing.ad_creative_link_titles
+                existing.ad_snapshot_url = ad.get("ad_snapshot_url", existing.ad_snapshot_url)
+                if website:
+                    existing.lien_site = website
+                existing.date_scan = scan_time  # Mettre à jour la date du scan
+                updated_count += 1
+            else:
+                # Créer une nouvelle entrée
+                winning_entry = WinningAds(
+                    ad_id=ad_id,
+                    page_id=page_id,
+                    page_name=ad.get("page_name", ""),
+                    ad_creation_time=ad_creation,
+                    ad_age_days=data.get("age_days"),
+                    eu_total_reach=data.get("reach"),
+                    matched_criteria=data.get("matched_criteria", ""),
+                    ad_creative_bodies=to_str_list(ad.get("ad_creative_bodies")),
+                    ad_creative_link_captions=to_str_list(ad.get("ad_creative_link_captions")),
+                    ad_creative_link_titles=to_str_list(ad.get("ad_creative_link_titles")),
+                    ad_snapshot_url=ad.get("ad_snapshot_url", ""),
+                    lien_site=website,
+                    date_scan=scan_time
+                )
+                session.add(winning_entry)
+                new_count += 1
+
+    return (new_count, updated_count)
 
 
 def get_winning_ads(
