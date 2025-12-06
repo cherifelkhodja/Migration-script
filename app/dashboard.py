@@ -2552,15 +2552,15 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
         return
 
     # ═══ PHASE 3: Vérification cache + Extraction sites web ═══
-    tracker.start_phase(3, "🌐 Extraction sites web (avec cache)", total_phases=8)
+    tracker.start_phase(3, "🌐 Extraction sites web", total_phases=8)
 
-    # Récupérer les infos en cache pour toutes les pages
+    # Récupérer les pages existantes en BDD (dernier scan < 1 jour)
     cached_pages = {}
     if db:
-        cached_pages = get_cached_pages_info(db, list(pages_filtered.keys()), cache_days=4)
-        cached_count = sum(1 for c in cached_pages.values() if not c.get("needs_rescan"))
-        if cached_count > 0:
-            st.info(f"💾 {cached_count} pages en cache (scan < 4 jours)")
+        cached_pages = get_cached_pages_info(db, list(pages_filtered.keys()), cache_days=1)
+        valid_cache = sum(1 for c in cached_pages.values() if not c.get("needs_rescan"))
+        if valid_cache > 0:
+            st.info(f"💾 {valid_cache} pages en BDD (scan < 1 jour)")
 
     # Extraire les URLs pour les pages non cachées ou sans site
     for i, (pid, data) in enumerate(pages_filtered.items()):
@@ -2743,68 +2743,45 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
         st.warning("Aucune page finale trouvée")
         return
 
-    # ═══ PHASE 6: Analyse des sites web (multithreaded + cache) + Classification Gemini ═══
+    # ═══ PHASE 6: Analyse sites web + Classification Gemini ═══
     tracker.start_phase(6, "🔬 Analyse sites web + Classification", total_phases=8)
     web_results = {}
 
-    # Séparer les pages à analyser vs celles en cache
+    # Logique simplifiée:
+    # - Si page en BDD avec dernier_scan < 1 jour ET thématique → utiliser cache
+    # - Sinon → analyser le site et classifier
     pages_need_analysis = []
+    pages_cached = 0
+
     for pid, data in pages_final.items():
         cached = cached_pages.get(str(pid), {})
 
-        # Page en cache = existe déjà en BDD
-        if not cached.get("needs_rescan") and cached.get("nombre_produits") is not None:
-            # Skip classification SEULEMENT si la page a déjà une thématique
-            has_thematique = bool(cached.get("thematique"))
+        # Condition simple: en cache valide (< 1 jour) ET a une thématique
+        is_valid_cache = (
+            not cached.get("needs_rescan") and
+            cached.get("nombre_produits") is not None and
+            bool(cached.get("thematique"))
+        )
 
-            # Vérifier si la page a du contenu pour classification
-            has_site_content = bool(
-                cached.get("site_title") or
-                cached.get("site_description") or
-                cached.get("site_h1")
-            )
-
-            # Si pas de thématique ET pas de contenu site -> re-analyser pour classifier
-            if not has_thematique and not has_site_content and data.get("website"):
-                pages_need_analysis.append((pid, data))
-                continue
-
+        if is_valid_cache:
+            # Utiliser les données en cache - pas besoin de ré-analyser
             web_results[pid] = {
                 "product_count": cached.get("nombre_produits", 0),
                 "theme": cached.get("template", ""),
                 "category": cached.get("thematique", ""),
                 "currency_from_site": cached.get("devise", ""),
                 "_from_cache": True,
-                "_skip_classification": has_thematique,  # Skip seulement si déjà classifiée
-                # Récupérer le contenu du site pour classification si pas de thématique
-                "site_title": cached.get("site_title", "") if not has_thematique else "",
-                "site_description": cached.get("site_description", "") if not has_thematique else "",
-                "site_h1": cached.get("site_h1", "") if not has_thematique else "",
-                "site_keywords": cached.get("site_keywords", "") if not has_thematique else ""
+                "_skip_classification": True  # Déjà classifiée
             }
             if cached.get("devise") and not data.get("currency"):
                 data["currency"] = cached["devise"]
+            pages_cached += 1
         elif data.get("website"):
-            # Nouvelle page - nécessite analyse ET classification
+            # Analyser le site (nouvelle page OU cache expiré OU pas de thématique)
             pages_need_analysis.append((pid, data))
 
-    cached_analysis = len(web_results)
-
-    # Log détaillé du cache
-    cache_with_thematique = sum(1 for w in web_results.values() if w.get("_skip_classification"))
-    cache_without_thematique = sum(1 for w in web_results.values() if not w.get("_skip_classification"))
-    cache_with_content = sum(1 for w in web_results.values()
-                            if not w.get("_skip_classification") and
-                            (w.get("site_title") or w.get("site_description") or w.get("site_h1")))
-
-    print(f"[UI Search] Cache: {cached_analysis} pages ({cache_with_thematique} avec thématique, {cache_without_thematique} sans, {cache_with_content} avec contenu)")
-    print(f"[UI Search] À analyser: {len(pages_need_analysis)} pages")
-
-    # Log les URLs à analyser
-    for pid, data in pages_need_analysis[:5]:  # Max 5 pour pas spammer
-        print(f"[UI Search] → Analyse requise: {pid} | url={data.get('website', 'VIDE')[:60]}")
-
-    st.info(f"🔬 {len(pages_need_analysis)} sites à analyser ({cached_analysis} en cache)")
+    print(f"[UI Search] {pages_cached} pages en cache valide, {len(pages_need_analysis)} à analyser")
+    st.info(f"🔬 {len(pages_need_analysis)} sites à analyser ({pages_cached} en cache valide)")
 
     # Fonction worker pour analyse parallèle
     def analyze_web_worker(pid_data):
@@ -2850,94 +2827,57 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
                 if completed % 5 == 0:
                     tracker.update_step("Analyse web", completed, len(pages_need_analysis))
 
-    # ═══ Classification Gemini (pages sans thématique) ═══
+    # ═══ Classification Gemini (pages nouvellement analysées) ═══
     classified_count = 0
     gemini_key = os.getenv("GEMINI_API_KEY", "")
 
-    # Compter les pages à classifier (nouvelles OU existantes sans thématique)
-    pages_to_classify_count = sum(1 for w in web_results.values() if not w.get("_skip_classification"))
-    pages_with_thematique = sum(1 for w in web_results.values() if w.get("_skip_classification"))
+    # Préparer les pages à classifier (celles analysées avec du contenu)
+    pages_to_classify_data = []
+    for pid, web_data in web_results.items():
+        # Skip les pages en cache (déjà classifiées)
+        if web_data.get("_skip_classification"):
+            continue
+        # Classifier seulement si on a du contenu
+        if web_data.get("site_title") or web_data.get("site_description") or web_data.get("site_h1"):
+            pages_to_classify_data.append({
+                "page_id": pid,
+                "url": pages_final.get(pid, {}).get("website", ""),
+                "site_title": web_data.get("site_title", ""),
+                "site_description": web_data.get("site_description", ""),
+                "site_h1": web_data.get("site_h1", ""),
+                "site_keywords": web_data.get("site_keywords", "")
+            })
 
-    # Compter les pages avec contenu pour classification
-    pages_with_content = sum(1 for w in web_results.values()
-                            if not w.get("_skip_classification") and
-                            (w.get("site_title") or w.get("site_description") or w.get("site_h1")))
+    print(f"[UI Search] Classification: {len(pages_to_classify_data)} pages avec contenu à classifier")
 
-    # Afficher diagnostic classification
-    with st.expander("🔍 Diagnostic Classification", expanded=False):
-        st.write(f"**Clé Gemini:** {'✅ Configurée' if gemini_key else '❌ Manquante'}")
-        st.write(f"**Pages totales:** {len(web_results)}")
-        st.write(f"**Déjà classifiées (thématique):** {pages_with_thematique}")
-        st.write(f"**À classifier:** {pages_to_classify_count}")
-        st.write(f"**Avec contenu site:** {pages_with_content}")
-
-        # Montrer quelques exemples de pages sans thématique
-        if pages_to_classify_count > 0:
-            st.write("---")
-            st.write("**Exemples de pages à classifier:**")
-            count = 0
-            for pid, web_data in web_results.items():
-                if not web_data.get("_skip_classification") and count < 5:
-                    has_content = bool(web_data.get("site_title") or web_data.get("site_description") or web_data.get("site_h1"))
-                    st.write(f"- Page {pid}: content={'✅' if has_content else '❌'} | title='{web_data.get('site_title', '')[:30]}...'")
-                    count += 1
-
-    print(f"[UI Search] Classification: {pages_to_classify_count} pages à classifier, {pages_with_thematique} déjà classifiées, {pages_with_content} avec contenu")
-
-    if gemini_key and pages_to_classify_count > 0:
+    if gemini_key and pages_to_classify_data:
         tracker.update_step("Classification Gemini", 0, 1)
+        st.info(f"🏷️ Classification de {len(pages_to_classify_data)} pages avec Gemini...")
 
         try:
             from app.gemini_classifier import classify_pages_batch
+            classification_results = classify_pages_batch(db, pages_to_classify_data)
 
-            # Préparer les données pour classification - pages sans thématique
-            pages_to_classify = []
-            for pid, web_data in web_results.items():
-                # Skip les pages avec thématique (déjà classifiées)
-                if web_data.get("_skip_classification"):
-                    continue
-                # Ne classifier que les pages avec du contenu extrait
-                if web_data.get("site_title") or web_data.get("site_description") or web_data.get("site_h1"):
-                    pages_to_classify.append({
-                        "page_id": pid,
-                        "url": pages_final.get(pid, {}).get("website", ""),
-                        "site_title": web_data.get("site_title", ""),
-                        "site_description": web_data.get("site_description", ""),
-                        "site_h1": web_data.get("site_h1", ""),
-                        "site_keywords": web_data.get("site_keywords", "")
-                    })
-                else:
-                    print(f"[UI Search] Page {pid} sans contenu pour classification")
+            for pid, classification in classification_results.items():
+                if pid in web_results:
+                    web_results[pid]["gemini_category"] = classification.get("category", "")
+                    web_results[pid]["gemini_subcategory"] = classification.get("subcategory", "")
+                    web_results[pid]["gemini_confidence"] = classification.get("confidence", 0.0)
 
-            if pages_to_classify:
-                st.info(f"🏷️ Classification de {len(pages_to_classify)} pages avec Gemini...")
-                # Classifier et stocker les résultats dans web_results
-                classification_results = classify_pages_batch(db, pages_to_classify)
-
-                for pid, classification in classification_results.items():
-                    if pid in web_results:
-                        web_results[pid]["gemini_category"] = classification.get("category", "")
-                        web_results[pid]["gemini_subcategory"] = classification.get("subcategory", "")
-                        web_results[pid]["gemini_confidence"] = classification.get("confidence", 0.0)
-
-                classified_count = len(classification_results)
-                st.success(f"✅ {classified_count} pages classifiées")
-            else:
-                print(f"[UI Search] Aucune page avec contenu pour classification")
+            classified_count = len(classification_results)
+            st.success(f"✅ {classified_count} pages classifiées")
 
         except Exception as e:
             st.warning(f"⚠️ Classification Gemini: {str(e)[:100]}")
+    elif not gemini_key and pages_to_classify_data:
+        st.warning("⚠️ Clé Gemini non configurée - classification ignorée")
 
     # Stats détaillées Phase 6
-    total_products = sum(r.get("product_count", 0) for r in web_results.values())
-    avg_products = total_products // len(web_results) if web_results else 0
-
     phase6_stats = {
-        "Sites analysés": len(web_results),
-        "En cache": cached_analysis,
-        "Nouvelles analyses": len(pages_need_analysis),
+        "Sites totaux": len(web_results),
+        "En cache (< 1 jour)": pages_cached,
+        "Analysés": len(pages_need_analysis),
         "Classifiées (Gemini)": classified_count,
-        "Total produits": total_products,
     }
     tracker.complete_phase(f"{len(web_results)} sites, {classified_count} classifiées", stats=phase6_stats)
 
