@@ -2234,6 +2234,7 @@ def render_preview_results():
     db = get_database()
     pages_final = st.session_state.get("pages_final", {})
     web_results = st.session_state.get("web_results", {})
+    winning_ads_data = st.session_state.get("winning_ads_data", [])
     countries = st.session_state.get("countries", ["FR"])
 
     if not pages_final:
@@ -2243,39 +2244,93 @@ def render_preview_results():
             st.rerun()
         return
 
-    st.info(f"📊 {len(pages_final)} pages trouvées")
+    # Compter winning ads par page
+    winning_by_page = {}
+    for w in winning_ads_data:
+        wpid = w.get("page_id")
+        winning_by_page[wpid] = winning_by_page.get(wpid, 0) + 1
 
-    # Afficher les pages avec options
-    for pid, data in list(pages_final.items()):
+    # Statistiques globales
+    total_winning = len(winning_ads_data)
+    total_ads = sum(d.get('ads_active_total', 0) for d in pages_final.values())
+
+    col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+    col_stat1.metric("📊 Pages", len(pages_final))
+    col_stat2.metric("📢 Ads totales", total_ads)
+    col_stat3.metric("🏆 Winning Ads", total_winning)
+    col_stat4.metric("📈 Pages avec Winning", len(winning_by_page))
+
+    st.markdown("---")
+
+    # Préparer les données pour le tableau
+    preview_data = []
+    for pid, data in pages_final.items():
         web = web_results.get(pid, {})
-        website = data.get('website', '')
-        fb_link = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={countries[0]}&view_all_page_id={pid}"
-        winning_count = data.get('winning_ads_count', 0)
+        winning_count = winning_by_page.get(pid, 0)
 
-        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+        preview_data.append({
+            "Page ID": str(pid),
+            "Nom": data.get('page_name', 'N/A'),
+            "Site": data.get('website', ''),
+            "CMS": data.get('cms', 'N/A'),
+            "État": data.get('etat', 'N/A'),
+            "Ads": data.get('ads_active_total', 0),
+            "🏆": winning_count,
+            "Produits": web.get('product_count', 0),
+            "Thématique": web.get('category', '') or web.get('gemini_category', ''),
+            "Classification": web.get('gemini_subcategory', ''),
+        })
 
-        with col1:
-            winning_badge = f" 🏆 {winning_count}" if winning_count > 0 else ""
-            st.write(f"**{data.get('page_name', 'N/A')}** - {data.get('ads_active_total', 0)} ads{winning_badge}")
-            st.caption(f"CMS: {data.get('cms', 'N/A')} | Produits: {web.get('product_count', 'N/A')}")
+    # Afficher en tableau
+    if preview_data:
+        df = pd.DataFrame(preview_data)
 
-        with col2:
-            if website:
-                st.link_button("🌐 Site", website)
-            else:
-                st.caption("Pas de site")
+        # Formater état avec badges
+        df["État"] = df["État"].apply(lambda x: format_state_for_df(x) if x else "")
 
-        with col3:
-            st.link_button("📘 Ads", fb_link)
+        st.dataframe(
+            df,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Site": st.column_config.LinkColumn("Site"),
+                "Page ID": st.column_config.TextColumn("Page ID", width="small"),
+            }
+        )
 
-        with col4:
-            if st.button("🚫", key=f"bl_preview_{pid}", help="Blacklister"):
-                if db and add_to_blacklist(db, pid, data.get("page_name", ""), "Blacklisté depuis aperçu"):
-                    # Retirer de pages_final
-                    del st.session_state.pages_final[pid]
-                    if pid in st.session_state.web_results:
-                        del st.session_state.web_results[pid]
-                    st.rerun()
+    st.markdown("---")
+
+    # Détails par page (expandable)
+    with st.expander("📋 Détails par page (actions individuelles)"):
+        for pid, data in list(pages_final.items()):
+            web = web_results.get(pid, {})
+            website = data.get('website', '')
+            fb_link = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={countries[0]}&view_all_page_id={pid}"
+            winning_count = winning_by_page.get(pid, 0)
+
+            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+
+            with col1:
+                winning_badge = f" 🏆 {winning_count}" if winning_count > 0 else ""
+                st.write(f"**{data.get('page_name', 'N/A')}** - {data.get('ads_active_total', 0)} ads{winning_badge}")
+                st.caption(f"ID: {pid} | CMS: {data.get('cms', 'N/A')} | État: {data.get('etat', 'N/A')} | Produits: {web.get('product_count', 'N/A')}")
+
+            with col2:
+                if website:
+                    st.link_button("🌐 Site", website)
+                else:
+                    st.caption("Pas de site")
+
+            with col3:
+                st.link_button("📘 Ads", fb_link)
+
+            with col4:
+                if st.button("🚫", key=f"bl_preview_{pid}", help="Blacklister"):
+                    if db and add_to_blacklist(db, pid, data.get("page_name", ""), "Blacklisté depuis aperçu"):
+                        del st.session_state.pages_final[pid]
+                        if pid in st.session_state.web_results:
+                            del st.session_state.web_results[pid]
+                        st.rerun()
 
     st.markdown("---")
 
