@@ -145,74 +145,307 @@ def detect_cms_from_url(url: str) -> Dict[str, any]:
             return result
 
         # ═══════════════════════════════════════════════════════════════════
-        # DÉTECTION AUTRES CMS
+        # DÉTECTION AUTRES CMS (ordre de priorité par fréquence)
         # ═══════════════════════════════════════════════════════════════════
 
-        # WooCommerce / WordPress
-        woo_patterns = ["woocommerce", "wp-content", "wp-includes", "wordpress",
-                        "wc-ajax", "add_to_cart", "cart-contents"]
-        if any(p in html for p in woo_patterns):
-            if "woocommerce" in html or "wc-ajax" in html:
-                result["cms"] = "WooCommerce"
-            else:
-                result["cms"] = "WordPress"
+        # WooCommerce (WordPress + plugin e-commerce)
+        woo_strong = ["woocommerce", "wc-ajax", "wc-add-to-cart", "wc_cart", "wc-blocks"]
+        woo_medium = ["wp-content/plugins/woocommerce", "add_to_cart_button", "cart-contents"]
+        if any(p in html for p in woo_strong):
+            result["cms"] = "WooCommerce"
+            result["confidence"] = 90
+            return result
+        if any(p in html for p in woo_medium):
+            result["cms"] = "WooCommerce"
+            result["confidence"] = 75
+            return result
+
+        # WordPress (sans WooCommerce)
+        wp_patterns = ["wp-content", "wp-includes", "wordpress", "wp-json", "/wp-admin",
+                       'name="generator" content="wordpress', "powered by wordpress"]
+        if any(p in html for p in wp_patterns):
+            result["cms"] = "WordPress"
             result["confidence"] = 80
             return result
 
         # PrestaShop
-        presta_patterns = ["prestashop", "presta", "ps_", "prestashop-page"]
-        if any(p in html for p in presta_patterns):
+        presta_strong = ["prestashop", "/modules/ps_", "prestashop-page", "id_product="]
+        presta_medium = ["ps_shoppingcart", "ps_customersignin", "blockcart", "/themes/classic/"]
+        if any(p in html for p in presta_strong):
             result["cms"] = "PrestaShop"
-            result["confidence"] = 80
+            result["confidence"] = 90
+            return result
+        if any(p in html for p in presta_medium):
+            result["cms"] = "PrestaShop"
+            result["confidence"] = 75
             return result
 
-        # Magento
-        magento_patterns = ["magento", "mage-", "x-magento", "varien"]
-        if any(p in html for p in magento_patterns) or "x-magento" in str(headers_dict):
+        # Magento / Adobe Commerce
+        magento_strong = ["magento", "mage-", "x-magento", "/static/frontend/magento"]
+        magento_medium = ["varien", "mage/cookies", "checkout/cart", "catalogsearch/result"]
+        if any(p in html for p in magento_strong) or "x-magento" in str(headers_dict):
             result["cms"] = "Magento"
-            result["confidence"] = 80
+            result["confidence"] = 90
+            return result
+        if any(p in html for p in magento_medium):
+            result["cms"] = "Magento"
+            result["confidence"] = 70
             return result
 
         # Wix
-        if "wixstatic.com" in html or "wix.com" in html:
+        wix_patterns = ["wixstatic.com", "wix.com", "parastorage.com", "_wix_browser_sess",
+                        "wix-code-sdk", "wixapps.net"]
+        if any(p in html for p in wix_patterns):
             result["cms"] = "Wix"
             result["confidence"] = 90
             return result
 
         # Squarespace
-        if "squarespace.com" in html or "static1.squarespace" in html:
+        squarespace_patterns = ["squarespace.com", "static1.squarespace", "squarespace-cdn",
+                                 "sqs-analytics", 'data-squarespace-']
+        if any(p in html for p in squarespace_patterns):
             result["cms"] = "Squarespace"
             result["confidence"] = 90
             return result
 
         # BigCommerce
-        if "bigcommerce" in html or "cdn.bcapp" in html:
+        bigcommerce_patterns = ["bigcommerce", "cdn.bcapp", "bcappcdn", "bigcommerce.com",
+                                 "stencil-", "cornerstone-"]
+        if any(p in html for p in bigcommerce_patterns):
             result["cms"] = "BigCommerce"
-            result["confidence"] = 80
+            result["confidence"] = 85
             return result
 
         # Webflow
-        if "webflow" in html:
+        webflow_patterns = ["webflow.com", "assets.website-files.com", 'data-wf-site',
+                            "webflow-production", "w-commerce"]
+        if any(p in html for p in webflow_patterns):
             result["cms"] = "Webflow"
-            result["confidence"] = 80
+            result["confidence"] = 90
             return result
 
         # Shopware
-        if "shopware" in html:
+        shopware_patterns = ["shopware", "sw-cms-", "sw-blocks", "/frontend/", "shopware.com"]
+        if any(p in html for p in shopware_patterns):
             result["cms"] = "Shopware"
-            result["confidence"] = 80
+            result["confidence"] = 85
             return result
 
         # OpenCart
-        if "opencart" in html or "route=product" in html:
+        opencart_patterns = ["opencart", "route=product", "route=checkout", "index.php?route="]
+        if any(p in html for p in opencart_patterns):
             result["cms"] = "OpenCart"
-            result["confidence"] = 70
+            result["confidence"] = 80
             return result
 
-        # Salesforce Commerce Cloud
-        if "demandware" in html or "salesforce" in html.lower():
+        # Salesforce Commerce Cloud (Demandware)
+        sfcc_patterns = ["demandware", "dwanalytics", "dw/shop", "sfcc", "salesforce commerce"]
+        if any(p in html for p in sfcc_patterns):
             result["cms"] = "Salesforce Commerce"
-            result["confidence"] = 70
+            result["confidence"] = 85
+            return result
+
+        # WiziShop (français)
+        wizishop_patterns = ["wizishop", "wizi-", "cdn.wizishop.com"]
+        if any(p in html for p in wizishop_patterns):
+            result["cms"] = "WiziShop"
+            result["confidence"] = 90
+            return result
+
+        # Oxatis (français)
+        oxatis_patterns = ["oxatis", "cdn.oxatis.com", "oxatis-cdn"]
+        if any(p in html for p in oxatis_patterns):
+            result["cms"] = "Oxatis"
+            result["confidence"] = 90
+            return result
+
+        # Ecwid
+        ecwid_patterns = ["ecwid", "app.ecwid.com", "ecwid_product"]
+        if any(p in html for p in ecwid_patterns):
+            result["cms"] = "Ecwid"
+            result["confidence"] = 90
+            return result
+
+        # Jimdo
+        jimdo_patterns = ["jimdo", "jimdocdn", "a.jimdo.com"]
+        if any(p in html for p in jimdo_patterns):
+            result["cms"] = "Jimdo"
+            result["confidence"] = 90
+            return result
+
+        # Drupal Commerce
+        drupal_patterns = ["drupal", "/sites/default/files", "drupal.org", "/core/misc/drupal"]
+        if any(p in html for p in drupal_patterns):
+            result["cms"] = "Drupal"
+            result["confidence"] = 80
+            return result
+
+        # Odoo
+        odoo_patterns = ["odoo", "/web/static/", "/website/static/", "odoo.com"]
+        if any(p in html for p in odoo_patterns):
+            result["cms"] = "Odoo"
+            result["confidence"] = 80
+            return result
+
+        # Typo3
+        typo3_patterns = ["typo3", "typo3conf", "typo3temp"]
+        if any(p in html for p in typo3_patterns):
+            result["cms"] = "Typo3"
+            result["confidence"] = 80
+            return result
+
+        # Joomla
+        joomla_patterns = ["joomla", "/components/com_", "/media/jui/", "option=com_"]
+        if any(p in html for p in joomla_patterns):
+            result["cms"] = "Joomla"
+            result["confidence"] = 80
+            return result
+
+        # Weebly
+        weebly_patterns = ["weebly", "weeblycloud", "editmysite.com"]
+        if any(p in html for p in weebly_patterns):
+            result["cms"] = "Weebly"
+            result["confidence"] = 90
+            return result
+
+        # Volusion
+        volusion_patterns = ["volusion", "vspfiles", "/v/vspfiles/"]
+        if any(p in html for p in volusion_patterns):
+            result["cms"] = "Volusion"
+            result["confidence"] = 85
+            return result
+
+        # 3dcart / Shift4Shop
+        dcart_patterns = ["3dcart", "shift4shop", "3dcartstores"]
+        if any(p in html for p in dcart_patterns):
+            result["cms"] = "Shift4Shop"
+            result["confidence"] = 85
+            return result
+
+        # Snipcart
+        snipcart_patterns = ["snipcart", "cdn.snipcart.com", "snipcart-add-item"]
+        if any(p in html for p in snipcart_patterns):
+            result["cms"] = "Snipcart"
+            result["confidence"] = 90
+            return result
+
+        # Gumroad
+        gumroad_patterns = ["gumroad", "gumroad.com", "gumroad-overlay"]
+        if any(p in html for p in gumroad_patterns):
+            result["cms"] = "Gumroad"
+            result["confidence"] = 90
+            return result
+
+        # Kajabi
+        kajabi_patterns = ["kajabi", "kajabi-cdn", "app.kajabi.com"]
+        if any(p in html for p in kajabi_patterns):
+            result["cms"] = "Kajabi"
+            result["confidence"] = 90
+            return result
+
+        # Teachable
+        teachable_patterns = ["teachable", "teachablecdn", "app.teachable.com"]
+        if any(p in html for p in teachable_patterns):
+            result["cms"] = "Teachable"
+            result["confidence"] = 90
+            return result
+
+        # Thinkific
+        thinkific_patterns = ["thinkific", "thinkific.com", "thinkific-cdn"]
+        if any(p in html for p in thinkific_patterns):
+            result["cms"] = "Thinkific"
+            result["confidence"] = 90
+            return result
+
+        # Podia
+        podia_patterns = ["podia", "app.podia.com", "podia-cdn"]
+        if any(p in html for p in podia_patterns):
+            result["cms"] = "Podia"
+            result["confidence"] = 90
+            return result
+
+        # Systeme.io
+        systeme_patterns = ["systeme.io", "systemeio", "app.systeme.io"]
+        if any(p in html for p in systeme_patterns):
+            result["cms"] = "Systeme.io"
+            result["confidence"] = 90
+            return result
+
+        # ClickFunnels
+        clickfunnels_patterns = ["clickfunnels", "cf-styles", "cf2.com"]
+        if any(p in html for p in clickfunnels_patterns):
+            result["cms"] = "ClickFunnels"
+            result["confidence"] = 90
+            return result
+
+        # Kartra
+        kartra_patterns = ["kartra", "app.kartra.com", "kartra-cdn"]
+        if any(p in html for p in kartra_patterns):
+            result["cms"] = "Kartra"
+            result["confidence"] = 90
+            return result
+
+        # ThriveCart
+        thrivecart_patterns = ["thrivecart", "thrivecart.com"]
+        if any(p in html for p in thrivecart_patterns):
+            result["cms"] = "ThriveCart"
+            result["confidence"] = 90
+            return result
+
+        # Samcart
+        samcart_patterns = ["samcart", "app.samcart.com"]
+        if any(p in html for p in samcart_patterns):
+            result["cms"] = "SamCart"
+            result["confidence"] = 90
+            return result
+
+        # Tilda
+        tilda_patterns = ["tilda.cc", "tildacdn", "tilda-"]
+        if any(p in html for p in tilda_patterns):
+            result["cms"] = "Tilda"
+            result["confidence"] = 90
+            return result
+
+        # Duda
+        duda_patterns = ["duda.co", "dudaone", "cdn.duda.co"]
+        if any(p in html for p in duda_patterns):
+            result["cms"] = "Duda"
+            result["confidence"] = 90
+            return result
+
+        # GoDaddy Website Builder
+        godaddy_patterns = ["godaddy", "img.godaddy.com", "godaddy-website-builder"]
+        if any(p in html for p in godaddy_patterns):
+            result["cms"] = "GoDaddy"
+            result["confidence"] = 85
+            return result
+
+        # HubSpot CMS
+        hubspot_patterns = ["hubspot", "hs-scripts", "hscta", "hubspotusercontent"]
+        if any(p in html for p in hubspot_patterns):
+            result["cms"] = "HubSpot"
+            result["confidence"] = 85
+            return result
+
+        # Shoptet (Czech)
+        shoptet_patterns = ["shoptet", "shoptet.cz"]
+        if any(p in html for p in shoptet_patterns):
+            result["cms"] = "Shoptet"
+            result["confidence"] = 90
+            return result
+
+        # Lightspeed eCom
+        lightspeed_patterns = ["lightspeed", "shoplightspeed", "seoshop"]
+        if any(p in html for p in lightspeed_patterns):
+            result["cms"] = "Lightspeed"
+            result["confidence"] = 85
+            return result
+
+        # Neto (Australia)
+        neto_patterns = ["neto.com.au", "netosuite"]
+        if any(p in html for p in neto_patterns):
+            result["cms"] = "Neto"
+            result["confidence"] = 85
             return result
 
         return result

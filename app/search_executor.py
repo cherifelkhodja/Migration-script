@@ -452,6 +452,25 @@ def execute_background_search(
                 if completed % 5 == 0:
                     tracker.update_step("Analyse CMS", completed, len(pages_need_cms))
 
+    # Compter tous les CMS (y compris ceux en cache)
+    all_cms_counts = {}
+    cms_page_ids = {}
+    for pid, data in pages_with_sites.items():
+        cms_name = data.get("cms", "Unknown")
+        all_cms_counts[cms_name] = all_cms_counts.get(cms_name, 0) + 1
+        if cms_name not in cms_page_ids:
+            cms_page_ids[cms_name] = []
+        cms_page_ids[cms_name].append(pid)
+
+    # Log TOUS les CMS détectés (avant filtre)
+    print(f"[Search #{search_id}] Phase 4 - Tous les CMS détectés ({len(pages_with_sites)} sites):")
+    for cms_name, count in sorted(all_cms_counts.items(), key=lambda x: -x[1]):
+        print(f"   🏷️ {cms_name}: {count} pages")
+        for pid in cms_page_ids[cms_name][:5]:
+            print(f"      → {pid}")
+        if len(cms_page_ids[cms_name]) > 5:
+            print(f"      ... et {len(cms_page_ids[cms_name]) - 5} autres")
+
     # Filtrer par CMS
     def cms_matches(cms_name):
         if cms_name in cms_filter:
@@ -480,12 +499,6 @@ def execute_background_search(
                 print(f"         → {pid}")
             if len(pids) > 3:
                 print(f"         ... et {len(pids) - 3} autres")
-
-    # Compter les CMS
-    all_cms_counts = {}
-    for pid, data in pages_with_sites.items():
-        cms_name = data.get("cms", "Unknown")
-        all_cms_counts[cms_name] = all_cms_counts.get(cms_name, 0) + 1
 
     phase4_stats = {
         "Pages analysées": len(pages_with_sites),

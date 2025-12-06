@@ -2665,9 +2665,22 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
 
     # Compter tous les CMS (y compris ceux en cache)
     all_cms_counts = {}
+    cms_page_ids = {}  # Pour le log détaillé
     for pid, data in pages_with_sites.items():
         cms_name = data.get("cms", "Unknown")
         all_cms_counts[cms_name] = all_cms_counts.get(cms_name, 0) + 1
+        if cms_name not in cms_page_ids:
+            cms_page_ids[cms_name] = []
+        cms_page_ids[cms_name].append(pid)
+
+    # Log TOUS les CMS détectés (avant filtre)
+    print(f"[UI Search] Phase 4 - Tous les CMS détectés ({len(pages_with_sites)} sites):")
+    for cms_name, count in sorted(all_cms_counts.items(), key=lambda x: -x[1]):
+        print(f"   🏷️ {cms_name}: {count} pages")
+        for pid in cms_page_ids[cms_name][:5]:
+            print(f"      → {pid}")
+        if len(cms_page_ids[cms_name]) > 5:
+            print(f"      ... et {len(cms_page_ids[cms_name]) - 5} autres")
 
     # Filter by CMS
     known_cms_list = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow"]
