@@ -406,6 +406,12 @@ class SearchLog(Base):
     # Détails API par mot-clé (JSON)
     api_details = Column(Text)  # JSON avec détails par keyword
 
+    # Liste des erreurs détaillées (JSON)
+    errors_list = Column(Text)  # JSON array des erreurs [{"type": "meta_api", "message": "...", "keyword": "...", "timestamp": "..."}]
+
+    # Détail erreurs scraper par type (JSON)
+    scraper_errors_by_type = Column(Text)  # JSON {"timeout": 5, "403_forbidden": 2, ...}
+
     __table_args__ = (
         Index('idx_search_log_date', 'started_at'),
         Index('idx_search_log_status', 'status'),
@@ -3031,8 +3037,14 @@ def update_search_log(
                 api_details_data["keyword_stats"] = api_metrics["api_details"]
             if api_metrics.get("scraper_errors_by_type"):
                 api_details_data["scraper_errors_by_type"] = api_metrics["scraper_errors_by_type"]
+                # Aussi stocker dans le champ dédié
+                log.scraper_errors_by_type = json.dumps(api_metrics["scraper_errors_by_type"], ensure_ascii=False)
             if api_details_data:
                 log.api_details = json.dumps(api_details_data, ensure_ascii=False)
+
+            # Liste des erreurs détaillées
+            if api_metrics.get("errors_list"):
+                log.errors_list = json.dumps(api_metrics["errors_list"], ensure_ascii=False, default=str)
 
         return True
 
@@ -3157,8 +3169,24 @@ def get_search_logs(
             "scraper_api_avg_time": getattr(l, 'scraper_api_avg_time', 0) or 0,
             "web_avg_time": getattr(l, 'web_avg_time', 0) or 0,
             "scraper_api_cost": getattr(l, 'scraper_api_cost', 0) or 0,
-            **_parse_api_details(getattr(l, 'api_details', None))
+            "errors_list": json.loads(getattr(l, 'errors_list', None) or '[]'),
+            **_parse_api_details(getattr(l, 'api_details', None)),
+            **_parse_scraper_errors(getattr(l, 'scraper_errors_by_type', None))
         } for l in logs]
+
+
+def _parse_scraper_errors(scraper_errors_json: str) -> Dict:
+    """Parse le JSON scraper_errors_by_type"""
+    import json
+    if not scraper_errors_json:
+        return {}
+    try:
+        data = json.loads(scraper_errors_json)
+        if isinstance(data, dict):
+            return {"scraper_errors_by_type": data}
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return {}
 
 
 def _parse_api_details(api_details_json: str) -> Dict:

@@ -67,6 +67,9 @@ class APITracker:
         # Détails par mot-clé
         self._keyword_stats: Dict[str, Dict] = {}
 
+        # Liste des erreurs détaillées
+        self._errors_list: List[Dict] = []
+
     def track_meta_api_call(
         self,
         endpoint: str,
@@ -113,6 +116,17 @@ class APITracker:
                 response_size=response_size
             )
             self.calls.append(call)
+
+            # Ajouter à la liste des erreurs si échec
+            if not success and error_message:
+                self._errors_list.append({
+                    "type": "meta_api",
+                    "message": error_message[:500],
+                    "keyword": keyword,
+                    "error_type": error_type,
+                    "status_code": status_code,
+                    "timestamp": datetime.utcnow().strftime("%H:%M:%S")
+                })
 
     def track_scraper_api_call(
         self,
@@ -169,6 +183,17 @@ class APITracker:
             )
             self.calls.append(call)
 
+            # Ajouter à la liste des erreurs si échec
+            if not success:
+                self._errors_list.append({
+                    "type": "scraper_api",
+                    "message": error_message[:500] if error_message else f"HTTP {status_code}",
+                    "url": site_url[:200] if site_url else url[:200],
+                    "error_type": error_type,
+                    "status_code": status_code,
+                    "timestamp": datetime.utcnow().strftime("%H:%M:%S")
+                })
+
     def track_web_request(
         self,
         url: str,
@@ -204,6 +229,17 @@ class APITracker:
             )
             self.calls.append(call)
 
+            # Ajouter à la liste des erreurs si échec
+            if not success:
+                self._errors_list.append({
+                    "type": "web",
+                    "message": error_message[:500] if error_message else f"HTTP {status_code}",
+                    "url": site_url[:200] if site_url else url[:200],
+                    "error_type": error_type,
+                    "status_code": status_code,
+                    "timestamp": datetime.utcnow().strftime("%H:%M:%S")
+                })
+
     def get_summary(self) -> Dict[str, Any]:
         """Retourne un résumé des statistiques"""
         with self._lock:
@@ -230,7 +266,10 @@ class APITracker:
                 "scraper_api_cost": self._scraper_api_calls * self.SCRAPER_API_COST_PER_REQUEST,
 
                 # Détails par mot-clé
-                "keyword_stats": dict(self._keyword_stats)
+                "keyword_stats": dict(self._keyword_stats),
+
+                # Liste des erreurs détaillées
+                "errors_list": list(self._errors_list)
             }
 
     def get_api_metrics_for_log(self) -> Dict[str, Any]:
@@ -249,7 +288,8 @@ class APITracker:
             "scraper_api_avg_time": round(summary["scraper_api_avg_time"], 2),
             "web_avg_time": round(summary["web_avg_time"], 2),
             "scraper_api_cost": round(summary["scraper_api_cost"], 4),
-            "api_details": summary["keyword_stats"]
+            "api_details": summary["keyword_stats"],
+            "errors_list": summary["errors_list"]
         }
 
     def save_calls_to_db(self):

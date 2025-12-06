@@ -7276,6 +7276,52 @@ def render_search_logs():
                         err_details.append(f"{label}: {count}")
                     st.caption("📊 **Détail erreurs scraper:** " + " | ".join(err_details))
 
+                # ═══ LISTE DÉTAILLÉE DES ERREURS ═══
+                errors_list = log.get("errors_list", [])
+                if errors_list and len(errors_list) > 0:
+                    with st.expander(f"🚨 **{len(errors_list)} erreur(s) détaillée(s)**", expanded=False):
+                        # Grouper par type d'erreur
+                        errors_by_type = {}
+                        for err in errors_list:
+                            err_type = err.get("type", "unknown")
+                            if err_type not in errors_by_type:
+                                errors_by_type[err_type] = []
+                            errors_by_type[err_type].append(err)
+
+                        # Afficher par type
+                        type_icons = {
+                            "meta_api": "🔵 Meta API",
+                            "scraper_api": "🟠 ScraperAPI",
+                            "web": "🌐 Web",
+                            "rate_limit": "⏱️ Rate Limit",
+                            "unknown": "❓ Autre"
+                        }
+
+                        for err_type, errs in errors_by_type.items():
+                            type_label = type_icons.get(err_type, f"⚠️ {err_type}")
+                            st.markdown(f"**{type_label}** ({len(errs)})")
+
+                            for err in errs[:10]:  # Limiter à 10 par type
+                                timestamp = err.get("timestamp", "")
+                                message = err.get("message", "Erreur inconnue")[:200]
+                                keyword = err.get("keyword", "")
+                                url = err.get("url", "")
+
+                                details = []
+                                if keyword:
+                                    details.append(f"Mot-clé: {keyword}")
+                                if url:
+                                    details.append(f"URL: {url[:50]}...")
+                                if timestamp:
+                                    details.append(f"À: {timestamp}")
+
+                                st.error(f"❌ {message}")
+                                if details:
+                                    st.caption(" | ".join(details))
+
+                            if len(errs) > 10:
+                                st.caption(f"... et {len(errs) - 10} autres erreurs de ce type")
+
                 # Ligne 3: Temps moyens
                 meta_avg = log.get("meta_api_avg_time", 0) or 0
                 scraper_avg = log.get("scraper_api_avg_time", 0) or 0
