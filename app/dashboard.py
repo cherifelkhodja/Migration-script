@@ -7279,13 +7279,38 @@ def render_search_logs():
                 st.metric("Winning Ads", log.get("winning_ads_count", 0))
 
             # ═══ TABLEAUX PAGES ET WINNING ADS (avec historique complet) ═══
-            from app.database import get_pages_for_search, get_winning_ads_for_search, get_search_history_stats
+            from app.database import get_pages_for_search, get_winning_ads_for_search, get_search_history_stats, PageRecherche, WinningAds
 
             # Récupérer les stats d'historique
             history_stats = get_search_history_stats(db, log_id)
 
             # Tableau des pages trouvées (utilise les tables d'historique many-to-many)
             pages_from_search = get_pages_for_search(db, log_id, limit=100)
+
+            # FALLBACK: Si pas d'historique, utiliser last_search_log_id
+            if not pages_from_search:
+                with db.get_session() as session:
+                    fallback_pages = session.query(PageRecherche).filter(
+                        PageRecherche.last_search_log_id == log_id
+                    ).limit(100).all()
+                    if fallback_pages:
+                        pages_from_search = [
+                            {
+                                "page_id": p.page_id,
+                                "page_name": p.page_name,
+                                "lien_site": p.lien_site,
+                                "cms": p.cms,
+                                "etat": p.etat,
+                                "nombre_ads_active": p.nombre_ads_active,
+                                "thematique": p.thematique,
+                                "pays": p.pays,
+                                "was_new": p.was_created_in_last_search,
+                                "ads_count_at_discovery": p.nombre_ads_active,
+                                "keyword_matched": None
+                            }
+                            for p in fallback_pages
+                        ]
+
             if pages_from_search:
                 new_pages = history_stats.get("new_pages", 0)
                 existing_pages = history_stats.get("existing_pages", 0)
@@ -7336,6 +7361,31 @@ def render_search_logs():
 
             # Tableau des winning ads (utilise les tables d'historique many-to-many)
             winning_from_search = get_winning_ads_for_search(db, log_id, limit=100)
+
+            # FALLBACK: Si pas d'historique, utiliser search_log_id sur winning_ads
+            if not winning_from_search:
+                with db.get_session() as session:
+                    fallback_winning = session.query(WinningAds).filter(
+                        WinningAds.search_log_id == log_id
+                    ).limit(100).all()
+                    if fallback_winning:
+                        winning_from_search = [
+                            {
+                                "ad_id": w.ad_id,
+                                "page_id": w.page_id,
+                                "page_name": w.page_name,
+                                "lien_site": w.lien_site,
+                                "ad_age_days": w.ad_age_days,
+                                "eu_total_reach": w.eu_total_reach,
+                                "matched_criteria": w.matched_criteria,
+                                "ad_snapshot_url": w.ad_snapshot_url,
+                                "was_new": w.is_new,
+                                "reach_at_discovery": w.eu_total_reach,
+                                "age_days_at_discovery": w.ad_age_days
+                            }
+                            for w in fallback_winning
+                        ]
+
             if winning_from_search:
                 new_winning = history_stats.get("new_winning_ads", 0)
                 existing_winning = history_stats.get("existing_winning_ads", 0)
