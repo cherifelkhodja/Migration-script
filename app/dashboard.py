@@ -3624,52 +3624,174 @@ def render_watchlists():
 
     st.markdown("---")
 
-    # Suivi des pages performantes
-    st.subheader("🌟 Top Performers (≥80 ads)")
-    try:
-        top_pages = search_pages(
-            db, etat="XXL", limit=20,
-            thematique=filters.get("thematique"),
-            subcategory=filters.get("subcategory"),
-            pays=filters.get("pays")
-        )
-        top_pages.extend(search_pages(
-            db, etat="XL", limit=20,
-            thematique=filters.get("thematique"),
-            subcategory=filters.get("subcategory"),
-            pays=filters.get("pays")
-        ))
+    # Créer 3 onglets pour les différentes vues
+    tab1, tab2, tab3 = st.tabs(["🌟 Top Performers", "🏆 Top Winning Ads", "📊 Pages avec le + de Winning Ads"])
 
-        if top_pages:
-            df = pd.DataFrame(top_pages)
-            cols = ["page_name", "lien_site", "cms", "etat", "nombre_ads_active", "subcategory", "pays"]
-            df_display = df[[c for c in cols if c in df.columns]].head(20)
-            st.dataframe(df_display, width="stretch", hide_index=True)
-        else:
-            st.info("Aucune page XXL/XL trouvée")
-    except Exception as e:
-        st.error(f"Erreur: {e}")
+    # ═══ TAB 1: Top Performers ═══
+    with tab1:
+        st.subheader("🌟 Top Performers (≥80 ads)")
+        try:
+            top_pages = search_pages(
+                db, etat="XXL", limit=20,
+                thematique=filters.get("thematique"),
+                subcategory=filters.get("subcategory"),
+                pays=filters.get("pays")
+            )
+            top_pages.extend(search_pages(
+                db, etat="XL", limit=20,
+                thematique=filters.get("thematique"),
+                subcategory=filters.get("subcategory"),
+                pays=filters.get("pays")
+            ))
 
-    st.markdown("---")
+            if top_pages:
+                # Trier par nombre d'ads décroissant
+                top_pages_sorted = sorted(top_pages, key=lambda x: x.get("nombre_ads_active", 0), reverse=True)[:20]
+                df = pd.DataFrame(top_pages_sorted)
+                cols = ["page_name", "lien_site", "cms", "etat", "nombre_ads_active", "subcategory", "pays"]
+                df_display = df[[c for c in cols if c in df.columns]]
+                df_display.columns = ["Page", "Site", "CMS", "État", "Ads Actives", "Catégorie", "Pays"]
+                st.dataframe(df_display, use_container_width=True, hide_index=True)
+            else:
+                st.info("Aucune page XXL/XL trouvée")
+        except Exception as e:
+            st.error(f"Erreur: {e}")
 
-    # Shopify uniquement
-    st.subheader("🛒 Shopify Stores")
-    try:
-        shopify_pages = search_pages(
-            db, cms="Shopify", limit=30,
-            thematique=filters.get("thematique"),
-            subcategory=filters.get("subcategory"),
-            pays=filters.get("pays")
-        )
-        if shopify_pages:
-            df = pd.DataFrame(shopify_pages)
-            cols = ["page_name", "lien_site", "etat", "nombre_ads_active", "nombre_produits", "subcategory", "pays"]
-            df_display = df[[c for c in cols if c in df.columns]]
-            st.dataframe(df_display, width="stretch", hide_index=True)
-        else:
-            st.info("Aucune boutique Shopify trouvée")
-    except Exception as e:
-        st.error(f"Erreur: {e}")
+    # ═══ TAB 2: Top Winning Ads ═══
+    with tab2:
+        st.subheader("🏆 Top Winning Ads (Best Performers)")
+        st.caption("Ads avec le plus grand reach et durée de diffusion")
+
+        try:
+            # Récupérer les meilleures winning ads
+            winning_ads = get_winning_ads(db, limit=50, days=30)
+
+            if winning_ads:
+                # Créer un DataFrame pour l'affichage
+                ads_data = []
+                for ad in winning_ads[:20]:
+                    # Formater le reach
+                    reach = ad.get("eu_total_reach", 0) or 0
+                    if reach >= 1000000:
+                        reach_str = f"{reach/1000000:.1f}M"
+                    elif reach >= 1000:
+                        reach_str = f"{reach/1000:.0f}K"
+                    else:
+                        reach_str = str(reach)
+
+                    # Extraire le texte de l'ad
+                    bodies = ad.get("ad_creative_bodies", "")
+                    if isinstance(bodies, str):
+                        try:
+                            import json
+                            bodies = json.loads(bodies) if bodies.startswith("[") else [bodies]
+                        except:
+                            bodies = [bodies] if bodies else []
+                    ad_text = bodies[0][:80] + "..." if bodies and len(bodies[0]) > 80 else (bodies[0] if bodies else "N/A")
+
+                    ads_data.append({
+                        "Page": ad.get("page_name", "N/A"),
+                        "Texte Ad": ad_text,
+                        "Reach EU": reach_str,
+                        "Âge (jours)": ad.get("ad_age_days", 0),
+                        "Critères": ad.get("matched_criteria", ""),
+                        "Lien": ad.get("ad_snapshot_url", "")
+                    })
+
+                df = pd.DataFrame(ads_data)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+
+                # Bouton pour voir les détails
+                with st.expander("📋 Détails des Winning Ads"):
+                    for i, ad in enumerate(winning_ads[:10]):
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            st.markdown(f"**{ad.get('page_name', 'N/A')}**")
+                            bodies = ad.get("ad_creative_bodies", "")
+                            if isinstance(bodies, str):
+                                try:
+                                    import json
+                                    bodies = json.loads(bodies) if bodies.startswith("[") else [bodies]
+                                except:
+                                    bodies = [bodies] if bodies else []
+                            if bodies:
+                                st.caption(bodies[0][:200])
+                        with col2:
+                            if ad.get("ad_snapshot_url"):
+                                st.link_button("👁️ Voir", ad["ad_snapshot_url"], use_container_width=True)
+                        st.divider()
+            else:
+                st.info("Aucune winning ad trouvée")
+        except Exception as e:
+            st.error(f"Erreur: {e}")
+
+    # ═══ TAB 3: Pages avec le plus de Winning Ads ═══
+    with tab3:
+        st.subheader("📊 Pages avec le plus de Winning Ads")
+        st.caption("Classement des pages par nombre de winning ads")
+
+        try:
+            # Récupérer le nombre de winning ads par page
+            winning_by_page = get_winning_ads_by_page(db, days=30)
+
+            if winning_by_page:
+                # Trier par nombre décroissant
+                sorted_pages = sorted(winning_by_page.items(), key=lambda x: x[1], reverse=True)[:30]
+
+                # Récupérer les infos des pages
+                pages_data = []
+                for page_id, count in sorted_pages:
+                    # Chercher les infos de la page
+                    page_info = search_pages(db, page_id=page_id, limit=1)
+                    if page_info:
+                        p = page_info[0]
+                        pages_data.append({
+                            "Page": p.get("page_name", "N/A"),
+                            "Site": p.get("lien_site", ""),
+                            "Winning Ads": count,
+                            "Ads Actives": p.get("nombre_ads_active", 0),
+                            "CMS": p.get("cms", "N/A"),
+                            "État": p.get("etat", "N/A"),
+                            "Catégorie": p.get("subcategory", ""),
+                            "page_id": page_id
+                        })
+                    else:
+                        # Si page pas trouvée, récupérer le nom depuis les winning ads
+                        winning = get_winning_ads(db, page_id=page_id, limit=1)
+                        page_name = winning[0].get("page_name", page_id) if winning else page_id
+                        pages_data.append({
+                            "Page": page_name,
+                            "Site": "",
+                            "Winning Ads": count,
+                            "Ads Actives": 0,
+                            "CMS": "N/A",
+                            "État": "N/A",
+                            "Catégorie": "",
+                            "page_id": page_id
+                        })
+
+                if pages_data:
+                    df = pd.DataFrame(pages_data)
+                    # Afficher sans le page_id
+                    display_cols = ["Page", "Site", "Winning Ads", "Ads Actives", "CMS", "État", "Catégorie"]
+                    st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+
+                    # Top 3 en métrique
+                    st.markdown("##### 🥇 Podium")
+                    col1, col2, col3 = st.columns(3)
+                    if len(pages_data) >= 1:
+                        with col1:
+                            st.metric("🥇 1er", pages_data[0]["Page"][:20], f"{pages_data[0]['Winning Ads']} winning ads")
+                    if len(pages_data) >= 2:
+                        with col2:
+                            st.metric("🥈 2ème", pages_data[1]["Page"][:20], f"{pages_data[1]['Winning Ads']} winning ads")
+                    if len(pages_data) >= 3:
+                        with col3:
+                            st.metric("🥉 3ème", pages_data[2]["Page"][:20], f"{pages_data[2]['Winning Ads']} winning ads")
+            else:
+                st.info("Aucune winning ad enregistrée")
+        except Exception as e:
+            st.error(f"Erreur: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
