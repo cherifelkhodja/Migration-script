@@ -2794,11 +2794,13 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
     # Fonction worker pour analyse parallèle
     def analyze_web_worker(pid_data):
         pid, data = pid_data
+        url = data.get("website", "")
         try:
-            result = analyze_website_complete(data["website"], countries[0])
+            result = analyze_website_complete(url, countries[0])
+            result["_analyzed_url"] = url  # Pour debug
             return pid, result
         except Exception as e:
-            return pid, {"product_count": 0, "error": str(e)}
+            return pid, {"product_count": 0, "error": str(e), "_analyzed_url": url}
 
     # Multithreading pour l'analyse web (8 workers)
     if pages_need_analysis:
@@ -2813,6 +2815,12 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
                 if not data.get("currency") and result.get("currency_from_site"):
                     data["currency"] = result["currency_from_site"]
                 completed += 1
+
+                # Log détaillé pour debug classification
+                has_content = bool(result.get("site_title") or result.get("site_description") or result.get("site_h1"))
+                url_short = result.get("_analyzed_url", "")[:50]
+                print(f"[UI Search] Analysé {pid}: url={url_short}, cms={result.get('cms', 'N/A')}, content={has_content}, title='{result.get('site_title', '')[:30]}'")
+
                 if completed % 5 == 0:
                     tracker.update_step("Analyse web", completed, len(pages_need_analysis))
 
