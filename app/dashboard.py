@@ -863,7 +863,7 @@ class SearchProgressTracker:
                         line += f" → **{log['count']}**"
                     if log.get('total') is not None:
                         line += f" (total: {log['total']})"
-                    log_text += line + "\n"
+                    log_text += line + "  \n"  # Deux espaces + \n pour retour à la ligne en markdown
 
                 st.markdown(log_text)
 
