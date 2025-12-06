@@ -2,14 +2,44 @@
 
 Application dashboard pour la recherche et l'analyse des annonces Meta (Facebook Ads) ciblant les sites Shopify.
 
-## Fonctionnalités
+## Architecture
 
-- **Recherche par mots-clés** : Recherche d'annonces actives via l'API Meta Ads Archive
-- **Détection Shopify** : Vérification automatique HTTP pour identifier les sites Shopify
-- **Analyse complète des sites** :
-  - Détection du CMS et du thème
+Ce projet suit une **architecture hexagonale** (Ports & Adapters) avec les principes **SOLID** et **Clean Code**.
+
+```
+src/
+├── domain/                    # Coeur metier (0 dependances externes)
+│   ├── entities/              # Page, Ad, WinningAd, Collection
+│   ├── value_objects/         # PageId, Etat, CMS, Url, Reach, etc.
+│   ├── services/              # WinningAdDetector, PageStateCalculator
+│   └── exceptions.py          # Exceptions metier
+│
+├── application/               # Orchestration
+│   ├── ports/                 # Interfaces (repositories, services)
+│   │   ├── repositories/      # PageRepository, AdRepository, etc.
+│   │   └── services/          # AdsSearchService, ClassificationService
+│   └── use_cases/             # SearchAds, DetectWinningAds, etc.
+│
+└── infrastructure/            # Adapters (implementations)
+    ├── external_services/     # MetaAdsSearchAdapter
+    └── persistence/           # SQLAlchemyPageRepository
+
+app/                           # Couche Presentation (legacy)
+├── dashboard.py               # Application Streamlit
+├── meta_api.py                # Client API Meta
+├── database.py                # Gestion PostgreSQL
+└── ...
+```
+
+## Fonctionnalites
+
+- **Recherche par mots-cles** : Recherche d'annonces actives via l'API Meta Ads Archive
+- **Detection Winning Ads** : Identification des annonces performantes selon des criteres age/reach
+- **Detection Shopify** : Verification automatique HTTP pour identifier les sites Shopify
+- **Analyse complete des sites** :
+  - Detection du CMS et du theme
   - Identification des moyens de paiement
-  - Classification thématique des produits
+  - Classification thematique des produits
   - Comptage des produits via sitemaps
 - **Dashboard interactif** : Interface Streamlit moderne avec graphiques
 - **Export CSV** : 3 types d'exports (pages, annonces, suivi)
@@ -21,20 +51,20 @@ Application dashboard pour la recherche et l'analyse des annonces Meta (Facebook
 git clone <repository-url>
 cd Migration-script
 
-# Créer un environnement virtuel (recommandé)
+# Creer un environnement virtuel
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
 # ou: venv\Scripts\activate  # Windows
 
-# Installer les dépendances
-pip install -r requirements.txt
+# Installer les dependances
+pip install -e ".[dev]"
 ```
 
 ## Configuration
 
 ### Token Meta API
 
-Vous avez besoin d'un token d'accès Meta Ads API. Deux options :
+Vous avez besoin d'un token d'acces Meta Ads API. Trois options :
 
 1. **Variable d'environnement** :
 ```bash
@@ -48,89 +78,135 @@ META_ACCESS_TOKEN=votre_token_ici
 
 3. **Dans l'interface** : Entrez le token directement dans la sidebar
 
-### Fichier Blacklist (optionnel)
+### Base de donnees PostgreSQL
 
-Créez un fichier `blacklist.csv` avec les pages à exclure :
-```csv
-page_id;page_name
-123456789;NomPage1
-987654321;NomPage2
+```
+DATABASE_URL=postgresql://user:password@host:5432/database
 ```
 
 ## Utilisation
 
-### Dashboard (recommandé)
+### Dashboard
 
 ```bash
-# Option 1: Via le script de lancement
+# Lancer l'application
 python run.py
 
-# Option 2: Directement avec Streamlit
+# Ou directement avec Streamlit
 streamlit run app/dashboard.py
 ```
 
 Ouvrez ensuite http://localhost:8501 dans votre navigateur.
 
-### Script CLI (original)
+### Utilisation programmatique
+
+```python
+from src.domain.entities import Ad, Page
+from src.domain.value_objects import PageId, Reach
+from src.application.use_cases import SearchAdsUseCase, DetectWinningAdsUseCase
+from src.infrastructure.external_services import MetaAdsSearchAdapter
+
+# Creer l'adapter
+from app.meta_api import MetaAdsClient
+client = MetaAdsClient(access_token="...")
+adapter = MetaAdsSearchAdapter(client)
+
+# Executer une recherche
+use_case = SearchAdsUseCase(ads_service=adapter)
+from src.application.use_cases.search_ads import SearchAdsRequest
+request = SearchAdsRequest(keywords=["bijoux"], countries=["FR"])
+response = use_case.execute(request)
+
+print(f"{response.pages_count} pages trouvees")
+```
+
+## Tests
 
 ```bash
-python V5_recherche_ads_complete.py
+# Lancer tous les tests
+pytest
+
+# Tests avec couverture
+pytest --cov=src --cov-report=html
+
+# Tests specifiques
+pytest tests/unit/domain/  # Tests domaine seulement
+pytest tests/unit/application/  # Tests use cases seulement
 ```
 
-## Structure du projet
+### Statistiques actuelles
+- **245 tests** unitaires
+- **84%+ coverage** sur le code source
 
-```
-Migration-script/
-├── app/
-│   ├── __init__.py          # Package init
-│   ├── config.py             # Configuration et constantes
-│   ├── meta_api.py           # Client API Meta
-│   ├── web_analyzer.py       # Analyse des sites web
-│   ├── shopify_detector.py   # Détection Shopify
-│   ├── utils.py              # Utilitaires et exports
-│   └── dashboard.py          # Application Streamlit
-├── résultats/                # Dossier des exports CSV
-├── run.py                    # Script de lancement
-├── requirements.txt          # Dépendances Python
-├── V5_recherche_ads_complete.py  # Script CLI original
-└── README.md
+## Qualite du code
+
+```bash
+# Linting avec Ruff
+ruff check src/ tests/
+
+# Formatage
+ruff format src/ tests/
+
+# Type checking avec MyPy
+mypy src/
 ```
 
-## Seuils de filtrage
+## Concepts du domaine
 
-| Seuil | Valeur par défaut | Description |
-|-------|-------------------|-------------|
-| MIN_ADS_INITIAL | 5 | Filtre préliminaire (recherche) |
-| MIN_ADS_FOR_EXPORT | 15 | Export CSV pages et suivi |
-| MIN_ADS_FOR_ADS_CSV | 25 | Export CSV annonces |
+### Etats des pages (Etat)
 
-## Exports CSV
+| Etat | Nombre d'ads | Description |
+|------|--------------|-------------|
+| XS   | 1-9          | Tres petit  |
+| S    | 10-19        | Petit       |
+| M    | 20-34        | Moyen       |
+| L    | 35-79        | Grand       |
+| XL   | 80-149       | Tres grand  |
+| XXL  | 150+         | Enorme      |
+
+### Criteres Winning Ads
+
+Une annonce est "winning" si elle atteint un seuil de reach en fonction de son age :
+
+| Age (jours) | Reach minimum |
+|-------------|---------------|
+| 4           | 15 000        |
+| 5           | 20 000        |
+| 6           | 30 000        |
+| 7           | 40 000        |
+| 8           | 50 000        |
+| 15          | 100 000       |
+| 22          | 200 000       |
+| 29          | 400 000       |
+
+## CI/CD
+
+Le projet utilise GitHub Actions pour :
+- Tests automatiques (Python 3.10, 3.11, 3.12)
+- Verification de la couverture (minimum 84%)
+- Linting avec Ruff
+- Type checking avec MyPy
+- Scan de securite avec Bandit
+
+## Structure des exports CSV
 
 ### 1. Liste des pages (`liste_pages_*.csv`)
-Contient toutes les pages Shopify avec ≥15 ads :
-- Informations page (ID, nom, site)
-- Analyse web (CMS, thème, paiements)
-- Classification (thématique, produits)
+Pages Shopify avec >=15 ads : informations page, analyse web, classification.
 
 ### 2. Liste des annonces (`liste_ads_*.csv`)
-Toutes les annonces des pages avec ≥25 ads :
-- Détails de l'annonce
-- Contenu créatif
-- Ciblage
+Annonces des pages avec >=25 ads : details, contenu creatif, ciblage.
 
 ### 3. Suivi site (`suivi_site_*.csv`)
-Données de suivi pour monitoring :
-- Nombre d'ads actives
-- Nombre de produits
-- Date de scan
+Donnees de monitoring : nombre d'ads actives, produits, date de scan.
 
-## Dépendances principales
+## Dependances principales
 
 - **Streamlit** : Framework dashboard
-- **Pandas** : Traitement des données
+- **SQLAlchemy** : ORM et persistence
+- **Pandas** : Traitement des donnees
 - **Plotly** : Visualisations interactives
-- **BeautifulSoup** : Parsing HTML
-- **Requests** : Requêtes HTTP
+- **Pytest** : Framework de tests
+- **Ruff** : Linting et formatage
 
 ## Licence
 
