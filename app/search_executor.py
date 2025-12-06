@@ -189,6 +189,18 @@ def execute_background_search(
     # Créer le tracker de progression
     tracker = BackgroundProgressTracker(db, search_id)
 
+    # Convertir countries et languages en listes si ce sont des strings
+    # (SearchQueue stocke des strings comme "FR" ou "FR,BE")
+    if isinstance(countries, str):
+        countries_list = [c.strip() for c in countries.split(",") if c.strip()]
+    else:
+        countries_list = countries if countries else ["FR"]
+
+    if isinstance(languages, str):
+        languages_list = [l.strip() for l in languages.split(",") if l.strip()]
+    else:
+        languages_list = languages if languages else ["fr"]
+
     # S'assurer que les tables existent
     ensure_tables_exist(db)
 
@@ -237,7 +249,7 @@ def execute_background_search(
             time.sleep(META_DELAY_BETWEEN_KEYWORDS)
 
         try:
-            ads = client.search_ads(kw, countries, languages)
+            ads = client.search_ads(kw, countries_list, languages_list)
             for ad in ads:
                 ad_id = ad.get("id")
                 if ad_id and ad_id not in seen_ad_ids:
@@ -439,7 +451,7 @@ def execute_background_search(
         batch_num = (batch_idx // batch_size) + 1
         tracker.update_step("Batch API", batch_num, total_batches)
 
-        batch_results = client.fetch_ads_for_pages_batch(batch_pids, countries, languages)
+        batch_results = client.fetch_ads_for_pages_batch(batch_pids, countries_list, languages_list)
 
         for pid in batch_pids:
             data = pages_with_cms[pid]
@@ -518,7 +530,7 @@ def execute_background_search(
     def analyze_web_worker(pid_data):
         pid, data = pid_data
         try:
-            result = analyze_website_complete(data["website"], countries[0] if countries else "FR")
+            result = analyze_website_complete(data["website"], countries_list[0] if countries_list else "FR")
             return pid, result
         except Exception as e:
             return pid, {"product_count": 0, "error": str(e)}
@@ -597,13 +609,13 @@ def execute_background_search(
 
     try:
         tracker.update_step("Sauvegarde pages", 1, 4)
-        pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, None)
+        pages_saved = save_pages_recherche(db, pages_final, web_results, countries_list, languages_list, None)
 
         tracker.update_step("Sauvegarde suivi", 2, 4)
         suivi_saved = save_suivi_page(db, pages_final, web_results, MIN_ADS_SUIVI)
 
         tracker.update_step("Sauvegarde annonces", 3, 4)
-        ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, MIN_ADS_LISTE)
+        ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries_list, MIN_ADS_LISTE)
 
         tracker.update_step("Sauvegarde winning ads", 4, 4)
         winning_saved, winning_skipped = save_winning_ads(db, winning_ads_data, pages_final)
