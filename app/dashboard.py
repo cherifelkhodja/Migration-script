@@ -2756,6 +2756,19 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
         if not cached.get("needs_rescan") and cached.get("nombre_produits") is not None:
             # Skip classification SEULEMENT si la page a déjà une thématique
             has_thematique = bool(cached.get("thematique"))
+
+            # Vérifier si la page a du contenu pour classification
+            has_site_content = bool(
+                cached.get("site_title") or
+                cached.get("site_description") or
+                cached.get("site_h1")
+            )
+
+            # Si pas de thématique ET pas de contenu site -> re-analyser pour classifier
+            if not has_thematique and not has_site_content and data.get("website"):
+                pages_need_analysis.append((pid, data))
+                continue
+
             web_results[pid] = {
                 "product_count": cached.get("nombre_produits", 0),
                 "theme": cached.get("template", ""),
@@ -2811,7 +2824,31 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
     pages_to_classify_count = sum(1 for w in web_results.values() if not w.get("_skip_classification"))
     pages_with_thematique = sum(1 for w in web_results.values() if w.get("_skip_classification"))
 
-    print(f"[UI Search] Classification: {pages_to_classify_count} pages à classifier, {pages_with_thematique} déjà classifiées")
+    # Compter les pages avec contenu pour classification
+    pages_with_content = sum(1 for w in web_results.values()
+                            if not w.get("_skip_classification") and
+                            (w.get("site_title") or w.get("site_description") or w.get("site_h1")))
+
+    # Afficher diagnostic classification
+    with st.expander("🔍 Diagnostic Classification", expanded=False):
+        st.write(f"**Clé Gemini:** {'✅ Configurée' if gemini_key else '❌ Manquante'}")
+        st.write(f"**Pages totales:** {len(web_results)}")
+        st.write(f"**Déjà classifiées (thématique):** {pages_with_thematique}")
+        st.write(f"**À classifier:** {pages_to_classify_count}")
+        st.write(f"**Avec contenu site:** {pages_with_content}")
+
+        # Montrer quelques exemples de pages sans thématique
+        if pages_to_classify_count > 0:
+            st.write("---")
+            st.write("**Exemples de pages à classifier:**")
+            count = 0
+            for pid, web_data in web_results.items():
+                if not web_data.get("_skip_classification") and count < 5:
+                    has_content = bool(web_data.get("site_title") or web_data.get("site_description") or web_data.get("site_h1"))
+                    st.write(f"- Page {pid}: content={'✅' if has_content else '❌'} | title='{web_data.get('site_title', '')[:30]}...'")
+                    count += 1
+
+    print(f"[UI Search] Classification: {pages_to_classify_count} pages à classifier, {pages_with_thematique} déjà classifiées, {pages_with_content} avec contenu")
 
     if gemini_key and pages_to_classify_count > 0:
         tracker.update_step("Classification Gemini", 0, 1)

@@ -516,6 +516,19 @@ def execute_background_search(
         if not cached.get("needs_rescan") and cached.get("nombre_produits") is not None:
             # Skip classification SEULEMENT si la page a déjà une thématique
             has_thematique = bool(cached.get("thematique"))
+
+            # Vérifier si la page a du contenu pour classification
+            has_site_content = bool(
+                cached.get("site_title") or
+                cached.get("site_description") or
+                cached.get("site_h1")
+            )
+
+            # Si pas de thématique ET pas de contenu site -> re-analyser pour classifier
+            if not has_thematique and not has_site_content and data.get("website"):
+                pages_need_analysis.append((pid, data))
+                continue
+
             web_results[pid] = {
                 "product_count": cached.get("nombre_produits", 0),
                 "theme": cached.get("template", ""),
