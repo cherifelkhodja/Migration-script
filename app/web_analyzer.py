@@ -12,7 +12,7 @@ try:
     from app.config import (
         REQUEST_TIMEOUT, HEADERS, DEFAULT_PAYMENTS, TAXONOMY, KEYWORD_OVERRIDES,
         THEME_ASSET_CANDIDATES, REQUEST_SNIPPET, INLINE_NAME_PATTERNS,
-        ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_random_headers, get_proxied_url, is_proxy_enabled,
+        ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_proxied_url, is_proxy_enabled,
         # Patterns pré-compilés
         COMPILED_INLINE_PATTERNS, COMPILED_ASSET_PATTERNS, COMPILED_THEME_ID_PATTERN,
         COMPILED_THEME_CLEAN_PATTERN, COMPILED_SITEMAP_LOC, COMPILED_SITEMAP_URL_TAG,
@@ -24,7 +24,7 @@ except ImportError:
     from config import (
         REQUEST_TIMEOUT, HEADERS, DEFAULT_PAYMENTS, TAXONOMY, KEYWORD_OVERRIDES,
         THEME_ASSET_CANDIDATES, REQUEST_SNIPPET, INLINE_NAME_PATTERNS,
-        ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_random_headers, get_proxied_url, is_proxy_enabled
+        ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_proxied_url, is_proxy_enabled
     )
     # Fallback: compiler les patterns si import échoue
     COMPILED_INLINE_PATTERNS = [re.compile(p, re.I | re.M | re.S) for p in INLINE_NAME_PATTERNS]

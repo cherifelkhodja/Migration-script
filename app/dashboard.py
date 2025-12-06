@@ -5,7 +5,6 @@ Design moderne avec navigation latérale
 import warnings
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
 
-import io
 import os
 import sys
 import time
@@ -28,42 +27,39 @@ import plotly.graph_objects as go
 
 from app.config import (
     AVAILABLE_COUNTRIES, AVAILABLE_LANGUAGES,
-    MIN_ADS_INITIAL, MIN_ADS_FOR_EXPORT,
-    DEFAULT_COUNTRIES, DEFAULT_LANGUAGES,
+    MIN_ADS_INITIAL,
+    DEFAULT_COUNTRIES,
     DATABASE_URL, MIN_ADS_SUIVI, MIN_ADS_LISTE,
     DEFAULT_STATE_THRESHOLDS, WINNING_AD_CRITERIA,
     META_DELAY_BETWEEN_KEYWORDS, META_DELAY_BETWEEN_BATCHES,
-    WEB_DELAY_CMS_CHECK, WORKERS_WEB_ANALYSIS
+    WEB_DELAY_CMS_CHECK
 )
 from app.meta_api import MetaAdsClient, extract_website_from_ads, extract_currency_from_ads
 from app.shopify_detector import detect_cms_from_url
 from app.web_analyzer import analyze_website_complete
-from app.utils import load_blacklist, is_blacklisted
 from app.database import (
     DatabaseManager, save_pages_recherche, save_suivi_page,
-    save_ads_recherche, get_suivi_stats, get_suivi_stats_filtered, search_pages, get_suivi_history,
+    save_ads_recherche, get_suivi_stats, get_suivi_stats_filtered, search_pages,
     get_evolution_stats, get_page_evolution_history, get_etat_from_ads_count,
     add_to_blacklist, remove_from_blacklist, get_blacklist, get_blacklist_ids,
     is_winning_ad, save_winning_ads, get_winning_ads, get_winning_ads_stats,
     get_winning_ads_filtered, get_winning_ads_stats_filtered,
-    get_all_pages, get_winning_ads_by_page, get_cached_pages_info, get_dashboard_trends,
+    get_winning_ads_by_page, get_cached_pages_info, get_dashboard_trends,
     # Tags
-    get_all_tags, create_tag, delete_tag, add_tag_to_page, remove_tag_from_page,
+    get_all_tags, create_tag, delete_tag, add_tag_to_page,
     get_page_tags, get_pages_by_tag,
     # Notes
-    get_page_notes, add_page_note, update_page_note, delete_page_note,
+    get_page_notes, add_page_note,
     # Favorites
     get_favorites, is_favorite, add_favorite, remove_favorite, toggle_favorite,
     # Collections
-    get_collections, create_collection, update_collection, delete_collection,
-    add_page_to_collection, remove_page_from_collection, get_collection_pages, get_page_collections,
+    get_collections, create_collection, delete_collection,
+    add_page_to_collection, remove_page_from_collection, get_collection_pages,
     # Saved Filters
     get_saved_filters, save_filter, delete_saved_filter,
     # Scheduled Scans
     get_scheduled_scans, create_scheduled_scan, update_scheduled_scan,
-    delete_scheduled_scan, mark_scan_executed,
-    # Settings
-    get_setting, set_setting, get_all_settings,
+    delete_scheduled_scan,
     # Bulk actions
     bulk_add_to_blacklist, bulk_add_to_collection, bulk_add_tag, bulk_add_to_favorites,
     # Classification & Filtering
@@ -2467,7 +2463,7 @@ def render_preview_results():
 def run_search_process(keywords, countries, languages, min_ads, selected_cms, preview_mode=False):
     """Exécute le processus de recherche complet avec tracking détaillé et logging"""
     from app.api_tracker import APITracker, set_current_tracker, clear_current_tracker
-    from app.meta_api import init_token_rotator, clear_token_rotator
+    from app.meta_api import init_token_rotator
 
     db = get_database()
 
@@ -5536,7 +5532,6 @@ def render_settings_api_tab(db):
     from app.database import (
         get_all_meta_tokens, add_meta_token, delete_meta_token,
         update_meta_token, reset_token_stats, clear_rate_limit,
-        get_token_usage_logs, get_token_stats_detailed, verify_all_tokens,
         get_search_logs_stats, get_cache_stats, clear_expired_cache, clear_all_cache
     )
 
@@ -6078,7 +6073,7 @@ def render_settings_maintenance_tab(db):
 
     from app.database import (
         get_pages_count, migration_add_country_to_all_pages,
-        get_all_pages_for_classification, update_pages_classification_batch,
+        update_pages_classification_batch,
         build_taxonomy_prompt, init_default_taxonomy, get_archive_stats, archive_old_data
     )
     from sqlalchemy import func
@@ -6956,7 +6951,7 @@ def render_search_logs():
     ensure_tables_exist(db)
 
     # Import des fonctions de log
-    from app.database import get_search_logs, get_search_log_detail, get_search_logs_stats, delete_search_log
+    from app.database import get_search_logs, get_search_logs_stats, delete_search_log
 
     # Stats globales
     stats = get_search_logs_stats(db, days=30)

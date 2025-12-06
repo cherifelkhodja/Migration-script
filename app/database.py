@@ -3,7 +3,7 @@ Module de gestion de la base de données PostgreSQL
 """
 import os
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional, Any
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, Float, Index, Boolean
@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 # Import du cache (avec fallback si non disponible)
 try:
-    from app.cache import get_stats_cache, cached, invalidate_stats_cache
+    from app.cache import cached, invalidate_stats_cache
     CACHE_ENABLED = True
 except ImportError:
     CACHE_ENABLED = False

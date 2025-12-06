@@ -9,9 +9,9 @@ from typing import Optional, Dict
 from urllib.parse import urlparse
 
 try:
-    from app.config import HEADERS, TIMEOUT_SHOPIFY_CHECK, get_random_headers, get_proxied_url, is_proxy_enabled
+    from app.config import HEADERS, TIMEOUT_SHOPIFY_CHECK, get_proxied_url, is_proxy_enabled
 except ImportError:
-    from config import HEADERS, TIMEOUT_SHOPIFY_CHECK, get_random_headers, get_proxied_url, is_proxy_enabled
+    from config import HEADERS, TIMEOUT_SHOPIFY_CHECK, get_proxied_url, is_proxy_enabled
 
 
 def detect_cms_from_url(url: str) -> Dict[str, any]:

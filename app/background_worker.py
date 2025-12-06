@@ -130,7 +130,7 @@ class BackgroundSearchWorker:
         Cette méthode s'exécute dans un thread séparé.
         """
         from app.database import (
-            DatabaseManager, get_search_queue, SearchQueue,
+            DatabaseManager, SearchQueue,
             update_search_queue_status, update_search_queue_progress
         )
 
@@ -297,7 +297,7 @@ class BackgroundSearchWorker:
         Returns:
             Liste des recherches actives
         """
-        from app.database import DatabaseManager, get_active_searches as db_get_active, SearchQueue
+        from app.database import DatabaseManager, SearchQueue
 
         db = DatabaseManager()
 
