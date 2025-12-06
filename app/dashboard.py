@@ -1323,7 +1323,9 @@ def chart_header(title: str, subtitle: str = None, help_text: str = None):
             if subtitle:
                 st.caption(subtitle)
         with col2:
-            st.markdown(f"<span title='{help_text}' style='cursor: help; font-size: 18px;'>ℹ️</span>", unsafe_allow_html=True)
+            # Échapper les apostrophes pour éviter de casser l'attribut HTML
+            safe_help = help_text.replace("'", "&#39;")
+            st.markdown(f"<span title='{safe_help}' style='cursor: help; font-size: 18px;'>ℹ️</span>", unsafe_allow_html=True)
     else:
         st.markdown(f"**{title}**")
         if subtitle:
