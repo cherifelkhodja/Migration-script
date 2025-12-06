@@ -3406,6 +3406,17 @@ def render_pages_shops():
     # ═══ FILTRES ═══
     st.markdown("#### 🔍 Filtres")
 
+    # Ligne 0: Filtre par ID (prioritaire)
+    col_id1, col_id2 = st.columns([3, 1])
+    with col_id1:
+        default_page_id = loaded_filter.get("page_id", "") if loaded_filter else ""
+        page_id_filter = st.text_input(
+            "🆔 Page ID",
+            value=default_page_id,
+            placeholder="Ex: 123456789012345",
+            help="Filtrer par ID de page spécifique"
+        )
+
     # Ligne 1: Recherche, CMS, État
     col1, col2, col3 = st.columns(3)
 
@@ -3518,6 +3529,7 @@ def render_pages_shops():
             thematique=thematique_param,
             subcategory=subcategory_param,
             pays=pays_filter,
+            page_id=page_id_filter.strip() if page_id_filter else None,
             limit=limit
         )
 
@@ -4800,10 +4812,32 @@ def render_winning_ads():
 
     # Filtres de classification
     st.markdown("#### 🔍 Filtres")
+
+    # Filtre par ID (Page ID ou Ad ID)
+    col_id1, col_id2 = st.columns(2)
+    with col_id1:
+        page_id_filter = st.text_input(
+            "🆔 Page ID",
+            placeholder="Ex: 123456789012345",
+            help="Filtrer les winning ads d'une page spécifique",
+            key="winning_page_id"
+        )
+    with col_id2:
+        ad_id_filter = st.text_input(
+            "📢 Ad ID",
+            placeholder="Ex: 987654321098765",
+            help="Rechercher une annonce spécifique par son ID",
+            key="winning_ad_id"
+        )
+
     class_filters = render_classification_filters(db, key_prefix="winning", columns=3)
 
     # Afficher les filtres actifs
     active_filters = []
+    if page_id_filter:
+        active_filters.append(f"🆔 Page: {page_id_filter}")
+    if ad_id_filter:
+        active_filters.append(f"📢 Ad: {ad_id_filter}")
     if class_filters.get("thematique"):
         active_filters.append(f"🏷️ {class_filters['thematique']}")
     if class_filters.get("subcategory"):
@@ -4935,10 +4969,16 @@ def render_winning_ads():
         # limit=0 signifie "Toutes" -> on utilise une très grande limite
         actual_limit = limit if limit > 0 else 100000
 
+        # Préparer les filtres ID
+        page_id_param = page_id_filter.strip() if page_id_filter else None
+        ad_id_param = ad_id_filter.strip() if ad_id_filter else None
+
         # Utiliser la fonction filtrée si des filtres sont actifs
-        if any(class_filters.values()):
+        if any(class_filters.values()) or page_id_param or ad_id_param:
             winning_ads = get_winning_ads_filtered(
                 db, limit=actual_limit, days=period,
+                page_id=page_id_param,
+                ad_id=ad_id_param,
                 thematique=class_filters.get("thematique"),
                 subcategory=class_filters.get("subcategory"),
                 pays=class_filters.get("pays")

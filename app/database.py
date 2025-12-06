@@ -2753,6 +2753,7 @@ def get_search_history_stats(
 def get_winning_ads(
     db: DatabaseManager,
     page_id: str = None,
+    ad_id: str = None,
     limit: int = 100,
     days: int = None
 ) -> List[Dict]:
@@ -2762,6 +2763,7 @@ def get_winning_ads(
     Args:
         db: Instance DatabaseManager
         page_id: Filtrer par page (optionnel)
+        ad_id: Filtrer par ad_id (optionnel)
         limit: Nombre max de résultats
         days: Filtrer par période en jours (optionnel)
 
@@ -2778,6 +2780,9 @@ def get_winning_ads(
 
         if page_id:
             query = query.filter(WinningAds.page_id == page_id)
+
+        if ad_id:
+            query = query.filter(WinningAds.ad_id == ad_id)
 
         if days:
             cutoff = datetime.utcnow() - timedelta(days=days)
@@ -2808,6 +2813,7 @@ def get_winning_ads(
 def get_winning_ads_filtered(
     db: DatabaseManager,
     page_id: str = None,
+    ad_id: str = None,
     limit: int = 100,
     days: int = None,
     thematique: str = None,
@@ -2820,6 +2826,7 @@ def get_winning_ads_filtered(
     Args:
         db: Instance DatabaseManager
         page_id: Filtrer par page (optionnel)
+        ad_id: Filtrer par ad_id (optionnel)
         limit: Nombre max de résultats
         days: Filtrer par période en jours (optionnel)
         thematique: Filtrer par catégorie de la page
@@ -2855,6 +2862,9 @@ def get_winning_ads_filtered(
 
         if page_id:
             query = query.filter(WinningAds.page_id == page_id)
+
+        if ad_id:
+            query = query.filter(WinningAds.ad_id == ad_id)
 
         if days:
             cutoff = datetime.utcnow() - timedelta(days=days)
