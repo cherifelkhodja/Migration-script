@@ -72,7 +72,7 @@ class BackgroundSearchWorker:
         S'execute en continu en arriere-plan.
         """
         # Import local pour eviter les imports circulaires
-        from app.database import (
+        from src.infrastructure.persistence.database import (
             DatabaseManager, get_pending_searches,
             update_search_queue_status, recover_interrupted_searches
         )
@@ -132,7 +132,7 @@ class BackgroundSearchWorker:
         Cette methode s'execute dans un thread separe.
         """
         # Import local pour eviter les imports circulaires
-        from app.database import (
+        from src.infrastructure.persistence.database import (
             DatabaseManager, SearchQueue,
             update_search_queue_status, update_search_queue_progress
         )
@@ -156,7 +156,7 @@ class BackgroundSearchWorker:
             update_search_queue_status(db, search_id, "running")
 
             # Importer et executer la recherche
-            from app.search_executor import execute_background_search
+            from src.application.use_cases.search_executor import execute_background_search
 
             result = execute_background_search(
                 db=db,
@@ -219,7 +219,7 @@ class BackgroundSearchWorker:
         Returns:
             ID de la recherche creee
         """
-        from app.database import DatabaseManager, create_search_queue
+        from src.infrastructure.persistence.database import DatabaseManager, create_search_queue
 
         db = DatabaseManager()
         search_id = create_search_queue(
@@ -249,7 +249,7 @@ class BackgroundSearchWorker:
         Returns:
             True si annulee, False sinon
         """
-        from app.database import DatabaseManager, cancel_search_queue
+        from src.infrastructure.persistence.database import DatabaseManager, cancel_search_queue
 
         db = DatabaseManager()
         return cancel_search_queue(db, search_id)
@@ -264,7 +264,7 @@ class BackgroundSearchWorker:
         Returns:
             Dict avec le statut ou None
         """
-        from app.database import DatabaseManager, SearchQueue
+        from src.infrastructure.persistence.database import DatabaseManager, SearchQueue
 
         db = DatabaseManager()
 
@@ -300,7 +300,7 @@ class BackgroundSearchWorker:
         Returns:
             Liste des recherches actives
         """
-        from app.database import DatabaseManager, SearchQueue
+        from src.infrastructure.persistence.database import DatabaseManager, SearchQueue
 
         db = DatabaseManager()
 
@@ -332,7 +332,7 @@ class BackgroundSearchWorker:
 
     def get_stats(self) -> Dict:
         """Retourne les statistiques du worker"""
-        from app.database import DatabaseManager, get_queue_stats
+        from src.infrastructure.persistence.database import DatabaseManager, get_queue_stats
 
         db = DatabaseManager()
         queue_stats = get_queue_stats(db)

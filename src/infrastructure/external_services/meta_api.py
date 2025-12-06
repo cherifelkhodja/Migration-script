@@ -26,12 +26,12 @@ try:
 except ImportError:
     # Fallback pour compatibilite legacy
     try:
-        from app.config import (
+        from src.infrastructure.config import (
             ADS_ARCHIVE, TIMEOUT, LIMIT_SEARCH, LIMIT_COUNT, LIMIT_MIN,
             FIELDS_ADS_COMPLETE,
             META_DELAY_BETWEEN_PAGES
         )
-        from app.api_tracker import get_current_tracker
+        from src.infrastructure.monitoring.api_tracker import get_current_tracker
     except ImportError:
         from config import (
             ADS_ARCHIVE, TIMEOUT, LIMIT_SEARCH, LIMIT_COUNT, LIMIT_MIN,
@@ -311,7 +311,7 @@ class TokenRotator:
         if not self._db:
             return
         try:
-            from app.database import record_token_usage
+            from src.infrastructure.persistence.database import record_token_usage
             record_token_usage(
                 self._db,
                 token=token,
@@ -604,7 +604,7 @@ class MetaAdsClient:
         response_time_ms = int((time.time() - start_time) * 1000)
         if token_id and _token_db:
             try:
-                from app.database import log_token_usage
+                from src.infrastructure.persistence.database import log_token_usage
                 # S'assurer que countries est une liste avant le join
                 countries_str = ",".join(countries) if isinstance(countries, list) and countries else (countries if isinstance(countries, str) else None)
                 log_token_usage(
@@ -674,7 +674,7 @@ class MetaAdsClient:
                 response_time_ms = int((time.time() - start_time) * 1000)
                 if token_id and _token_db:
                     try:
-                        from app.database import log_token_usage
+                        from src.infrastructure.persistence.database import log_token_usage
                         countries_str = ",".join(countries) if isinstance(countries, list) and countries else (countries if isinstance(countries, str) else None)
                         log_token_usage(
                             _token_db,
@@ -709,7 +709,7 @@ class MetaAdsClient:
         response_time_ms = int((time.time() - start_time) * 1000)
         if token_id and _token_db:
             try:
-                from app.database import log_token_usage
+                from src.infrastructure.persistence.database import log_token_usage
                 countries_str = ",".join(countries) if isinstance(countries, list) and countries else (countries if isinstance(countries, str) else None)
                 log_token_usage(
                     _token_db,
@@ -843,7 +843,7 @@ def search_keywords_parallel(
         )
     except ImportError:
         try:
-            from app.config import (
+            from src.infrastructure.config import (
                 META_PARALLEL_ENABLED, META_DELAY_BETWEEN_KEYWORDS,
                 META_DELAY_SEQUENTIAL_NO_PROXY, META_MIN_DELAY_BETWEEN_PARALLEL
             )
@@ -1154,7 +1154,7 @@ def _search_ads_with_dedicated_token(
     response_time_ms = int((time.time() - start_time) * 1000)
     if token_id and db:
         try:
-            from app.database import log_token_usage
+            from src.infrastructure.persistence.database import log_token_usage
             countries_str = ",".join(countries) if isinstance(countries, list) else countries
             log_token_usage(
                 db,
@@ -1187,7 +1187,7 @@ def extract_website_from_ads(ads_list: List[dict]) -> str:
         from src.infrastructure.config import COMPILED_URL_PATTERNS, COMPILED_CAPTION_DOMAIN, COMPILED_DOMAIN_VALIDATOR
     except ImportError:
         try:
-            from app.config import COMPILED_URL_PATTERNS, COMPILED_CAPTION_DOMAIN, COMPILED_DOMAIN_VALIDATOR
+            from src.infrastructure.config import COMPILED_URL_PATTERNS, COMPILED_CAPTION_DOMAIN, COMPILED_DOMAIN_VALIDATOR
         except ImportError:
             # Fallback si import échoue
             COMPILED_URL_PATTERNS = [
@@ -1357,7 +1357,7 @@ def cached_search_ads(
         return (ads, False)
 
     try:
-        from app.database import generate_cache_key, get_cached_response, set_cached_response
+        from src.infrastructure.persistence.database import generate_cache_key, get_cached_response, set_cached_response
 
         # Generer la cle de cache
         cache_key = generate_cache_key(
@@ -1424,7 +1424,7 @@ def cached_fetch_ads_for_page(
         return (ads, False)
 
     try:
-        from app.database import generate_cache_key, get_cached_response, set_cached_response
+        from src.infrastructure.persistence.database import generate_cache_key, get_cached_response, set_cached_response
 
         # Generer la cle de cache
         cache_key = generate_cache_key(

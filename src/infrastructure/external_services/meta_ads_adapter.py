@@ -27,7 +27,7 @@ class MetaAdsSearchAdapter(AdsSearchService):
     l'implementation concrete de l'API Meta.
 
     Example:
-        >>> from app.meta_api import MetaAdsClient
+        >>> from src.infrastructure.external_services.meta_api import MetaAdsClient
         >>> client = MetaAdsClient(access_token="...")
         >>> adapter = MetaAdsSearchAdapter(client)
         >>> result = adapter.search_by_keywords(params)
@@ -247,7 +247,7 @@ class MetaAdsSearchAdapter(AdsSearchService):
             Dictionnaire avec infos sur les tokens.
         """
         try:
-            from app.meta_api import get_token_rotator
+            from src.infrastructure.external_services.meta_api import get_token_rotator
 
             rotator = get_token_rotator()
             if rotator:

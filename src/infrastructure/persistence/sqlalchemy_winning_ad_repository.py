@@ -38,7 +38,7 @@ class SQLAlchemyWinningAdRepository(WinningAdRepository):
             return None
         try:
             # Utiliser la fonction existante de database.py
-            from app.database import get_winning_ads_filtered
+            from src.infrastructure.persistence.database import get_winning_ads_filtered
             ads = get_winning_ads_filtered(self._db, ad_id=str(ad_id), limit=1)
             if ads:
                 return self._row_to_winning_ad(ads[0])
@@ -61,7 +61,7 @@ class SQLAlchemyWinningAdRepository(WinningAdRepository):
         if not self._db:
             return []
         try:
-            from app.database import get_winning_ads
+            from src.infrastructure.persistence.database import get_winning_ads
             rows = get_winning_ads(self._db, limit=limit, offset=offset)
             return [self._row_to_winning_ad(r) for r in rows]
         except Exception:
@@ -72,7 +72,7 @@ class SQLAlchemyWinningAdRepository(WinningAdRepository):
         if not self._db:
             return []
         try:
-            from app.database import get_winning_ads_by_page
+            from src.infrastructure.persistence.database import get_winning_ads_by_page
             rows = get_winning_ads_by_page(self._db, page_id=str(page_id), limit=limit)
             return [self._row_to_winning_ad(r) for r in rows]
         except Exception:
@@ -83,7 +83,7 @@ class SQLAlchemyWinningAdRepository(WinningAdRepository):
         if not self._db:
             return []
         try:
-            from app.database import get_winning_ads_filtered
+            from src.infrastructure.persistence.database import get_winning_ads_filtered
             rows = get_winning_ads_filtered(self._db, critere=criteria, limit=limit)
             return [self._row_to_winning_ad(r) for r in rows]
         except Exception:
@@ -94,7 +94,7 @@ class SQLAlchemyWinningAdRepository(WinningAdRepository):
         if not self._db:
             return []
         try:
-            from app.database import get_winning_ads
+            from src.infrastructure.persistence.database import get_winning_ads
             rows = get_winning_ads(self._db, days=days, limit=limit)
             return [self._row_to_winning_ad(r) for r in rows]
         except Exception:
@@ -105,7 +105,7 @@ class SQLAlchemyWinningAdRepository(WinningAdRepository):
         if not self._db:
             return []
         try:
-            from app.database import get_winning_ads_filtered
+            from src.infrastructure.persistence.database import get_winning_ads_filtered
             rows = get_winning_ads_filtered(
                 self._db, search_log_id=search_log_id, limit=limit
             )
@@ -118,7 +118,7 @@ class SQLAlchemyWinningAdRepository(WinningAdRepository):
         if not self._db:
             return 0
         try:
-            from app.database import get_winning_ads_stats
+            from src.infrastructure.persistence.database import get_winning_ads_stats
             stats = get_winning_ads_stats(self._db)
             return stats.get("total", 0)
         except Exception:
@@ -129,7 +129,7 @@ class SQLAlchemyWinningAdRepository(WinningAdRepository):
         if not self._db:
             return winning_ad
         try:
-            from app.database import save_winning_ads
+            from src.infrastructure.persistence.database import save_winning_ads
             ads_data = [{
                 "ad_id": str(winning_ad.ad_id),
                 "page_id": str(winning_ad.page_id),
@@ -175,7 +175,7 @@ class SQLAlchemyWinningAdRepository(WinningAdRepository):
         if not self._db:
             return {}
         try:
-            from app.database import get_winning_ads_stats
+            from src.infrastructure.persistence.database import get_winning_ads_stats
             return get_winning_ads_stats(self._db)
         except Exception:
             return {}

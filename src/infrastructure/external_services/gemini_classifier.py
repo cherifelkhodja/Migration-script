@@ -509,7 +509,7 @@ class GeminiClassifier:
             self.model = model_name
         elif db:
             try:
-                from app.database import get_app_setting, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT
+                from src.infrastructure.persistence.database import get_app_setting, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT
                 self.model = get_app_setting(db, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT)
             except Exception:
                 self.model = "gemini-1.5-flash"  # Fallback
@@ -853,7 +853,7 @@ def classify_and_save(
     Classifie des pages et sauvegarde les resultats en base.
     """
     # Import local pour eviter les imports circulaires
-    from app.database import (
+    from src.infrastructure.persistence.database import (
         get_pages_for_classification,
         update_pages_classification_batch,
         build_taxonomy_prompt,
@@ -919,7 +919,7 @@ def classify_with_extracted_content(
     Evite de re-scraper les sites en reutilisant les donnees de la phase 6.
     """
     # Import local pour eviter les imports circulaires
-    from app.database import (
+    from src.infrastructure.persistence.database import (
         update_pages_classification_batch,
         build_taxonomy_prompt,
         init_default_taxonomy
@@ -1048,7 +1048,7 @@ def classify_pages_batch(
     Utilise pendant la phase 6 pour classifier immediatement apres scraping.
     """
     # Import local pour eviter les imports circulaires
-    from app.database import build_taxonomy_prompt, init_default_taxonomy
+    from src.infrastructure.persistence.database import build_taxonomy_prompt, init_default_taxonomy
 
     if not pages_data:
         return {}

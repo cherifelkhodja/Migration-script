@@ -20,7 +20,7 @@ try:
     CACHE_ENABLED = True
 except ImportError:
     try:
-        from app.cache import cached, invalidate_stats_cache
+        from src.infrastructure.cache import cached, invalidate_stats_cache
         CACHE_ENABLED = True
     except ImportError:
         CACHE_ENABLED = False

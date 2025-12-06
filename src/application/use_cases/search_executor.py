@@ -22,7 +22,7 @@ try:
         MIN_ADS_LISTE
     )
 except ImportError:
-    from app.config import (
+    from src.infrastructure.config import (
         META_DELAY_BETWEEN_KEYWORDS,
         META_DELAY_BETWEEN_BATCHES,
         WINNING_AD_CRITERIA,
@@ -116,7 +116,7 @@ class BackgroundProgressTracker:
     def _update_db(self, phase: int, percent: int, message: str,
                    phase_name: str = None, phases_data: list = None):
         """Met à jour la base de données"""
-        from app.database import update_search_queue_progress
+        from src.infrastructure.persistence.database import update_search_queue_progress
 
         update_search_queue_progress(
             self.db,
@@ -192,12 +192,12 @@ def execute_background_search(
         from src.infrastructure.scrapers.web_analyzer import analyze_website_complete
         from src.infrastructure.monitoring.api_tracker import APITracker, set_current_tracker
     except ImportError:
-        from app.meta_api import MetaAdsClient, init_token_rotator, get_token_rotator, extract_currency_from_ads
-        from app.shopify_detector import detect_cms_from_url
-        from app.web_analyzer import analyze_website_complete
-        from app.api_tracker import APITracker, set_current_tracker
+        from src.infrastructure.external_services.meta_api import MetaAdsClient, init_token_rotator, get_token_rotator, extract_currency_from_ads
+        from src.infrastructure.scrapers.cms_detector import detect_cms_from_url
+        from src.infrastructure.scrapers.web_analyzer import analyze_website_complete
+        from src.infrastructure.monitoring.api_tracker import APITracker, set_current_tracker
 
-    from app.database import (
+    from src.infrastructure.persistence.database import (
         get_active_meta_tokens_with_proxies, get_blacklist_ids, get_cached_pages_info,
         create_search_log, update_search_log, save_pages_recherche,
         save_suivi_page, save_ads_recherche, save_winning_ads,
@@ -267,7 +267,7 @@ def execute_background_search(
     try:
         from src.infrastructure.external_services.meta_api import search_keywords_parallel
     except ImportError:
-        from app.meta_api import search_keywords_parallel
+        from src.infrastructure.external_services.meta_api import search_keywords_parallel
 
     def phase1_progress(kw, current, total):
         """Callback pour la progression de la recherche"""
@@ -743,7 +743,7 @@ def execute_background_search(
             try:
                 from src.infrastructure.external_services.gemini_classifier import classify_pages_batch
             except ImportError:
-                from app.gemini_classifier import classify_pages_batch
+                from src.infrastructure.external_services.gemini_classifier import classify_pages_batch
 
             classification_results = classify_pages_batch(db, pages_to_classify_data)
 
@@ -820,7 +820,7 @@ def execute_background_search(
 
     try:
         # D'abord, vérifier quelles pages existent déjà (pour l'historique)
-        from app.database import PageRecherche, WinningAds
+        from src.infrastructure.persistence.database import PageRecherche, WinningAds
         existing_page_ids = set()
         existing_ad_ids = set()
 

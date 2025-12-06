@@ -30,7 +30,7 @@ class Container:
     hexagonale pour une utilisation facile par le dashboard.
 
     Example:
-        >>> from app.database import DatabaseManager
+        >>> from src.infrastructure.persistence.database import DatabaseManager
         >>> db = DatabaseManager()
         >>> container = Container.create(db)
         >>> results = container.search_use_case.execute(request)
@@ -137,7 +137,7 @@ class Container:
         """
         # Import tardif pour eviter les dependances circulaires
         try:
-            from app.database import DatabaseManager
+            from src.infrastructure.persistence.database import DatabaseManager
             db_manager = DatabaseManager(database_url)
             return cls.create(db_manager=db_manager)
         except Exception:

@@ -300,7 +300,7 @@ class APITracker:
 
         try:
             # Import local pour eviter les imports circulaires
-            from app.database import save_api_calls
+            from src.infrastructure.persistence.database import save_api_calls
             save_api_calls(self.db, self.search_log_id, self.calls)
         except Exception as e:
             print(f"Erreur sauvegarde API calls: {e}")
