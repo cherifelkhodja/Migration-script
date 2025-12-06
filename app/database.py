@@ -7,6 +7,7 @@ from typing import List, Dict, Optional, Any, Tuple
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, Float, Index, Boolean
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.dialects.postgresql import insert
@@ -138,7 +139,7 @@ class WinningAds(Base):
     __tablename__ = "winning_ads"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    ad_id = Column(String(50), nullable=False, index=True)
+    ad_id = Column(String(50), unique=True, nullable=False, index=True)
     page_id = Column(String(50), nullable=False, index=True)
     page_name = Column(String(255))
     ad_creation_time = Column(DateTime)
@@ -758,6 +759,30 @@ def _run_migrations(db: DatabaseManager):
         "CREATE INDEX IF NOT EXISTS idx_winning_search ON winning_ads (search_log_id)",
     ]
 
+    # Nettoyage des doublons winning_ads AVANT d'ajouter la contrainte unique
+    # Garde l'entrée la plus récente (id le plus élevé) pour chaque ad_id
+    cleanup_duplicates_sql = """
+    DELETE FROM winning_ads
+    WHERE id NOT IN (
+        SELECT MAX(id)
+        FROM winning_ads
+        GROUP BY ad_id
+    )
+    """
+
+    # Contrainte unique sur ad_id (après nettoyage des doublons)
+    unique_constraint_sql = """
+    DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'uq_winning_ads_ad_id'
+        ) THEN
+            ALTER TABLE winning_ads ADD CONSTRAINT uq_winning_ads_ad_id UNIQUE (ad_id);
+        END IF;
+    END $$;
+    """
+
     with db.get_session() as session:
         # Run column migrations
         for table, column, sql in migrations:
@@ -778,6 +803,26 @@ def _run_migrations(db: DatabaseManager):
                 # Index existe déjà ou autre erreur non critique
                 session.rollback()
                 pass
+
+        # Nettoyage des doublons winning_ads
+        try:
+            result = session.execute(text(cleanup_duplicates_sql))
+            deleted = result.rowcount
+            session.commit()
+            if deleted > 0:
+                print(f"[Migration] Supprimé {deleted} doublons de winning_ads")
+        except Exception as e:
+            session.rollback()
+            pass
+
+        # Ajout contrainte unique sur ad_id
+        try:
+            session.execute(text(unique_constraint_sql))
+            session.commit()
+        except Exception as e:
+            # Contrainte existe déjà
+            session.rollback()
+            pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2018,12 +2063,22 @@ def save_winning_ads(
     if not winning_ads_data:
         return (0, 0)
 
+    # Dédupliquer les données d'entrée (garder la première occurrence de chaque ad_id)
+    seen_ad_ids = set()
+    deduplicated_data = []
+    for data in winning_ads_data:
+        ad = data.get("ad", {})
+        ad_id = str(ad.get("id", ""))
+        if ad_id and ad_id not in seen_ad_ids:
+            seen_ad_ids.add(ad_id)
+            deduplicated_data.append(data)
+
     scan_time = datetime.utcnow()
     new_count = 0
     updated_count = 0
 
     with db.get_session() as session:
-        for data in winning_ads_data:
+        for data in deduplicated_data:
             ad = data.get("ad", {})
             ad_id = str(ad.get("id", ""))
 
@@ -2073,7 +2128,7 @@ def save_winning_ads(
                     existing.is_new = False
                 updated_count += 1
             else:
-                # Créer une nouvelle entrée
+                # Créer une nouvelle entrée avec gestion des race conditions
                 winning_entry = WinningAds(
                     ad_id=ad_id,
                     page_id=page_id,
@@ -2091,10 +2146,60 @@ def save_winning_ads(
                     search_log_id=search_log_id,
                     is_new=True
                 )
-                session.add(winning_entry)
-                new_count += 1
+                try:
+                    # Utiliser un savepoint pour ne pas annuler toute la transaction
+                    with session.begin_nested():
+                        session.add(winning_entry)
+                        session.flush()
+                    new_count += 1
+                except IntegrityError:
+                    # Race condition: l'ad a été insérée par un autre processus
+                    # Le savepoint est automatiquement rollback, on fait une mise à jour
+                    existing = session.query(WinningAds).filter(WinningAds.ad_id == ad_id).first()
+                    if existing:
+                        existing.page_id = page_id
+                        existing.page_name = ad.get("page_name", existing.page_name)
+                        existing.ad_creation_time = ad_creation or existing.ad_creation_time
+                        existing.ad_age_days = data.get("age_days", existing.ad_age_days)
+                        existing.eu_total_reach = data.get("reach", existing.eu_total_reach)
+                        existing.date_scan = scan_time
+                        if search_log_id:
+                            existing.search_log_id = search_log_id
+                            existing.is_new = False
+                        updated_count += 1
 
     return (new_count, updated_count)
+
+
+def cleanup_duplicate_winning_ads(db: DatabaseManager) -> int:
+    """
+    Supprime les doublons de winning_ads (garde l'entrée la plus récente pour chaque ad_id).
+    Utile pour la maintenance ou après une migration.
+
+    Returns:
+        Nombre de doublons supprimés
+    """
+    from sqlalchemy import text
+
+    cleanup_sql = """
+    DELETE FROM winning_ads
+    WHERE id NOT IN (
+        SELECT MAX(id)
+        FROM winning_ads
+        GROUP BY ad_id
+    )
+    """
+
+    with db.get_session() as session:
+        try:
+            result = session.execute(text(cleanup_sql))
+            deleted = result.rowcount
+            session.commit()
+            return deleted
+        except Exception as e:
+            session.rollback()
+            print(f"[cleanup_duplicate_winning_ads] Erreur: {e}")
+            return 0
 
 
 def get_winning_ads(
