@@ -613,12 +613,18 @@ def execute_background_search(
     classified_count = 0
     gemini_key = os.getenv("GEMINI_API_KEY", "")
 
+    # Debug: compter les pages par catégorie
+    pages_skipped = 0
+    pages_no_content = 0
+
     # Préparer les pages à classifier (celles analysées avec du contenu)
     pages_to_classify_data = []
     for pid, web_data in web_results.items():
         if web_data.get("_skip_classification"):
+            pages_skipped += 1
             continue
-        if web_data.get("site_title") or web_data.get("site_description") or web_data.get("site_h1"):
+        has_content = web_data.get("site_title") or web_data.get("site_description") or web_data.get("site_h1")
+        if has_content:
             pages_to_classify_data.append({
                 "page_id": pid,
                 "url": pages_final.get(pid, {}).get("website", ""),
@@ -627,8 +633,27 @@ def execute_background_search(
                 "site_h1": web_data.get("site_h1", ""),
                 "site_keywords": web_data.get("site_keywords", "")
             })
+        else:
+            pages_no_content += 1
 
-    print(f"[Search #{search_id}] Classification: {len(pages_to_classify_data)} pages avec contenu à classifier")
+    # Log détaillé pour debug classification
+    print(f"[Search #{search_id}] Classification Debug:")
+    print(f"   📊 Total web_results: {len(web_results)}")
+    print(f"   ⏩ Pages skippées (cache): {pages_skipped}")
+    print(f"   ❌ Pages sans contenu: {pages_no_content}")
+    print(f"   ✅ Pages à classifier: {len(pages_to_classify_data)}")
+
+    if pages_to_classify_data:
+        print(f"   📝 Exemples de pages à classifier:")
+        for p in pages_to_classify_data[:3]:
+            title = p.get('site_title', '')[:40] or 'VIDE'
+            desc = p.get('site_description', '')[:40] or 'VIDE'
+            print(f"      → {p['page_id']}: title='{title}' desc='{desc}'")
+
+    if gemini_key:
+        print(f"   🔑 Clé Gemini: configurée ({gemini_key[:8]}...)")
+    else:
+        print(f"   ⚠️ Clé Gemini: NON CONFIGURÉE")
 
     if gemini_key and pages_to_classify_data:
         tracker.update_step("Classification Gemini", 0, 1)
