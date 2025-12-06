@@ -9,10 +9,14 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from src.application.ports.repositories.page_repository import PageRepository
+from src.application.ports.repositories.winning_ad_repository import WinningAdRepository
 from src.application.use_cases.detect_winning_ads import DetectWinningAdsUseCase
 from src.application.use_cases.search_ads import SearchAdsUseCase
 from src.infrastructure.external_services.meta_ads_adapter import MetaAdsSearchAdapter
 from src.infrastructure.persistence.sqlalchemy_page_repository import SQLAlchemyPageRepository
+from src.infrastructure.persistence.sqlalchemy_winning_ad_repository import (
+    SQLAlchemyWinningAdRepository,
+)
 from src.presentation.view_models.page_view_model import PageViewModel
 from src.presentation.view_models.search_view_model import SearchViewModel
 
@@ -32,18 +36,21 @@ class Container:
         >>> results = container.search_use_case.execute(request)
     """
 
-    # Repositories
+    # Repositories (required)
     page_repository: PageRepository
 
-    # Use Cases
+    # Use Cases (required)
     search_use_case: SearchAdsUseCase
     winning_ads_use_case: DetectWinningAdsUseCase
 
-    # ViewModels
+    # ViewModels (required)
     page_view_model: PageViewModel
     search_view_model: SearchViewModel
 
-    # External Services
+    # Optional repositories
+    winning_ad_repository: Optional[WinningAdRepository] = None
+
+    # External Services (optional)
     meta_adapter: Optional[MetaAdsSearchAdapter] = None
 
     @classmethod
@@ -78,6 +85,13 @@ class Container:
             db_manager=db_manager
         )
 
+        # Winning Ads Repository - creer si db_manager et pas fourni
+        if winning_ads_repository is None and db_manager:
+            winning_ads_repository = SQLAlchemyWinningAdRepository(
+                session=session,
+                db_manager=db_manager
+            )
+
         # External Services - Meta Adapter
         meta_adapter = None
         if meta_client:
@@ -85,20 +99,24 @@ class Container:
 
         # Use Cases
         search_use_case = SearchAdsUseCase(
-            meta_port=meta_adapter,
+            ads_service=meta_adapter,
             page_repository=page_repository
         )
 
         winning_ads_use_case = DetectWinningAdsUseCase(
-            winning_ads_repository=winning_ads_repository
+            winning_ad_repository=winning_ads_repository
         )
 
         # ViewModels
         page_view_model = PageViewModel(page_repository=page_repository)
-        search_view_model = SearchViewModel(search_use_case=search_use_case)
+        search_view_model = SearchViewModel(
+            ads_service=meta_adapter,
+            winning_repository=winning_ads_repository,
+        )
 
         return cls(
             page_repository=page_repository,
+            winning_ad_repository=winning_ads_repository,
             search_use_case=search_use_case,
             winning_ads_use_case=winning_ads_use_case,
             page_view_model=page_view_model,

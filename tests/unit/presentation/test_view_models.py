@@ -286,6 +286,86 @@ class TestPageViewModel:
 
         assert len(pages) == 1
 
+    def test_get_pages_by_etat_exception(
+        self, mock_page_repository: MagicMock
+    ) -> None:
+        """Test exception dans get_pages_by_etat."""
+        mock_page_repository.find_by_etat.side_effect = RuntimeError("DB error")
+
+        vm = PageViewModel(page_repository=mock_page_repository)
+        pages = vm.get_pages_by_etat("L")
+
+        assert pages == []
+
+    def test_get_pages_by_cms_exception(
+        self, mock_page_repository: MagicMock
+    ) -> None:
+        """Test exception dans get_pages_by_cms."""
+        mock_page_repository.find_by_cms.side_effect = RuntimeError("DB error")
+
+        vm = PageViewModel(page_repository=mock_page_repository)
+        pages = vm.get_pages_by_cms("shopify")
+
+        assert pages == []
+
+    def test_get_pages_by_category_exception(
+        self, mock_page_repository: MagicMock
+    ) -> None:
+        """Test exception dans get_pages_by_category."""
+        mock_page_repository.find_by_category.side_effect = RuntimeError("DB error")
+
+        vm = PageViewModel(page_repository=mock_page_repository)
+        pages = vm.get_pages_by_category("Mode")
+
+        assert pages == []
+
+    def test_get_statistics_exception(self, mock_page_repository: MagicMock) -> None:
+        """Test exception dans get_statistics."""
+        mock_page_repository.count.side_effect = RuntimeError("DB error")
+
+        vm = PageViewModel(page_repository=mock_page_repository)
+        stats = vm.get_statistics()
+
+        assert stats["total_pages"] == 0
+        assert stats["by_etat"] == {}
+        assert stats["by_cms"] == {}
+
+    def test_update_classification_exception(
+        self, mock_page_repository: MagicMock
+    ) -> None:
+        """Test exception dans update_classification."""
+        mock_page_repository.get_by_id.side_effect = RuntimeError("DB error")
+
+        vm = PageViewModel(page_repository=mock_page_repository)
+        result = vm.update_classification(page_id="123", category="Test")
+
+        assert result is False
+
+    def test_get_pages_needing_scan_exception(
+        self, mock_page_repository: MagicMock
+    ) -> None:
+        """Test exception dans get_pages_needing_scan."""
+        mock_page_repository.find_needing_scan.side_effect = RuntimeError("DB error")
+
+        vm = PageViewModel(page_repository=mock_page_repository)
+        pages = vm.get_pages_needing_scan(limit=10)
+
+        assert pages == []
+
+    def test_set_page_ads(self, mock_page_repository: MagicMock) -> None:
+        """Test set_page_ads et current_ads."""
+        vm = PageViewModel(page_repository=mock_page_repository)
+
+        # Creer des ads mock
+        mock_ad1 = MagicMock(spec=Ad)
+        mock_ad2 = MagicMock(spec=Ad)
+
+        vm.set_page_ads([mock_ad1, mock_ad2])
+
+        assert len(vm.current_ads) == 2
+        assert vm.current_ads[0] == mock_ad1
+        assert vm.current_ads[1] == mock_ad2
+
 
 # ============================================================
 # Tests SearchResultItem
