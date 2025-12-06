@@ -355,18 +355,30 @@ def execute_background_search(
                         return f"https://{cap}"
         return ""
 
+    pages_without_url = []
     for i, (pid, data) in enumerate(pages_filtered.items()):
         cached = cached_pages.get(str(pid), {})
 
-        if cached.get("lien_site") and not cached.get("needs_rescan"):
+        # Utiliser URL en cache si disponible (peu importe l'âge)
+        if cached.get("lien_site"):
             data["website"] = cached["lien_site"]
             data["_from_cache"] = True
         else:
             data["website"] = extract_website_from_ads(page_ads.get(pid, []))
             data["_from_cache"] = False
 
+        # Tracker les pages sans URL
+        if not data["website"]:
+            pages_without_url.append((pid, data.get("page_name", "Unknown")))
+
         if i % 10 == 0:
             tracker.update_step("Extraction URL", i + 1, len(pages_filtered))
+
+    # Log pages sans URL
+    if pages_without_url:
+        print(f"[Search #{search_id}] ⚠️ {len(pages_without_url)} pages sans URL:")
+        for pid, name in pages_without_url[:5]:
+            print(f"   → {pid} ({name[:30]})")
 
     sites_found = sum(1 for d in pages_filtered.values() if d["website"])
     cached_sites = sum(1 for d in pages_filtered.values() if d.get("_from_cache"))
@@ -375,6 +387,7 @@ def execute_background_search(
         "Sites trouvés": sites_found,
         "Sites en cache": cached_sites,
         "Nouveaux sites": sites_found - cached_sites,
+        "Sans URL": len(pages_without_url),
     }
     tracker.complete_phase(f"{sites_found} sites ({cached_sites} en cache)", stats=phase3_stats)
 
@@ -382,10 +395,11 @@ def execute_background_search(
     tracker.start_phase(4, "Détection CMS", total_phases=8)
     pages_with_sites = {pid: data for pid, data in pages_filtered.items() if data["website"]}
 
+    # Le CMS ne change presque jamais, on utilise le cache sans limite d'âge
     pages_need_cms = []
     for pid, data in pages_with_sites.items():
         cached = cached_pages.get(str(pid), {})
-        if cached.get("cms") and cached["cms"] not in ("Unknown", "Inconnu", "") and not cached.get("needs_rescan"):
+        if cached.get("cms") and cached["cms"] not in ("Unknown", "Inconnu", ""):
             data["cms"] = cached["cms"]
             data["is_shopify"] = cached["cms"] == "Shopify"
             data["_cms_cached"] = True
@@ -509,23 +523,24 @@ def execute_background_search(
     tracker.start_phase(6, "Analyse sites web", total_phases=8)
     web_results = {}
 
-    # Logique simplifiée:
-    # - Si page en BDD avec dernier_scan < 1 jour ET thématique → utiliser cache
-    # - Sinon → analyser le site et classifier
+    # Cache VALIDE = page en BDD avec:
+    #   1. dernier_scan < 1 jour (needs_rescan = False)
+    #   2. nombre_produits renseigné (analyse web déjà faite)
+    #   3. thématique existe (classification Gemini déjà faite)
     pages_need_analysis = []
     pages_cached = 0
+    pages_no_thematique = 0
+    pages_expired = 0
 
     for pid, data in pages_final.items():
         cached = cached_pages.get(str(pid), {})
 
-        # Condition simple: en cache valide (< 1 jour) ET a une thématique
-        is_valid_cache = (
-            not cached.get("needs_rescan") and
-            cached.get("nombre_produits") is not None and
-            bool(cached.get("thematique"))
-        )
+        # Vérifier les 3 conditions du cache
+        is_recent = not cached.get("needs_rescan")
+        has_analysis = cached.get("nombre_produits") is not None
+        has_thematique = bool(cached.get("thematique"))
 
-        if is_valid_cache:
+        if is_recent and has_analysis and has_thematique:
             web_results[pid] = {
                 "product_count": cached.get("nombre_produits", 0),
                 "theme": cached.get("template", ""),
@@ -538,9 +553,18 @@ def execute_background_search(
                 data["currency"] = cached["devise"]
             pages_cached += 1
         elif data.get("website"):
+            if not is_recent:
+                pages_expired += 1
+            elif not has_thematique:
+                pages_no_thematique += 1
             pages_need_analysis.append((pid, data))
 
-    print(f"[Search #{search_id}] {pages_cached} pages en cache valide, {len(pages_need_analysis)} à analyser")
+    print(f"[Search #{search_id}] Phase 6 - Cache:")
+    print(f"   ✅ {pages_cached} pages en cache valide (scan < 1j + thématique)")
+    print(f"   🔄 {len(pages_need_analysis)} pages à analyser:")
+    print(f"      - {pages_expired} expirées (scan > 1 jour)")
+    print(f"      - {pages_no_thematique} sans thématique")
+    print(f"      - {len(pages_need_analysis) - pages_expired - pages_no_thematique} nouvelles")
 
     def analyze_web_worker(pid_data):
         pid, data = pid_data
