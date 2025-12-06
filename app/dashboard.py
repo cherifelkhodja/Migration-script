@@ -3560,6 +3560,7 @@ def render_pages_shops():
                     "Winning Ads": lambda p: p.get("winning_ads", 0),
                     "Produits": lambda p: p.get("nombre_produits", 0),
                     "Score": lambda p: p.get("score", 0),
+                    "Dernier Scan": lambda p: p.get("dernier_scan").strftime("%Y-%m-%d %H:%M") if p.get("dernier_scan") else "",
                     "Keywords": lambda p: p.get("keywords", ""),
                     "Thématique": lambda p: p.get("thematique", ""),
                     "Sous-catégorie": lambda p: p.get("subcategory", ""),
@@ -3571,7 +3572,7 @@ def render_pages_shops():
                 }
 
                 # Colonnes par défaut
-                default_columns = ["Page ID", "Nom", "Site", "CMS", "État", "Ads Actives", "Winning Ads", "Score"]
+                default_columns = ["Page ID", "Nom", "Site", "CMS", "État", "Ads Actives", "Winning Ads", "Dernier Scan", "Score"]
 
                 with st.popover("📥 Export CSV"):
                     st.markdown("**Colonnes à exporter:**")
@@ -3749,6 +3750,11 @@ def render_pages_shops():
                 # Formater thématique
                 df["thematique_display"] = df["thematique"].apply(lambda x: x if x else "—")
 
+                # Formater dernier scan
+                df["scan_display"] = df["dernier_scan"].apply(
+                    lambda x: x.strftime("%d/%m %H:%M") if pd.notna(x) and x else "—"
+                )
+
                 # Formater classification avec badge de confiance
                 def format_classification(row):
                     subcat = row.get("subcategory", "")
@@ -3766,11 +3772,11 @@ def render_pages_shops():
                 df["classification_display"] = df.apply(format_classification, axis=1)
 
                 # Colonnes à afficher (avec thématique et classification)
-                display_cols = ["score_display", "page_name", "lien_site", "cms", "etat_display", "nombre_ads_active", "winning_ads", "thematique_display", "classification_display"]
+                display_cols = ["score_display", "page_name", "lien_site", "cms", "etat_display", "nombre_ads_active", "winning_ads", "scan_display", "thematique_display", "classification_display"]
                 df_display = df[[c for c in display_cols if c in df.columns]]
 
                 # Renommer colonnes
-                col_names = ["Score", "Nom", "Site", "CMS", "État", "Ads", "🏆", "Thématique", "Classification"]
+                col_names = ["Score", "Nom", "Site", "CMS", "État", "Ads", "🏆", "Scan", "Thématique", "Classification"]
                 df_display.columns = col_names[:len(df_display.columns)]
 
                 st.dataframe(
