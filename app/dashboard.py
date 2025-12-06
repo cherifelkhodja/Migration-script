@@ -885,7 +885,7 @@ class SearchProgressTracker:
 
             if summary_data:
                 df = pd.DataFrame(summary_data)
-                st.dataframe(df, hide_index=True, use_container_width=True)
+                st.dataframe(df, hide_index=True, width="stretch")
 
             # Stats API si disponibles
             if self.api_tracker:
@@ -1515,17 +1515,17 @@ def render_sidebar():
         # Main Navigation
         st.markdown("### Main")
 
-        if st.button("🏠 Dashboard", use_container_width=True,
+        if st.button("🏠 Dashboard", width="stretch",
                      type="primary" if st.session_state.current_page == "Dashboard" else "secondary"):
             st.session_state.current_page = "Dashboard"
             st.rerun()
 
-        if st.button("🔍 Search Ads", use_container_width=True,
+        if st.button("🔍 Search Ads", width="stretch",
                      type="primary" if st.session_state.current_page == "Search Ads" else "secondary"):
             st.session_state.current_page = "Search Ads"
             st.rerun()
 
-        if st.button("📜 Search Logs", use_container_width=True,
+        if st.button("📜 Search Logs", width="stretch",
                      type="primary" if st.session_state.current_page == "Search Logs" else "secondary"):
             st.session_state.current_page = "Search Logs"
             st.rerun()
@@ -1542,23 +1542,23 @@ def render_sidebar():
                 btn_label = "⏳ Recherches en cours"
                 btn_type = "primary" if st.session_state.current_page == "Background Searches" else "secondary"
 
-            if st.button(btn_label, use_container_width=True, type=btn_type):
+            if st.button(btn_label, width="stretch", type=btn_type):
                 st.session_state.current_page = "Background Searches"
                 st.rerun()
         except Exception:
             pass  # Worker non initialisé
 
-        if st.button("🏪 Pages / Shops", use_container_width=True,
+        if st.button("🏪 Pages / Shops", width="stretch",
                      type="primary" if st.session_state.current_page == "Pages / Shops" else "secondary"):
             st.session_state.current_page = "Pages / Shops"
             st.rerun()
 
-        if st.button("📋 Watchlists", use_container_width=True,
+        if st.button("📋 Watchlists", width="stretch",
                      type="primary" if st.session_state.current_page == "Watchlists" else "secondary"):
             st.session_state.current_page = "Watchlists"
             st.rerun()
 
-        if st.button("🔔 Alerts", use_container_width=True,
+        if st.button("🔔 Alerts", width="stretch",
                      type="primary" if st.session_state.current_page == "Alerts" else "secondary"):
             st.session_state.current_page = "Alerts"
             st.rerun()
@@ -1566,17 +1566,17 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### Organisation")
 
-        if st.button("⭐ Favoris", use_container_width=True,
+        if st.button("⭐ Favoris", width="stretch",
                      type="primary" if st.session_state.current_page == "Favoris" else "secondary"):
             st.session_state.current_page = "Favoris"
             st.rerun()
 
-        if st.button("📁 Collections", use_container_width=True,
+        if st.button("📁 Collections", width="stretch",
                      type="primary" if st.session_state.current_page == "Collections" else "secondary"):
             st.session_state.current_page = "Collections"
             st.rerun()
 
-        if st.button("🏷️ Tags", use_container_width=True,
+        if st.button("🏷️ Tags", width="stretch",
                      type="primary" if st.session_state.current_page == "Tags" else "secondary"):
             st.session_state.current_page = "Tags"
             st.rerun()
@@ -1584,22 +1584,22 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### Analyse")
 
-        if st.button("📈 Monitoring", use_container_width=True,
+        if st.button("📈 Monitoring", width="stretch",
                      type="primary" if st.session_state.current_page == "Monitoring" else "secondary"):
             st.session_state.current_page = "Monitoring"
             st.rerun()
 
-        if st.button("📊 Analytics", use_container_width=True,
+        if st.button("📊 Analytics", width="stretch",
                      type="primary" if st.session_state.current_page == "Analytics" else "secondary"):
             st.session_state.current_page = "Analytics"
             st.rerun()
 
-        if st.button("🏆 Winning Ads", use_container_width=True,
+        if st.button("🏆 Winning Ads", width="stretch",
                      type="primary" if st.session_state.current_page == "Winning Ads" else "secondary"):
             st.session_state.current_page = "Winning Ads"
             st.rerun()
 
-        if st.button("🎨 Creative Analysis", use_container_width=True,
+        if st.button("🎨 Creative Analysis", width="stretch",
                      type="primary" if st.session_state.current_page == "Creative Analysis" else "secondary"):
             st.session_state.current_page = "Creative Analysis"
             st.rerun()
@@ -1607,7 +1607,7 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### Automation")
 
-        if st.button("🕐 Scans Programmés", use_container_width=True,
+        if st.button("🕐 Scans Programmés", width="stretch",
                      type="primary" if st.session_state.current_page == "Scheduled Scans" else "secondary"):
             st.session_state.current_page = "Scheduled Scans"
             st.rerun()
@@ -1615,12 +1615,12 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### Config")
 
-        if st.button("🚫 Blacklist", use_container_width=True,
+        if st.button("🚫 Blacklist", width="stretch",
                      type="primary" if st.session_state.current_page == "Blacklist" else "secondary"):
             st.session_state.current_page = "Blacklist"
             st.rerun()
 
-        if st.button("⚙️ Settings", use_container_width=True,
+        if st.button("⚙️ Settings", width="stretch",
                      type="primary" if st.session_state.current_page == "Settings" else "secondary"):
             st.session_state.current_page = "Settings"
             st.rerun()
@@ -1807,7 +1807,7 @@ def render_dashboard():
                         value_suffix=" pages",
                         height=280
                     )
-                    st.plotly_chart(fig, key="dash_etats", use_container_width=True)
+                    st.plotly_chart(fig, key="dash_etats", width="stretch")
             else:
                 st.info("Aucune donnée disponible")
 
@@ -1827,7 +1827,7 @@ def render_dashboard():
                     values=values,
                     height=280
                 )
-                st.plotly_chart(fig, key="dash_cms", use_container_width=True)
+                st.plotly_chart(fig, key="dash_cms", width="stretch")
             else:
                 st.info("Aucune donnée disponible")
 
@@ -1856,7 +1856,7 @@ def render_dashboard():
             col_names = ["Nom", "CMS", "État", "Ads", "🏆 Winning", "Score"]
             df_display = df[[c for c in cols_to_show if c in df.columns]]
             df_display.columns = col_names[:len(df_display.columns)]
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            st.dataframe(df_display, width="stretch", hide_index=True)
 
             # Export button
             csv_data = export_to_csv(top_pages)
@@ -2003,7 +2003,7 @@ def render_keyword_search():
         )
 
     # Bouton de recherche
-    if st.button("🚀 Lancer la recherche", type="primary", use_container_width=True, key="btn_keyword"):
+    if st.button("🚀 Lancer la recherche", type="primary", width="stretch", key="btn_keyword"):
         if not keywords:
             st.error("Au moins un mot-clé requis !")
             return
@@ -2089,7 +2089,7 @@ def render_page_id_search():
     )
 
     # Bouton de recherche
-    if st.button("🚀 Lancer la recherche", type="primary", use_container_width=True, key="btn_pageid"):
+    if st.button("🚀 Lancer la recherche", type="primary", width="stretch", key="btn_pageid"):
         if not page_ids:
             st.error("Au moins un Page ID requis !")
             return
@@ -2154,7 +2154,7 @@ def render_preview_results():
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("💾 Sauvegarder en base de données", type="primary", use_container_width=True):
+        if st.button("💾 Sauvegarder en base de données", type="primary", width="stretch"):
             if db:
                 try:
                     thresholds = st.session_state.get("state_thresholds", None)
@@ -2176,7 +2176,7 @@ def render_preview_results():
                     st.error(f"Erreur sauvegarde: {e}")
 
     with col2:
-        if st.button("🔙 Nouvelle recherche", use_container_width=True):
+        if st.button("🔙 Nouvelle recherche", width="stretch"):
             st.session_state.show_preview_results = False
             st.session_state.pages_final = {}
             st.session_state.web_results = {}
@@ -3269,11 +3269,11 @@ def render_pages_shops():
                     # Présets rapides
                     col_p1, col_p2 = st.columns(2)
                     with col_p1:
-                        if st.button("📋 Essentiel", key="preset_essential", use_container_width=True):
+                        if st.button("📋 Essentiel", key="preset_essential", width="stretch"):
                             st.session_state.export_columns_pages = ["Page ID", "Nom", "Site", "CMS", "État", "Score"]
                             st.rerun()
                     with col_p2:
-                        if st.button("📊 Complet", key="preset_full", use_container_width=True):
+                        if st.button("📊 Complet", key="preset_full", width="stretch"):
                             st.session_state.export_columns_pages = list(all_export_columns.keys())
                             st.rerun()
 
@@ -3290,7 +3290,7 @@ def render_pages_shops():
                             csv_data,
                             file_name=f"pages_export_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
                             mime="text/csv",
-                            use_container_width=True
+                            width="stretch"
                         )
                     else:
                         st.warning("Sélectionnez au moins une colonne")
@@ -3354,14 +3354,14 @@ def render_pages_shops():
                     action_cols = st.columns(5)
 
                     with action_cols[0]:
-                        if st.button("⭐ Ajouter favoris", use_container_width=True):
+                        if st.button("⭐ Ajouter favoris", width="stretch"):
                             count = bulk_add_to_favorites(db, st.session_state.selected_pages)
                             st.success(f"{count} page(s) ajoutée(s) aux favoris")
                             st.session_state.selected_pages = []
                             st.rerun()
 
                     with action_cols[1]:
-                        if st.button("🚫 Blacklister", use_container_width=True):
+                        if st.button("🚫 Blacklister", width="stretch"):
                             count = bulk_add_to_blacklist(db, st.session_state.selected_pages, "Bulk blacklist")
                             st.success(f"{count} page(s) blacklistée(s)")
                             st.session_state.selected_pages = []
@@ -3458,7 +3458,7 @@ def render_pages_shops():
 
                 st.dataframe(
                     df_display,
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                     column_config={
                         "Site": st.column_config.LinkColumn("Site"),
@@ -3647,7 +3647,7 @@ def render_watchlists():
             df = pd.DataFrame(top_pages)
             cols = ["page_name", "lien_site", "cms", "etat", "nombre_ads_active", "subcategory", "pays"]
             df_display = df[[c for c in cols if c in df.columns]].head(20)
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            st.dataframe(df_display, width="stretch", hide_index=True)
         else:
             st.info("Aucune page XXL/XL trouvée")
     except Exception as e:
@@ -3668,7 +3668,7 @@ def render_watchlists():
             df = pd.DataFrame(shopify_pages)
             cols = ["page_name", "lien_site", "etat", "nombre_ads_active", "nombre_produits", "subcategory", "pays"]
             df_display = df[[c for c in cols if c in df.columns]]
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
+            st.dataframe(df_display, width="stretch", hide_index=True)
         else:
             st.info("Aucune boutique Shopify trouvée")
     except Exception as e:
@@ -3764,7 +3764,7 @@ def render_alerts():
         col1, col2 = st.columns(2)
 
         with col1:
-            if st.button("📈 Rechercher pages en croissance", use_container_width=True):
+            if st.button("📈 Rechercher pages en croissance", width="stretch"):
                 trends = detect_trends(db, days=7)
                 if trends["rising"]:
                     st.success(f"{len(trends['rising'])} page(s) en forte croissance")
@@ -3774,7 +3774,7 @@ def render_alerts():
                     st.info("Aucune page en forte croissance")
 
         with col2:
-            if st.button("📉 Rechercher pages en déclin", use_container_width=True):
+            if st.button("📉 Rechercher pages en déclin", width="stretch"):
                 trends = detect_trends(db, days=7)
                 if trends["falling"]:
                     st.warning(f"{len(trends['falling'])} page(s) en déclin")
@@ -3909,7 +3909,7 @@ def render_monitoring():
                         show_trend=True,
                         height=350
                     )
-                    st.plotly_chart(fig, key="monitoring_page_chart", use_container_width=True)
+                    st.plotly_chart(fig, key="monitoring_page_chart", width="stretch")
 
                 # Tableau avec deltas
                 df_data = []
@@ -3925,7 +3925,7 @@ def render_monitoring():
                     })
 
                 df = pd.DataFrame(df_data)
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                st.dataframe(df, width="stretch", hide_index=True)
             else:
                 st.info("Aucun historique trouvé pour cette page")
         except Exception as e:
@@ -4002,7 +4002,7 @@ def render_analytics():
                     value_suffix=" pages",
                     height=300
                 )
-                st.plotly_chart(fig, key="analytics_states", use_container_width=True)
+                st.plotly_chart(fig, key="analytics_states", width="stretch")
             else:
                 st.info("Aucune donnée disponible")
 
@@ -4024,7 +4024,7 @@ def render_analytics():
                     value_suffix=" sites",
                     height=300
                 )
-                st.plotly_chart(fig, key="analytics_cms", use_container_width=True)
+                st.plotly_chart(fig, key="analytics_cms", width="stretch")
             else:
                 st.info("Aucune donnée disponible")
 
@@ -4056,7 +4056,7 @@ def render_analytics():
                     value_suffix=" pages",
                     height=350
                 )
-                st.plotly_chart(fig, key="analytics_themes", use_container_width=True)
+                st.plotly_chart(fig, key="analytics_themes", width="stretch")
         else:
             st.info("Aucune donnée disponible")
 
@@ -4212,7 +4212,7 @@ def render_winning_ads():
                     value_suffix=" ads",
                     height=280
                 )
-                st.plotly_chart(fig, key="winning_by_criteria", use_container_width=True)
+                st.plotly_chart(fig, key="winning_by_criteria", width="stretch")
 
             with col2:
                 chart_header(
@@ -4224,7 +4224,7 @@ def render_winning_ads():
                 if by_page:
                     df_pages = pd.DataFrame(by_page)
                     df_pages.columns = ["Page ID", "Nom", "Winning Ads"]
-                    st.dataframe(df_pages, use_container_width=True, hide_index=True)
+                    st.dataframe(df_pages, width="stretch", hide_index=True)
                 else:
                     st.info("Aucune page avec winning ads")
 
@@ -4283,11 +4283,11 @@ def render_winning_ads():
                     # Présets
                     col_w1, col_w2 = st.columns(2)
                     with col_w1:
-                        if st.button("📋 Essentiel", key="preset_win_ess", use_container_width=True):
+                        if st.button("📋 Essentiel", key="preset_win_ess", width="stretch"):
                             st.session_state.export_columns_winning = ["Page", "Ad ID", "Reach", "Critère"]
                             st.rerun()
                     with col_w2:
-                        if st.button("📊 Complet", key="preset_win_full", use_container_width=True):
+                        if st.button("📊 Complet", key="preset_win_full", width="stretch"):
                             st.session_state.export_columns_winning = list(all_winning_columns.keys())
                             st.rerun()
 
@@ -4305,7 +4305,7 @@ def render_winning_ads():
                             f"winning_ads_{period}j{group_suffix}.csv",
                             "text/csv",
                             key="export_winning",
-                            use_container_width=True
+                            width="stretch"
                         )
                     else:
                         st.warning("Sélectionnez au moins une colonne")
@@ -4346,7 +4346,7 @@ def render_winning_ads():
                                 "Ad URL": ad.get('ad_snapshot_url', '')
                             })
                         df = pd.DataFrame(table_data)
-                        st.dataframe(df, use_container_width=True, hide_index=True,
+                        st.dataframe(df, width="stretch", hide_index=True,
                                    column_config={"Ad URL": st.column_config.LinkColumn("Voir")})
 
                         # Lien vers le site
@@ -4396,7 +4396,7 @@ def render_winning_ads():
                                 "Ad URL": ad.get('ad_snapshot_url', '')
                             })
                         df = pd.DataFrame(table_data)
-                        st.dataframe(df, use_container_width=True, hide_index=True,
+                        st.dataframe(df, width="stretch", hide_index=True,
                                    column_config={
                                        "Site": st.column_config.LinkColumn("Site"),
                                        "Ad URL": st.column_config.LinkColumn("Voir")
@@ -4430,7 +4430,7 @@ def render_winning_ads():
 
                 st.dataframe(
                     df_winning,
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                     column_config=column_config,
                     height=600
@@ -4912,7 +4912,7 @@ def render_settings():
         {"État": "XL", "Plage": f"{current['XL']}-{current['XXL']-1} ads"},
         {"État": "XXL", "Plage": f"≥{current['XXL']} ads"},
     ]
-    st.dataframe(pd.DataFrame(preview_data), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(preview_data), width="stretch", hide_index=True)
 
     # ─────────────────────────────────────────────────────────────────────────────
     # Gestion de la blacklist
@@ -5654,7 +5654,7 @@ def render_creative_analysis():
                 labels = [w[0] for w in word_counts]
                 values = [w[1] for w in word_counts]
                 fig = create_horizontal_bar_chart(labels, values, colors=[CHART_COLORS["primary"]] * len(labels))
-                st.plotly_chart(fig, key="word_freq", use_container_width=True)
+                st.plotly_chart(fig, key="word_freq", width="stretch")
 
         with col2:
             chart_header("😀 Emojis populaires", "Emojis les plus utilisés")
@@ -5871,7 +5871,7 @@ def render_background_searches():
         # Bouton de rafraîchissement manuel
         col_refresh, col_info = st.columns([1, 3])
         with col_refresh:
-            if st.button("🔄 Rafraîchir", use_container_width=True):
+            if st.button("🔄 Rafraîchir", width="stretch"):
                 st.rerun()
         with col_info:
             st.caption("🔁 Rafraîchissement automatique toutes les 5 secondes")
@@ -6229,7 +6229,7 @@ def render_search_logs():
                             })
                         if details_table:
                             df_details = pd.DataFrame(details_table)
-                            st.dataframe(df_details, hide_index=True, use_container_width=True)
+                            st.dataframe(df_details, hide_index=True, width="stretch")
 
             # Message d'erreur ou d'avertissement
             if status == "failed" and log.get("error_message"):
