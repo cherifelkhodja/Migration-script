@@ -745,7 +745,21 @@ def ensure_tables_exist(db: DatabaseManager) -> bool:
         True si succès
     """
     try:
+        # Créer toutes les tables manquantes
         Base.metadata.create_all(db.engine)
+
+        # Vérifier explicitement les tables d'historique
+        from sqlalchemy import inspect
+        inspector = inspect(db.engine)
+        existing_tables = inspector.get_table_names()
+
+        if "page_search_history" not in existing_tables:
+            print("[ensure_tables_exist] Création de la table page_search_history...")
+            PageSearchHistory.__table__.create(db.engine, checkfirst=True)
+
+        if "winning_ad_search_history" not in existing_tables:
+            print("[ensure_tables_exist] Création de la table winning_ad_search_history...")
+            WinningAdSearchHistory.__table__.create(db.engine, checkfirst=True)
 
         # Migrations pour ajouter les colonnes manquantes
         _run_migrations(db)
@@ -753,6 +767,8 @@ def ensure_tables_exist(db: DatabaseManager) -> bool:
         return True
     except Exception as e:
         print(f"Erreur création tables: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
