@@ -552,13 +552,15 @@ class MetaAdsClient:
         if token_id and _token_db:
             try:
                 from app.database import log_token_usage
+                # S'assurer que countries est une liste avant le join
+                countries_str = ",".join(countries) if isinstance(countries, list) and countries else (countries if isinstance(countries, str) else None)
                 log_token_usage(
                     _token_db,
                     token_id=token_id,
                     token_name=token_name,
                     action_type="search",
                     keyword=keyword,
-                    countries=",".join(countries) if countries else None,
+                    countries=countries_str,
                     success=success,
                     ads_count=len(all_ads),
                     error_message=error_msg,
@@ -618,13 +620,14 @@ class MetaAdsClient:
                 if token_id and _token_db:
                     try:
                         from app.database import log_token_usage
+                        countries_str = ",".join(countries) if isinstance(countries, list) and countries else (countries if isinstance(countries, str) else None)
                         log_token_usage(
                             _token_db,
                             token_id=token_id,
                             token_name=token_name,
                             action_type="page_fetch",
                             page_id=str(page_id),
-                            countries=",".join(countries) if countries else None,
+                            countries=countries_str,
                             success=False,
                             ads_count=len(all_ads),
                             error_message=error_msg,
@@ -652,13 +655,14 @@ class MetaAdsClient:
         if token_id and _token_db:
             try:
                 from app.database import log_token_usage
+                countries_str = ",".join(countries) if isinstance(countries, list) and countries else (countries if isinstance(countries, str) else None)
                 log_token_usage(
                     _token_db,
                     token_id=token_id,
                     token_name=token_name,
                     action_type="page_fetch",
                     page_id=str(page_id),
-                    countries=",".join(countries) if countries else None,
+                    countries=countries_str,
                     success=True,
                     ads_count=len(all_ads),
                     response_time_ms=response_time_ms

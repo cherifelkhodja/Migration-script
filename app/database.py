@@ -2834,6 +2834,16 @@ def create_search_log(
     Returns:
         ID du log créé
     """
+    # S'assurer que les paramètres sont des listes et non des strings
+    if isinstance(countries, str):
+        countries = [countries] if countries else []
+    if isinstance(languages, str):
+        languages = [languages] if languages else []
+    if isinstance(keywords, str):
+        keywords = [keywords] if keywords else []
+    if isinstance(selected_cms, str):
+        selected_cms = [selected_cms] if selected_cms else []
+
     with db.get_session() as session:
         log = SearchLog(
             keywords=" | ".join(keywords) if keywords else "",
