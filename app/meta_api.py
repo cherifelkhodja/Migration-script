@@ -858,29 +858,25 @@ def search_keywords_parallel(
         # Créer un lock pour les résultats partagés
         from threading import Lock
         results_lock = Lock()
+        failed_keywords = []  # Keywords qui ont échoué pour retry avec autre token
 
         def search_keyword_worker(args):
             """Worker pour rechercher un mot-clé avec un token+proxy dédié"""
-            keyword, token_data, worker_idx = args
-
-            # Créer un client avec le token dédié
-            client = MetaAdsClient(token_data["token"])
-            # Override le token pour utiliser celui du worker (pas le rotator global)
-            client._dedicated_token = token_data["token"]
-            client._dedicated_proxy = token_data.get("proxy")
+            keyword, token_data, token_idx = args
 
             try:
                 # Faire la requête API directement avec le token+proxy dédié
                 ads = _search_ads_with_dedicated_token(
                     keyword, countries, languages,
                     token_data["token"], token_data.get("proxy"),
-                    token_data.get("id"), token_data.get("name", f"Token #{worker_idx+1}"),
+                    token_data.get("id"), token_data.get("name", f"Token #{token_idx+1}"),
                     db
                 )
-                return keyword, ads, None
+                # Si aucune ad et pas d'erreur, c'est peut-être un échec silencieux
+                return keyword, ads, None, token_idx
             except Exception as e:
-                print(f"❌ Erreur worker #{worker_idx+1} pour '{keyword}': {e}")
-                return keyword, [], str(e)
+                print(f"❌ Erreur worker #{token_idx+1} pour '{keyword}': {e}")
+                return keyword, [], str(e), token_idx
 
         # Distribuer les keywords aux workers
         keyword_tasks = []
@@ -904,7 +900,48 @@ def search_keywords_parallel(
             for future in as_completed(futures):
                 keyword = futures[future]
                 try:
-                    kw, ads, error = future.result()
+                    kw, ads, error, used_token_idx = future.result()
+
+                    if error and len(ads) == 0:
+                        # Échec - marquer pour retry avec un autre token
+                        failed_keywords.append((kw, used_token_idx))
+                    else:
+                        with results_lock:
+                            for ad in ads:
+                                ad_id = ad.get("id")
+                                if ad_id and ad_id not in seen_ad_ids:
+                                    ad["_keyword"] = kw
+                                    all_ads.append(ad)
+                                    seen_ad_ids.add(ad_id)
+                            ads_by_keyword[kw] = len(ads)
+
+                    completed += 1
+                    if progress_callback:
+                        progress_callback(kw, completed, len(keywords))
+
+                except Exception as e:
+                    print(f"❌ Erreur future pour '{keyword}': {e}")
+                    completed += 1
+
+        # ═══ RETRY DES KEYWORDS ÉCHOUÉS AVEC UN AUTRE TOKEN ═══
+        if failed_keywords and len(tokens_with_proxies) > 1:
+            print(f"🔄 Retry de {len(failed_keywords)} keyword(s) avec un autre token...")
+
+            for kw, failed_token_idx in failed_keywords:
+                # Utiliser un token différent
+                new_token_idx = (failed_token_idx + 1) % len(tokens_with_proxies)
+                new_token_data = tokens_with_proxies[new_token_idx]
+
+                print(f"  → Retry '{kw}' avec {new_token_data.get('name', f'Token #{new_token_idx+1}')}")
+                time.sleep(META_DELAY_BETWEEN_KEYWORDS)  # Attendre avant le retry
+
+                try:
+                    ads = _search_ads_with_dedicated_token(
+                        kw, countries, languages,
+                        new_token_data["token"], new_token_data.get("proxy"),
+                        new_token_data.get("id"), new_token_data.get("name", f"Token #{new_token_idx+1}"),
+                        db
+                    )
 
                     with results_lock:
                         for ad in ads:
@@ -915,13 +952,14 @@ def search_keywords_parallel(
                                 seen_ad_ids.add(ad_id)
                         ads_by_keyword[kw] = len(ads)
 
-                    completed += 1
-                    if progress_callback:
-                        progress_callback(kw, completed, len(keywords))
+                    if len(ads) > 0:
+                        print(f"  ✅ Retry réussi: {len(ads)} ads pour '{kw}'")
+                    else:
+                        print(f"  ⚠️ Retry: 0 ads pour '{kw}' (peut-être pas de résultats)")
 
                 except Exception as e:
-                    print(f"❌ Erreur future pour '{keyword}': {e}")
-                    completed += 1
+                    print(f"  ❌ Retry échoué pour '{kw}': {e}")
+                    ads_by_keyword[kw] = 0
 
         print(f"✅ Recherche parallèle terminée: {len(all_ads)} ads uniques")
 
@@ -929,7 +967,7 @@ def search_keywords_parallel(
         # ═══ STRATÉGIE SÉQUENTIELLE ═══
         # Un seul token, délai plus long entre les requêtes
         delay = META_DELAY_SEQUENTIAL_NO_PROXY if not tokens_with_proxies else META_DELAY_BETWEEN_KEYWORDS
-        print(f"🔄 Recherche séquentielle: 1 token, délai {delay}s entre keywords")
+        print(f"🔄 Recherche séquentielle: {rotator.token_count} token(s), délai {delay}s entre keywords")
 
         client = MetaAdsClient(rotator.get_current_token())
 
@@ -937,28 +975,44 @@ def search_keywords_parallel(
             if i > 0:
                 time.sleep(delay)
 
-            try:
-                ads = client.search_ads(kw, countries, languages)
+            success = False
+            max_token_attempts = min(rotator.token_count, 3)  # Max 3 tokens différents
 
-                for ad in ads:
-                    ad_id = ad.get("id")
-                    if ad_id and ad_id not in seen_ad_ids:
-                        ad["_keyword"] = kw
-                        all_ads.append(ad)
-                        seen_ad_ids.add(ad_id)
+            for attempt in range(max_token_attempts):
+                try:
+                    ads = client.search_ads(kw, countries, languages)
 
-                ads_by_keyword[kw] = len(ads)
+                    for ad in ads:
+                        ad_id = ad.get("id")
+                        if ad_id and ad_id not in seen_ad_ids:
+                            ad["_keyword"] = kw
+                            all_ads.append(ad)
+                            seen_ad_ids.add(ad_id)
 
-                if progress_callback:
-                    progress_callback(kw, i + 1, len(keywords))
+                    ads_by_keyword[kw] = len(ads)
+                    success = True
+                    break  # Succès, passer au keyword suivant
 
-            except Exception as e:
-                print(f"❌ Erreur séquentielle pour '{kw}': {e}")
+                except Exception as e:
+                    print(f"❌ Erreur pour '{kw}' (tentative {attempt+1}/{max_token_attempts}): {e}")
+
+                    # Si on a d'autres tokens, essayer avec le suivant
+                    if attempt < max_token_attempts - 1 and rotator.token_count > 1:
+                        rotator.rotate_to_next(reason=f"retry_error_{kw}")
+                        client = MetaAdsClient(rotator.get_current_token())
+                        print(f"  → Retry avec {rotator.get_current_token_name()}")
+                        time.sleep(1)  # Petit délai avant retry
+
+            if not success:
                 ads_by_keyword[kw] = 0
 
-            # Rotation vers le prochain token si disponible (pour répartir la charge)
+            if progress_callback:
+                progress_callback(kw, i + 1, len(keywords))
+
+            # Rotation vers le prochain token pour le prochain keyword (répartir la charge)
             if rotator.token_count > 1:
                 rotator.rotate_to_next(reason=f"keyword_{i+1}_done")
+                client = MetaAdsClient(rotator.get_current_token())
 
         print(f"✅ Recherche séquentielle terminée: {len(all_ads)} ads uniques")
 
@@ -973,11 +1027,23 @@ def _search_ads_with_dedicated_token(
     proxy: Optional[str],
     token_id: Optional[int],
     token_name: str,
-    db=None
+    db=None,
+    max_retries: int = 3
 ) -> List[dict]:
     """
     Recherche des annonces avec un token+proxy dédié (pour recherche parallèle).
     Ne passe pas par le rotator global.
+
+    Args:
+        keyword: Mot-clé à rechercher
+        countries: Liste des codes pays
+        languages: Liste des codes langues
+        token: Token d'accès Meta API
+        proxy: URL du proxy (optionnel)
+        token_id: ID du token en DB
+        token_name: Nom du token pour les logs
+        db: DatabaseManager pour logging
+        max_retries: Nombre max de tentatives par token
     """
     start_time = time.time()
     error_msg = None
@@ -1004,7 +1070,6 @@ def _search_ads_with_dedicated_token(
 
     all_ads = []
     limit_curr = LIMIT_SEARCH
-    max_retries = 3
 
     while True:
         for attempt in range(max_retries):
