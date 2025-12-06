@@ -500,10 +500,12 @@ class MetaAdsClient:
             "ad_type": "ALL",
             "ad_active_status": "ACTIVE",
             "ad_reached_countries": json.dumps(countries),
-            "languages": json.dumps(languages),
             "fields": FIELDS_ADS_COMPLETE,
             "limit": LIMIT_SEARCH
         }
+        # N'inclure languages que si une liste non vide est fournie
+        if languages:
+            params["languages"] = json.dumps(languages)
 
         all_ads = []
         limit_curr = LIMIT_SEARCH
@@ -601,10 +603,12 @@ class MetaAdsClient:
             "ad_active_status": "ACTIVE",
             "ad_type": "ALL",
             "ad_reached_countries": json.dumps(countries),
-            "languages": json.dumps(languages),
             "fields": FIELDS_ADS_COMPLETE,
             "limit": LIMIT_COUNT
         }
+        # N'inclure languages que si une liste non vide est fournie
+        if languages:
+            params["languages"] = json.dumps(languages)
 
         url = ADS_ARCHIVE
         all_ads = []
@@ -702,10 +706,12 @@ class MetaAdsClient:
             "ad_active_status": "ACTIVE",
             "ad_type": "ALL",
             "ad_reached_countries": json.dumps(countries),
-            "languages": json.dumps(languages),
             "fields": FIELDS_ADS_COMPLETE,
             "limit": LIMIT_COUNT
         }
+        # N'inclure languages que si une liste non vide est fournie
+        if languages:
+            params["languages"] = json.dumps(languages)
 
         url = ADS_ARCHIVE
         all_ads = []

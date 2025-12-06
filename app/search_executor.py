@@ -199,7 +199,7 @@ def execute_background_search(
     if isinstance(languages, str):
         languages_list = [l.strip() for l in languages.split(",") if l.strip()]
     else:
-        languages_list = languages if languages else ["fr"]
+        languages_list = languages if languages else []  # Vide si pas de langues
 
     # S'assurer que les tables existent
     ensure_tables_exist(db)

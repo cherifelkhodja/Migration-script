@@ -2167,7 +2167,7 @@ def render_keyword_search():
                 cms_filter=selected_cms if selected_cms else ["Shopify"],
                 ads_min=min_ads,
                 countries=",".join(countries) if countries else "FR",
-                languages=",".join(languages) if languages else "fr"
+                languages=",".join(languages) if languages else ""  # Vide si pas de langues
             )
 
             st.success(f"✅ Tâche #{search_id} ajoutée à la file d'attente!")
