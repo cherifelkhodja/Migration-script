@@ -2743,26 +2743,39 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
         st.warning("Aucune page finale trouvée")
         return
 
-    # ═══ PHASE 6: Analyse des sites web (multithreaded + cache) ═══
-    tracker.start_phase(6, "🔬 Analyse sites web (parallèle)", total_phases=8)
+    # ═══ PHASE 6: Analyse des sites web (multithreaded + cache) + Classification Gemini ═══
+    tracker.start_phase(6, "🔬 Analyse sites web + Classification", total_phases=8)
     web_results = {}
 
     # Séparer les pages à analyser vs celles en cache
     pages_need_analysis = []
     for pid, data in pages_final.items():
         cached = cached_pages.get(str(pid), {})
-        # Utiliser les infos en cache si le scan est récent
-        if not cached.get("needs_rescan") and cached.get("nombre_produits") is not None:
+        # Vérifier si le cache a du contenu pour classification Gemini
+        has_classification_content = (
+            cached.get("site_title") or
+            cached.get("site_description") or
+            cached.get("site_h1")
+        )
+
+        # Utiliser les infos en cache SI scan récent ET contenu de classification présent
+        if not cached.get("needs_rescan") and cached.get("nombre_produits") is not None and has_classification_content:
             web_results[pid] = {
                 "product_count": cached.get("nombre_produits", 0),
                 "theme": cached.get("template", ""),
                 "category": cached.get("thematique", ""),
                 "currency_from_site": cached.get("devise", ""),
+                # Données pour classification Gemini (depuis le cache)
+                "site_title": cached.get("site_title", ""),
+                "site_description": cached.get("site_description", ""),
+                "site_h1": cached.get("site_h1", ""),
+                "site_keywords": cached.get("site_keywords", ""),
                 "_from_cache": True
             }
             if cached.get("devise") and not data.get("currency"):
                 data["currency"] = cached["devise"]
         elif data.get("website"):
+            # Page sans contenu de classification OU qui nécessite un rescan
             pages_need_analysis.append((pid, data))
 
     cached_analysis = len(web_results)
@@ -2793,6 +2806,47 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
                 if completed % 5 == 0:
                     tracker.update_step("Analyse web", completed, len(pages_need_analysis))
 
+    # ═══ Classification Gemini (intégrée à la phase 6) ═══
+    classified_count = 0
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+
+    if gemini_key and web_results:
+        tracker.update_step("Classification Gemini", 0, 1)
+
+        try:
+            from app.gemini_classifier import classify_pages_batch
+
+            # Préparer les données pour classification
+            pages_to_classify = []
+            for pid, web_data in web_results.items():
+                # Ne classifier que les pages avec du contenu extrait
+                if web_data.get("site_title") or web_data.get("site_description") or web_data.get("site_h1"):
+                    pages_to_classify.append({
+                        "page_id": pid,
+                        "url": pages_final.get(pid, {}).get("website", ""),
+                        "site_title": web_data.get("site_title", ""),
+                        "site_description": web_data.get("site_description", ""),
+                        "site_h1": web_data.get("site_h1", ""),
+                        "site_keywords": web_data.get("site_keywords", "")
+                    })
+
+            if pages_to_classify:
+                st.info(f"🏷️ Classification de {len(pages_to_classify)} pages avec Gemini...")
+                # Classifier et stocker les résultats dans web_results
+                classification_results = classify_pages_batch(db, pages_to_classify)
+
+                for pid, classification in classification_results.items():
+                    if pid in web_results:
+                        web_results[pid]["gemini_category"] = classification.get("category", "")
+                        web_results[pid]["gemini_subcategory"] = classification.get("subcategory", "")
+                        web_results[pid]["gemini_confidence"] = classification.get("confidence", 0.0)
+
+                classified_count = len(classification_results)
+                st.success(f"✅ {classified_count} pages classifiées")
+
+        except Exception as e:
+            st.warning(f"⚠️ Classification Gemini: {str(e)[:100]}")
+
     # Stats détaillées Phase 6
     total_products = sum(r.get("product_count", 0) for r in web_results.values())
     avg_products = total_products // len(web_results) if web_results else 0
@@ -2801,10 +2855,10 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
         "Sites analysés": len(web_results),
         "En cache": cached_analysis,
         "Nouvelles analyses": len(pages_need_analysis),
+        "Classifiées (Gemini)": classified_count,
         "Total produits": total_products,
-        "Moyenne produits/site": avg_products,
     }
-    tracker.complete_phase(f"{len(web_results)} sites analysés ({cached_analysis} cache)", stats=phase6_stats)
+    tracker.complete_phase(f"{len(web_results)} sites, {classified_count} classifiées", stats=phase6_stats)
 
     # ═══ PHASE 7: Détection des Winning Ads ═══
     tracker.start_phase(7, "🏆 Détection des Winning Ads", total_phases=8)
@@ -2925,61 +2979,6 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
             except Exception as e:
                 st.error(f"Erreur sauvegarde: {e}")
                 tracker.finalize_log(status="failed", error_message=str(e))
-
-        # ═══ PHASE 9: Classification automatique (Gemini) ═══
-        # Utilise les données pré-extraites en phase 6 pour éviter de re-scraper
-        classified_count = 0
-        gemini_key = os.getenv("GEMINI_API_KEY", "")
-
-        if gemini_key and pages_saved > 0:
-            tracker.start_phase(9, "🏷️ Classification automatique (Gemini)", total_phases=9)
-
-            try:
-                from app.gemini_classifier import classify_with_extracted_content
-                from app.database import init_default_taxonomy
-
-                # Initialiser la taxonomie si nécessaire
-                init_default_taxonomy(db)
-
-                # Préparer les pages avec les données DÉJÀ EXTRAITES en phase 6
-                pages_to_classify = []
-                for pid, data in pages_final.items():
-                    if data.get("website"):
-                        # Récupérer les données extraites pendant l'analyse web (phase 6)
-                        web_data = web_results.get(pid, {})
-                        pages_to_classify.append({
-                            "page_id": pid,
-                            "url": data.get("website", ""),
-                            "site_title": web_data.get("site_title", ""),
-                            "site_description": web_data.get("site_description", ""),
-                            "site_h1": web_data.get("site_h1", ""),
-                            "site_keywords": web_data.get("site_keywords", "")
-                        })
-
-                if pages_to_classify:
-                    tracker.update_step("Classification", 1, 1, f"{len(pages_to_classify)} pages")
-
-                    # Classifier avec les données pré-extraites (pas de re-scraping!)
-                    result = classify_with_extracted_content(db, pages_to_classify)
-
-                    classified_count = result.get("classified", 0)
-                    errors_count = result.get("errors", 0)
-
-                    phase9_stats = {
-                        "Pages à classifier": len(pages_to_classify),
-                        "Pages classifiées": classified_count,
-                        "Erreurs": errors_count,
-                    }
-                    tracker.complete_phase(f"{classified_count} pages classifiées", stats=phase9_stats)
-                else:
-                    tracker.complete_phase("Aucune page avec URL à classifier", stats={"Pages": 0})
-
-            except Exception as e:
-                st.warning(f"⚠️ Classification non effectuée: {str(e)[:100]}")
-                tracker.complete_phase(f"Erreur: {str(e)[:50]}", stats={"Erreur": str(e)[:100]})
-        elif not gemini_key:
-            # Pas de clé Gemini configurée - on skip silencieusement
-            pass
 
         # Afficher le résumé final
         tracker.show_summary()
