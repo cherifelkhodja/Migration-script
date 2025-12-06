@@ -95,6 +95,7 @@ from src.infrastructure.persistence.database import (
     remove_tag_from_page,
     get_page_tags,
     get_pages_by_tag,
+    get_taxonomy_categories,
 )
 
 __all__ = [
