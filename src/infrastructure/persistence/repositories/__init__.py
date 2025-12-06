@@ -1,0 +1,232 @@
+"""
+Repositories pour la persistence des donnees.
+
+Ce module expose les fonctions de repositories par domaine:
+- database_manager: Gestionnaire de base de donnees
+- settings_repository: Parametres application/utilisateur
+- organization_repository: Tags, blacklist, favoris, collections
+- cache_repository: Cache API
+- taxonomy_repository: Classification des pages
+"""
+
+from src.infrastructure.persistence.repositories.database_manager import (
+    DatabaseManager,
+    ensure_tables_exist,
+    get_database_stats,
+    health_check,
+    vacuum_database,
+)
+
+from src.infrastructure.persistence.repositories.utils import (
+    get_etat_from_ads_count,
+    to_str_list,
+)
+
+from src.infrastructure.persistence.repositories.settings_repository import (
+    SETTING_GEMINI_MODEL,
+    SETTING_GEMINI_MODEL_DEFAULT,
+    get_app_setting,
+    set_app_setting,
+    get_all_app_settings,
+    get_setting,
+    set_setting,
+    get_all_settings,
+)
+
+from src.infrastructure.persistence.repositories.organization_repository import (
+    # Blacklist
+    add_to_blacklist,
+    remove_from_blacklist,
+    get_blacklist,
+    is_in_blacklist,
+    get_blacklist_ids,
+    bulk_add_to_blacklist,
+    # Tags
+    get_all_tags,
+    create_tag,
+    delete_tag,
+    add_tag_to_page,
+    remove_tag_from_page,
+    get_page_tags,
+    get_pages_by_tag,
+    bulk_add_tag,
+    # Notes
+    get_page_notes,
+    add_page_note,
+    update_page_note,
+    delete_page_note,
+    # Favorites
+    get_favorites,
+    is_favorite,
+    add_favorite,
+    remove_favorite,
+    toggle_favorite,
+    bulk_add_to_favorites,
+    # Collections
+    get_collections,
+    create_collection,
+    update_collection,
+    delete_collection,
+    add_page_to_collection,
+    remove_page_from_collection,
+    get_collection_pages,
+    get_page_collections,
+    bulk_add_to_collection,
+    # Saved filters
+    get_saved_filters,
+    save_filter,
+    delete_saved_filter,
+    # Scheduled scans
+    get_scheduled_scans,
+    create_scheduled_scan,
+    update_scheduled_scan,
+    delete_scheduled_scan,
+    mark_scan_executed,
+)
+
+from src.infrastructure.persistence.repositories.cache_repository import (
+    generate_cache_key,
+    get_cached_response,
+    set_cached_response,
+    get_cache_stats,
+    clear_expired_cache,
+    clear_all_cache,
+)
+
+from src.infrastructure.persistence.repositories.taxonomy_repository import (
+    get_all_taxonomy,
+    get_taxonomy_by_category,
+    get_taxonomy_categories,
+    add_taxonomy_entry,
+    update_taxonomy_entry,
+    delete_taxonomy_entry,
+    init_default_taxonomy,
+    build_taxonomy_prompt,
+    get_unclassified_pages,
+    get_pages_for_classification,
+    update_page_classification,
+    update_pages_classification_batch,
+    get_classification_stats,
+)
+
+from src.infrastructure.persistence.repositories.token_repository import (
+    add_meta_token,
+    get_all_meta_tokens,
+    get_active_meta_tokens,
+    get_active_meta_tokens_with_proxies,
+    update_meta_token,
+    delete_meta_token,
+    record_token_usage,
+    clear_rate_limit,
+    reset_token_stats,
+    log_token_usage,
+    get_token_usage_logs,
+    get_token_stats_detailed,
+    verify_meta_token,
+    verify_all_tokens,
+)
+
+__all__ = [
+    # Database Manager
+    "DatabaseManager",
+    "ensure_tables_exist",
+    "get_database_stats",
+    "health_check",
+    "vacuum_database",
+    # Utils
+    "get_etat_from_ads_count",
+    "to_str_list",
+    # Settings
+    "SETTING_GEMINI_MODEL",
+    "SETTING_GEMINI_MODEL_DEFAULT",
+    "get_app_setting",
+    "set_app_setting",
+    "get_all_app_settings",
+    "get_setting",
+    "set_setting",
+    "get_all_settings",
+    # Blacklist
+    "add_to_blacklist",
+    "remove_from_blacklist",
+    "get_blacklist",
+    "is_in_blacklist",
+    "get_blacklist_ids",
+    "bulk_add_to_blacklist",
+    # Tags
+    "get_all_tags",
+    "create_tag",
+    "delete_tag",
+    "add_tag_to_page",
+    "remove_tag_from_page",
+    "get_page_tags",
+    "get_pages_by_tag",
+    "bulk_add_tag",
+    # Notes
+    "get_page_notes",
+    "add_page_note",
+    "update_page_note",
+    "delete_page_note",
+    # Favorites
+    "get_favorites",
+    "is_favorite",
+    "add_favorite",
+    "remove_favorite",
+    "toggle_favorite",
+    "bulk_add_to_favorites",
+    # Collections
+    "get_collections",
+    "create_collection",
+    "update_collection",
+    "delete_collection",
+    "add_page_to_collection",
+    "remove_page_from_collection",
+    "get_collection_pages",
+    "get_page_collections",
+    "bulk_add_to_collection",
+    # Saved Filters
+    "get_saved_filters",
+    "save_filter",
+    "delete_saved_filter",
+    # Scheduled Scans
+    "get_scheduled_scans",
+    "create_scheduled_scan",
+    "update_scheduled_scan",
+    "delete_scheduled_scan",
+    "mark_scan_executed",
+    # Cache
+    "generate_cache_key",
+    "get_cached_response",
+    "set_cached_response",
+    "get_cache_stats",
+    "clear_expired_cache",
+    "clear_all_cache",
+    # Taxonomy
+    "get_all_taxonomy",
+    "get_taxonomy_by_category",
+    "get_taxonomy_categories",
+    "add_taxonomy_entry",
+    "update_taxonomy_entry",
+    "delete_taxonomy_entry",
+    "init_default_taxonomy",
+    "build_taxonomy_prompt",
+    "get_unclassified_pages",
+    "get_pages_for_classification",
+    "update_page_classification",
+    "update_pages_classification_batch",
+    "get_classification_stats",
+    # Tokens
+    "add_meta_token",
+    "get_all_meta_tokens",
+    "get_active_meta_tokens",
+    "get_active_meta_tokens_with_proxies",
+    "update_meta_token",
+    "delete_meta_token",
+    "record_token_usage",
+    "clear_rate_limit",
+    "reset_token_stats",
+    "log_token_usage",
+    "get_token_usage_logs",
+    "get_token_stats_detailed",
+    "verify_meta_token",
+    "verify_all_tokens",
+]
