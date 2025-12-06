@@ -517,6 +517,11 @@ def execute_background_search(
                 "theme": cached.get("template", ""),
                 "category": cached.get("thematique", ""),
                 "currency_from_site": cached.get("devise", ""),
+                # Données pour classification Gemini (depuis le cache)
+                "site_title": cached.get("site_title", ""),
+                "site_description": cached.get("site_description", ""),
+                "site_h1": cached.get("site_h1", ""),
+                "site_keywords": cached.get("site_keywords", ""),
                 "_from_cache": True
             }
             if cached.get("devise") and not data.get("currency"):

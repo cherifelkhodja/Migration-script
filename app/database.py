@@ -57,6 +57,11 @@ class PageRecherche(Base):
     dernier_scan = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Données extraites du site pour classification Gemini (évite re-scraping)
+    site_title = Column(String(255))
+    site_description = Column(Text)
+    site_h1 = Column(String(200))
+    site_keywords = Column(String(300))
     # Lien vers la dernière recherche qui a mis à jour cette page
     last_search_log_id = Column(Integer, nullable=True, index=True)
     # Flag indiquant si la page a été créée (True) ou mise à jour (False) lors de la dernière recherche
@@ -787,6 +792,11 @@ def _run_migrations(db: DatabaseManager):
         ("liste_page_recherche", "classified_at", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS classified_at TIMESTAMP"),
         # Extension du champ pays pour multi-valeurs
         ("liste_page_recherche", "pays_resize", "ALTER TABLE liste_page_recherche ALTER COLUMN pays TYPE VARCHAR(255)"),
+        # Données pour classification Gemini (évite re-scraping des sites)
+        ("liste_page_recherche", "site_title", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS site_title VARCHAR(255)"),
+        ("liste_page_recherche", "site_description", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS site_description TEXT"),
+        ("liste_page_recherche", "site_h1", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS site_h1 VARCHAR(200)"),
+        ("liste_page_recherche", "site_keywords", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS site_keywords VARCHAR(300)"),
         # Proxy URL pour tokens Meta
         ("meta_tokens", "proxy_url", "ALTER TABLE meta_tokens ADD COLUMN IF NOT EXISTS proxy_url VARCHAR(255)"),
         # Updated_at pour SearchQueue (suivi des recherches actives)
@@ -1085,6 +1095,15 @@ def save_pages_recherche(
                 existing_page.nombre_produits = web.get("product_count", 0) or existing_page.nombre_produits
                 existing_page.dernier_scan = scan_time
                 existing_page.updated_at = scan_time
+                # Données pour classification Gemini (évite re-scraping)
+                if web.get("site_title"):
+                    existing_page.site_title = web.get("site_title", "")[:255]
+                if web.get("site_description"):
+                    existing_page.site_description = web.get("site_description", "")
+                if web.get("site_h1"):
+                    existing_page.site_h1 = web.get("site_h1", "")[:200]
+                if web.get("site_keywords"):
+                    existing_page.site_keywords = web.get("site_keywords", "")[:300]
                 # Tracking recherche
                 if search_log_id:
                     existing_page.last_search_log_id = search_log_id
@@ -1117,6 +1136,11 @@ def save_pages_recherche(
                     updated_at=scan_time,
                     last_search_log_id=search_log_id,
                     was_created_in_last_search=True,
+                    # Données pour classification Gemini
+                    site_title=web.get("site_title", "")[:255] if web.get("site_title") else None,
+                    site_description=web.get("site_description", ""),
+                    site_h1=web.get("site_h1", "")[:200] if web.get("site_h1") else None,
+                    site_keywords=web.get("site_keywords", "")[:300] if web.get("site_keywords") else None,
                 )
                 session.add(new_page)
                 new_count += 1
@@ -1786,7 +1810,12 @@ def get_cached_pages_info(
                 "devise": p.devise,
                 "dernier_scan": p.dernier_scan,
                 "needs_rescan": needs_rescan,
-                "needs_cms_detection": not p.cms or p.cms in ("Unknown", "Inconnu", "")
+                "needs_cms_detection": not p.cms or p.cms in ("Unknown", "Inconnu", ""),
+                # Données pour classification Gemini (évite re-scraping)
+                "site_title": p.site_title or "",
+                "site_description": p.site_description or "",
+                "site_h1": p.site_h1 or "",
+                "site_keywords": p.site_keywords or "",
             }
 
         return result
