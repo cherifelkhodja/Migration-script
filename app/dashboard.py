@@ -2670,10 +2670,13 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
         all_cms_counts[cms_name] = all_cms_counts.get(cms_name, 0) + 1
 
     # Filter by CMS
+    known_cms_list = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow"]
+
     def cms_matches(cms_name):
         if cms_name in selected_cms:
             return True
-        if "Autre/Inconnu" in selected_cms and cms_name not in cms_options[:-1]:
+        # "Autre/Inconnu" = tout CMS non reconnu
+        if "Autre/Inconnu" in selected_cms and cms_name not in known_cms_list:
             return True
         return False
 
