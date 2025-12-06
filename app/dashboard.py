@@ -2250,6 +2250,9 @@ def render_preview_results():
         wpid = w.get("page_id")
         winning_by_page[wpid] = winning_by_page.get(wpid, 0) + 1
 
+    # Récupérer les ads
+    page_ads = st.session_state.get("page_ads", {})
+
     # Statistiques globales
     total_winning = len(winning_ads_data)
     total_ads = sum(d.get('ads_active_total', 0) for d in pages_final.values())
@@ -2260,71 +2263,163 @@ def render_preview_results():
     col_stat3.metric("🏆 Winning Ads", total_winning)
     col_stat4.metric("📈 Pages avec Winning", len(winning_by_page))
 
-    st.markdown("---")
+    # ═══ 4 ONGLETS POUR LES DIFFÉRENTES DONNÉES ═══
+    tab_pages, tab_ads, tab_winning, tab_pages_winning = st.tabs([
+        f"📊 Pages ({len(pages_final)})",
+        f"📢 Ads ({total_ads})",
+        f"🏆 Winning Ads ({total_winning})",
+        f"📈 Pages avec Winning ({len(winning_by_page)})"
+    ])
 
-    # Préparer les données pour le tableau
-    preview_data = []
-    for pid, data in pages_final.items():
-        web = web_results.get(pid, {})
-        winning_count = winning_by_page.get(pid, 0)
-
-        preview_data.append({
-            "Page ID": str(pid),
-            "Nom": data.get('page_name', 'N/A'),
-            "Site": data.get('website', ''),
-            "CMS": data.get('cms', 'N/A'),
-            "État": data.get('etat', 'N/A'),
-            "Ads": data.get('ads_active_total', 0),
-            "🏆": winning_count,
-            "Produits": web.get('product_count', 0),
-            "Thématique": web.get('category', '') or web.get('gemini_category', ''),
-            "Classification": web.get('gemini_subcategory', ''),
-        })
-
-    # Afficher en tableau
-    if preview_data:
-        df = pd.DataFrame(preview_data)
-
-        # Formater état avec badges
-        df["État"] = df["État"].apply(lambda x: format_state_for_df(x) if x else "")
-
-        st.dataframe(
-            df,
-            width="stretch",
-            hide_index=True,
-            column_config={
-                "Site": st.column_config.LinkColumn("Site"),
-                "Page ID": st.column_config.TextColumn("Page ID", width="small"),
-            }
-        )
-
-    st.markdown("---")
-
-    # Détails par page (expandable)
-    with st.expander("📋 Détails par page (actions individuelles)"):
-        for pid, data in list(pages_final.items()):
+    # ═══ TAB 1: PAGES ═══
+    with tab_pages:
+        pages_data = []
+        for pid, data in pages_final.items():
             web = web_results.get(pid, {})
-            website = data.get('website', '')
-            fb_link = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={countries[0]}&view_all_page_id={pid}"
             winning_count = winning_by_page.get(pid, 0)
 
-            col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+            pages_data.append({
+                "Page ID": str(pid),
+                "Nom": data.get('page_name', 'N/A'),
+                "Site": data.get('website', ''),
+                "CMS": data.get('cms', 'N/A'),
+                "État": data.get('etat', 'N/A'),
+                "Ads": data.get('ads_active_total', 0),
+                "🏆": winning_count,
+                "Produits": web.get('product_count', 0),
+                "Thématique": web.get('category', '') or web.get('gemini_category', ''),
+                "Classification": web.get('gemini_subcategory', ''),
+            })
 
+        if pages_data:
+            df_pages = pd.DataFrame(pages_data)
+            df_pages["État"] = df_pages["État"].apply(lambda x: format_state_for_df(x) if x else "")
+
+            st.dataframe(
+                df_pages,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Site": st.column_config.LinkColumn("Site"),
+                    "Page ID": st.column_config.TextColumn("Page ID", width="small"),
+                }
+            )
+
+    # ═══ TAB 2: ADS TOTALES ═══
+    with tab_ads:
+        ads_data = []
+        for pid, data in pages_final.items():
+            ads_list = page_ads.get(pid, [])
+            for ad in ads_list:
+                ad_text = ""
+                if ad.get('ad_creative_bodies'):
+                    bodies = ad.get('ad_creative_bodies')
+                    ad_text = (bodies[0] if isinstance(bodies, list) else bodies)[:100]
+
+                ads_data.append({
+                    "Ad ID": ad.get('id', ''),
+                    "Page": data.get('page_name', 'N/A'),
+                    "Page ID": str(pid),
+                    "Reach": ad.get('eu_total_reach', 0),
+                    "Création": ad.get('ad_creation_time', '')[:10] if ad.get('ad_creation_time') else '',
+                    "Texte": ad_text,
+                    "URL": ad.get('ad_snapshot_url', ''),
+                })
+
+        if ads_data:
+            df_ads = pd.DataFrame(ads_data)
+            st.dataframe(
+                df_ads,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "URL": st.column_config.LinkColumn("URL"),
+                    "Ad ID": st.column_config.TextColumn("Ad ID", width="small"),
+                    "Page ID": st.column_config.TextColumn("Page ID", width="small"),
+                }
+            )
+        else:
+            st.info("Aucune ad détaillée disponible")
+
+    # ═══ TAB 3: WINNING ADS ═══
+    with tab_winning:
+        winning_data = []
+        for w in winning_ads_data:
+            ad = w.get('ad', {})
+            ad_text = ""
+            if ad and ad.get('ad_creative_bodies'):
+                bodies = ad.get('ad_creative_bodies')
+                ad_text = (bodies[0] if isinstance(bodies, list) else bodies)[:100]
+
+            winning_data.append({
+                "Ad ID": ad.get('id', '') if ad else '',
+                "Page": w.get('page_name', '') or pages_final.get(w.get('page_id'), {}).get('page_name', 'N/A'),
+                "Page ID": str(w.get('page_id', '')),
+                "Reach": w.get('reach', 0),
+                "Âge (j)": w.get('age_days', 0),
+                "Critère": w.get('matched_criteria', ''),
+                "Texte": ad_text,
+                "URL": ad.get('ad_snapshot_url', '') if ad else '',
+            })
+
+        if winning_data:
+            df_winning = pd.DataFrame(winning_data)
+            st.dataframe(
+                df_winning,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "URL": st.column_config.LinkColumn("URL"),
+                    "Ad ID": st.column_config.TextColumn("Ad ID", width="small"),
+                    "Page ID": st.column_config.TextColumn("Page ID", width="small"),
+                }
+            )
+        else:
+            st.info("Aucune winning ad trouvée")
+
+    # ═══ TAB 4: PAGES AVEC WINNING ═══
+    with tab_pages_winning:
+        pages_winning_data = []
+        for pid, count in sorted(winning_by_page.items(), key=lambda x: -x[1]):
+            data = pages_final.get(pid, {})
+            web = web_results.get(pid, {})
+
+            pages_winning_data.append({
+                "Page ID": str(pid),
+                "Nom": data.get('page_name', 'N/A'),
+                "Site": data.get('website', ''),
+                "Winning Ads": count,
+                "Ads Totales": data.get('ads_active_total', 0),
+                "CMS": data.get('cms', 'N/A'),
+                "État": data.get('etat', 'N/A'),
+                "Produits": web.get('product_count', 0),
+            })
+
+        if pages_winning_data:
+            df_pages_winning = pd.DataFrame(pages_winning_data)
+            df_pages_winning["État"] = df_pages_winning["État"].apply(lambda x: format_state_for_df(x) if x else "")
+
+            st.dataframe(
+                df_pages_winning,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "Site": st.column_config.LinkColumn("Site"),
+                    "Page ID": st.column_config.TextColumn("Page ID", width="small"),
+                }
+            )
+        else:
+            st.info("Aucune page avec winning ads")
+
+    st.markdown("---")
+
+    # Actions de blacklist (expandable)
+    with st.expander("🚫 Actions de blacklist par page"):
+        for pid, data in list(pages_final.items()):
+            col1, col2 = st.columns([4, 1])
             with col1:
-                winning_badge = f" 🏆 {winning_count}" if winning_count > 0 else ""
-                st.write(f"**{data.get('page_name', 'N/A')}** - {data.get('ads_active_total', 0)} ads{winning_badge}")
-                st.caption(f"ID: {pid} | CMS: {data.get('cms', 'N/A')} | État: {data.get('etat', 'N/A')} | Produits: {web.get('product_count', 'N/A')}")
-
+                st.write(f"**{data.get('page_name', 'N/A')}** ({pid})")
             with col2:
-                if website:
-                    st.link_button("🌐 Site", website)
-                else:
-                    st.caption("Pas de site")
-
-            with col3:
-                st.link_button("📘 Ads", fb_link)
-
-            with col4:
                 if st.button("🚫", key=f"bl_preview_{pid}", help="Blacklister"):
                     if db and add_to_blacklist(db, pid, data.get("page_name", ""), "Blacklisté depuis aperçu"):
                         del st.session_state.pages_final[pid]
