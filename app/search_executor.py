@@ -512,15 +512,22 @@ def execute_background_search(
     for pid, data in pages_final.items():
         cached = cached_pages.get(str(pid), {})
 
-        # Page en cache = existe déjà en BDD, pas besoin de re-classifier
+        # Page en cache = existe déjà en BDD
         if not cached.get("needs_rescan") and cached.get("nombre_produits") is not None:
+            # Skip classification SEULEMENT si la page a déjà une thématique
+            has_thematique = bool(cached.get("thematique"))
             web_results[pid] = {
                 "product_count": cached.get("nombre_produits", 0),
                 "theme": cached.get("template", ""),
                 "category": cached.get("thematique", ""),
                 "currency_from_site": cached.get("devise", ""),
                 "_from_cache": True,
-                "_skip_classification": True  # Page existante, déjà classifiée
+                "_skip_classification": has_thematique,  # Skip seulement si déjà classifiée
+                # Récupérer le contenu du site pour classification si pas de thématique
+                "site_title": cached.get("site_title", "") if not has_thematique else "",
+                "site_description": cached.get("site_description", "") if not has_thematique else "",
+                "site_h1": cached.get("site_h1", "") if not has_thematique else "",
+                "site_keywords": cached.get("site_keywords", "") if not has_thematique else ""
             }
             if cached.get("devise") and not data.get("currency"):
                 data["currency"] = cached["devise"]
@@ -552,14 +559,17 @@ def execute_background_search(
                 if completed % 5 == 0:
                     tracker.update_step("Analyse web", completed, len(pages_need_analysis))
 
-    # ═══ Classification Gemini (uniquement pour les NOUVELLES pages) ═══
+    # ═══ Classification Gemini (pages sans thématique) ═══
     classified_count = 0
     gemini_key = os.getenv("GEMINI_API_KEY", "")
 
-    # Compter les nouvelles pages (pas en cache)
-    new_pages_count = sum(1 for w in web_results.values() if not w.get("_skip_classification"))
+    # Compter les pages à classifier (nouvelles OU existantes sans thématique)
+    pages_to_classify_count = sum(1 for w in web_results.values() if not w.get("_skip_classification"))
+    pages_with_thematique = sum(1 for w in web_results.values() if w.get("_skip_classification"))
 
-    if gemini_key and new_pages_count > 0:
+    print(f"[Search #{search_id}] Classification: {pages_to_classify_count} pages à classifier, {pages_with_thematique} déjà classifiées")
+
+    if gemini_key and pages_to_classify_count > 0:
         tracker.update_step("Classification Gemini", 0, 1)
 
         try:
