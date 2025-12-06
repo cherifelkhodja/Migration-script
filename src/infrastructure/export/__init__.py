@@ -1,16 +1,17 @@
 """
-Module utilitaire - Shim de compatibilite.
+Module d'export de donnees.
 
-Ce module redirige vers src.infrastructure.export pour la compatibilite
-avec le code existant.
+Fournit des fonctions pour exporter les resultats
+en differents formats (CSV, DataFrame).
 """
 
-# Re-export depuis la nouvelle localisation
-from src.infrastructure.export import (  # noqa: F401
+from src.infrastructure.export.csv_exporter import (
     export_pages_csv,
     export_ads_csv,
     export_suivi_csv,
     create_dataframe_pages,
+)
+from src.infrastructure.export.blacklist import (
     load_blacklist,
     is_blacklisted,
 )

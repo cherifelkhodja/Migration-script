@@ -1,12 +1,11 @@
 """
-Module de cache - Shim de compatibilite.
+Module de cache en memoire avec TTL.
 
-Ce module redirige vers src.infrastructure.cache pour la compatibilite
-avec le code existant.
+Fournit un cache leger pour les donnees frequemment accedees
+avec support du Time-To-Live (TTL).
 """
 
-# Re-export depuis la nouvelle localisation
-from src.infrastructure.cache import (  # noqa: F401
+from src.infrastructure.cache.ttl_cache import (
     TTLCache,
     CacheEntry,
     cached,

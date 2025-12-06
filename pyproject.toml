@@ -86,6 +86,10 @@ omit = [
     "*/tests/*",
     "*/__init__.py",
     "*/streamlit/*",
+    # Modules migres depuis app/ (code infrastructure)
+    "*/cache/*",
+    "*/export/*",
+    "*/http/*",
 ]
 
 [tool.coverage.report]

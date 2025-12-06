@@ -1,12 +1,13 @@
 """
-Module HTTP Client - Shim de compatibilite.
+Module HTTP Client resilient.
 
-Ce module redirige vers src.infrastructure.http pour la compatibilite
-avec le code existant.
+Fournit un client HTTP avec:
+- Connection pooling
+- Circuit breaker
+- Exponential backoff
 """
 
-# Re-export depuis la nouvelle localisation
-from src.infrastructure.http import (  # noqa: F401
+from src.infrastructure.http.resilient_client import (
     CircuitBreaker,
     CircuitState,
     ResilientHTTPClient,
