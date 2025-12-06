@@ -697,6 +697,8 @@ def _run_migrations(db: DatabaseManager):
         ("search_logs", "web_avg_time", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS web_avg_time FLOAT DEFAULT 0"),
         ("search_logs", "scraper_api_cost", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS scraper_api_cost FLOAT DEFAULT 0"),
         ("search_logs", "api_details", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS api_details TEXT"),
+        ("search_logs", "errors_list", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS errors_list TEXT"),
+        ("search_logs", "scraper_errors_by_type", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS scraper_errors_by_type TEXT"),
         # Colonnes classification pour PageRecherche
         ("liste_page_recherche", "subcategory", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS subcategory VARCHAR(100)"),
         ("liste_page_recherche", "classification_confidence", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS classification_confidence FLOAT"),
