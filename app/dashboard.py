@@ -81,6 +81,7 @@ def init_session_state():
         'search_running': False,
         'stats': {},
         'db': None,
+        'container': None,  # Container hexagonal architecture
         'current_page': 'Dashboard',
         'countries': ['FR'],
         'languages': ['fr'],
@@ -160,9 +161,37 @@ def get_database() -> DatabaseManager:
         try:
             st.session_state.db = DatabaseManager(DATABASE_URL)
             st.session_state.db.create_tables()
+            # Initialiser le container hexagonal avec le db_manager
+            _init_hexagonal_container(st.session_state.db)
         except Exception as e:
             return None
     return st.session_state.db
+
+
+def _init_hexagonal_container(db_manager: DatabaseManager) -> None:
+    """Initialise le container d'architecture hexagonale."""
+    if st.session_state.container is None:
+        try:
+            from src.infrastructure import Container
+            st.session_state.container = Container.create(db_manager=db_manager)
+        except Exception:
+            # Fallback silencieux si l'import échoue
+            pass
+
+
+def get_hexagonal_container():
+    """
+    Récupère le container d'architecture hexagonale.
+
+    Returns:
+        Container ou None si non initialisé.
+
+    Example:
+        >>> container = get_hexagonal_container()
+        >>> if container:
+        ...     stats = container.page_view_model.get_statistics()
+    """
+    return st.session_state.get('container')
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
