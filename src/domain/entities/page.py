@@ -86,6 +86,11 @@ class Page:
         website: str | None = None,
         cms: str | None = None,
         active_ads_count: int = 0,
+        etat: str | None = None,
+        product_count: int = 0,
+        classification: ThematiqueClassification | None = None,
+        keywords: set[str] | None = None,
+        last_scan: datetime | None = None,
     ) -> "Page":
         """
         Factory pour creer une nouvelle Page.
@@ -96,16 +101,31 @@ class Page:
             website: URL du site (optionnel).
             cms: Nom du CMS (optionnel).
             active_ads_count: Nombre d'annonces actives.
+            etat: Code etat (optionnel, calcule automatiquement).
+            product_count: Nombre de produits.
+            classification: Classification thematique.
+            keywords: Mots-cles associes.
+            last_scan: Date du dernier scan.
 
         Returns:
             Nouvelle instance de Page.
         """
+        # Parser l'etat si fourni
+        etat_obj = None
+        if etat:
+            etat_obj = Etat.from_string(etat)
+
         return cls(
             id=PageId.from_any(page_id),
             name=name.strip() if name else "",
             website=Url.try_from_string(website) if website else None,
             cms=CMS.from_string(cms) if cms else CMS.unknown(),
             active_ads_count=active_ads_count,
+            etat=etat_obj,
+            product_count=product_count,
+            classification=classification,
+            keywords=keywords or set(),
+            last_scan_at=last_scan,
         )
 
     def update_ads_count(self, count: int) -> None:

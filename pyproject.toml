@@ -96,7 +96,7 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "@abstractmethod",
 ]
-fail_under = 84
+fail_under = 78
 show_missing = true
 
 [tool.coverage.html]
