@@ -2391,7 +2391,10 @@ def record_pages_search_history_batch(
         Nombre d'entrées créées
     """
     if not pages_data:
+        print(f"[record_pages_search_history_batch] Aucune page à enregistrer pour search #{search_log_id}")
         return 0
+
+    print(f"[record_pages_search_history_batch] Enregistrement de {len(pages_data)} pages pour search #{search_log_id}")
 
     count = 0
     with db.get_session() as session:
@@ -2418,9 +2421,12 @@ def record_pages_search_history_batch(
                     session.add(history)
                     count += 1
 
+            print(f"[record_pages_search_history_batch] {count} nouvelles entrées créées pour search #{search_log_id}")
             return count
         except Exception as e:
             print(f"[record_pages_search_history_batch] Erreur: {e}")
+            import traceback
+            traceback.print_exc()
             return count
 
 
@@ -2478,8 +2484,16 @@ def get_pages_for_search(
     Récupère toutes les pages trouvées dans une recherche spécifique.
     Joint avec PageRecherche pour avoir les infos actuelles.
     """
+    print(f"[get_pages_for_search] Recherche des pages pour search #{search_log_id}")
+
     with db.get_session() as session:
         try:
+            # Vérifier d'abord combien d'entrées existent
+            count = session.query(PageSearchHistory).filter(
+                PageSearchHistory.search_log_id == search_log_id
+            ).count()
+            print(f"[get_pages_for_search] {count} entrées trouvées dans page_search_history pour search #{search_log_id}")
+
             # Query avec jointure
             results = session.query(
                 PageSearchHistory,
