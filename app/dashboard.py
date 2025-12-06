@@ -629,6 +629,7 @@ class SearchProgressTracker:
             6: {"name": "🔬 Analyse web", "stats": {}},
             7: {"name": "🏆 Winning Ads", "stats": {}},
             8: {"name": "💾 Sauvegarde", "stats": {}},
+            9: {"name": "🏷️ Classification", "stats": {}},
         }
 
         # Log détaillé des étapes
