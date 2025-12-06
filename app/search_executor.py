@@ -378,14 +378,20 @@ def execute_background_search(
     cached_sites = sum(1 for d in pages_filtered.values() if d.get("_from_cache"))
     sites_new = sites_found - cached_sites
 
+    # Collecter les IDs pour logs détaillés
+    cached_url_page_ids = [pid for pid, d in pages_filtered.items() if d.get("_from_cache")]
+
     # Log détaillé Phase 3
     print(f"[Search #{search_id}] Phase 3 - Extraction sites web:")
     print(f"   🌐 Sites trouvés: {sites_found}")
     print(f"   💾 En cache (URL de BDD): {cached_sites}")
+    if cached_url_page_ids:
+        for pid in cached_url_page_ids:
+            print(f"      → {pid}")
     print(f"   🆕 Nouveaux (URL extraite des ads): {sites_new}")
     print(f"   ❌ Sans URL: {len(pages_without_url)}")
     if pages_without_url:
-        for pid, name in pages_without_url[:5]:
+        for pid, name in pages_without_url:
             print(f"      → {pid} ({name[:30]})")
 
     phase3_stats = {
@@ -414,10 +420,17 @@ def execute_background_search(
 
     cms_cached_count = len(pages_with_sites) - len(pages_need_cms)
 
+    # Collecter les IDs avec CMS en cache
+    cms_cached_page_ids = [pid for pid, data in pages_with_sites.items() if data.get("_cms_cached")]
+
     # Log détaillé Phase 4
     print(f"[Search #{search_id}] Phase 4 - Détection CMS:")
     print(f"   🔍 Sites à analyser: {len(pages_need_cms)}")
     print(f"   💾 CMS en cache (de BDD): {cms_cached_count}")
+    if cms_cached_page_ids:
+        for pid in cms_cached_page_ids:
+            cms_val = pages_with_sites[pid].get("cms", "?")
+            print(f"      → {pid} (CMS: {cms_val})")
 
     def detect_cms_worker(pid_data):
         pid, data = pid_data
@@ -448,6 +461,25 @@ def execute_background_search(
         return False
 
     pages_with_cms = {pid: data for pid, data in pages_with_sites.items() if cms_matches(data.get("cms", "Unknown"))}
+
+    # Log filtre CMS
+    pages_excluded_cms = {pid: data for pid, data in pages_with_sites.items() if not cms_matches(data.get("cms", "Unknown"))}
+    print(f"[Search #{search_id}] Phase 4 - Filtre CMS (sélection: {cms_filter}):")
+    print(f"   ✅ Pages retenues: {len(pages_with_cms)}")
+    print(f"   ❌ Pages exclues: {len(pages_excluded_cms)}")
+    if pages_excluded_cms:
+        excluded_by_cms = {}
+        for pid, data in pages_excluded_cms.items():
+            cms = data.get("cms", "Unknown")
+            if cms not in excluded_by_cms:
+                excluded_by_cms[cms] = []
+            excluded_by_cms[cms].append(pid)
+        for cms, pids in excluded_by_cms.items():
+            print(f"      {cms}: {len(pids)} pages")
+            for pid in pids[:3]:
+                print(f"         → {pid}")
+            if len(pids) > 3:
+                print(f"         ... et {len(pids) - 3} autres")
 
     # Compter les CMS
     all_cms_counts = {}
@@ -491,6 +523,18 @@ def execute_background_search(
         time.sleep(META_DELAY_BETWEEN_BATCHES)
 
     pages_final = {pid: data for pid, data in pages_with_cms.items() if data["ads_active_total"] >= ads_min}
+
+    # Log filtre min_ads
+    pages_excluded_ads = {pid: data for pid, data in pages_with_cms.items() if data["ads_active_total"] < ads_min}
+    print(f"[Search #{search_id}] Phase 5 - Filtre min_ads (min: {ads_min}):")
+    print(f"   ✅ Pages retenues: {len(pages_final)}")
+    print(f"   ❌ Pages exclues (< {ads_min} ads): {len(pages_excluded_ads)}")
+    if pages_excluded_ads:
+        for pid, data in list(pages_excluded_ads.items())[:10]:
+            ads_count = data.get("ads_active_total", 0)
+            print(f"      → {pid} ({ads_count} ads)")
+        if len(pages_excluded_ads) > 10:
+            print(f"      ... et {len(pages_excluded_ads) - 10} autres")
 
     # Calculer les états
     def get_etat_from_ads_count(count):
