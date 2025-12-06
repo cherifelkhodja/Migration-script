@@ -511,7 +511,15 @@ def execute_background_search(
     pages_need_analysis = []
     for pid, data in pages_final.items():
         cached = cached_pages.get(str(pid), {})
-        if not cached.get("needs_rescan") and cached.get("nombre_produits") is not None:
+        # Vérifier si le cache a du contenu pour classification Gemini
+        has_classification_content = (
+            cached.get("site_title") or
+            cached.get("site_description") or
+            cached.get("site_h1")
+        )
+
+        if not cached.get("needs_rescan") and cached.get("nombre_produits") is not None and has_classification_content:
+            # Page en cache AVEC contenu de classification
             web_results[pid] = {
                 "product_count": cached.get("nombre_produits", 0),
                 "theme": cached.get("template", ""),
@@ -527,6 +535,7 @@ def execute_background_search(
             if cached.get("devise") and not data.get("currency"):
                 data["currency"] = cached["devise"]
         elif data.get("website"):
+            # Page sans contenu de classification OU qui nécessite un rescan
             pages_need_analysis.append((pid, data))
 
     cached_analysis = len(web_results)
