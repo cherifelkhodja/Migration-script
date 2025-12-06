@@ -39,3 +39,6 @@ apscheduler>=3.10.0
 
 # Auto-refresh pour Streamlit
 streamlit-autorefresh>=1.0.1
+
+# AI Classification (Gemini)
+google-generativeai>=0.8.0
