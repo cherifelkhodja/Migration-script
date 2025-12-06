@@ -5852,6 +5852,52 @@ def render_settings():
     else:
         st.warning("⚠️ Clé API Gemini non configurée. Ajoutez GEMINI_API_KEY dans les variables d'environnement.")
 
+    # Configuration du modèle Gemini
+    if db:
+        from app.database import get_app_setting, set_app_setting, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT
+
+        st.markdown("---")
+        st.markdown("##### Modèle Gemini")
+        st.caption("Les modèles Gemini évoluent régulièrement. Modifiez si le modèle actuel devient obsolète.")
+
+        current_model = get_app_setting(db, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT)
+
+        col_model, col_btn = st.columns([3, 1])
+        with col_model:
+            # Liste des modèles disponibles (peut être mise à jour)
+            model_options = [
+                "gemini-1.5-flash",
+                "gemini-1.5-flash-8b",
+                "gemini-1.5-pro",
+                "gemini-2.0-flash-exp",
+                "gemini-exp-1206",
+            ]
+            # Ajouter le modèle actuel s'il n'est pas dans la liste
+            if current_model and current_model not in model_options:
+                model_options.insert(0, current_model)
+
+            # Champ texte pour entrer un modèle personnalisé
+            new_model = st.text_input(
+                "Nom du modèle",
+                value=current_model,
+                help="Entrez le nom exact du modèle Gemini (ex: gemini-1.5-flash, gemini-2.0-flash-exp)",
+                key="gemini_model_input"
+            )
+
+        with col_btn:
+            st.write("")  # Espacement
+            if st.button("💾 Sauvegarder", key="save_gemini_model"):
+                if new_model and new_model.strip():
+                    set_app_setting(db, SETTING_GEMINI_MODEL, new_model.strip(), "Modèle Gemini pour la classification")
+                    st.success(f"✅ Modèle mis à jour: {new_model}")
+                    st.rerun()
+                else:
+                    st.error("Veuillez entrer un nom de modèle valide")
+
+        # Afficher les modèles suggérés
+        st.caption(f"**Modèles suggérés:** {', '.join(model_options[:4])}")
+        st.markdown("---")
+
     if db:
         from app.database import (
             get_all_taxonomy, add_taxonomy_entry, update_taxonomy_entry,
@@ -7166,6 +7212,60 @@ def render_search_logs():
                 st.metric("Pages filtrées", log.get("pages_after_filter", 0))
             with m4:
                 st.metric("Winning Ads", log.get("winning_ads_count", 0))
+
+            # ═══ TABLEAUX PAGES ET WINNING ADS ═══
+            from app.database import get_pages_by_search_log, get_winning_ads_by_search_log
+
+            # Tableau des pages trouvées
+            pages_from_search = get_pages_by_search_log(db, log_id, limit=50)
+            if pages_from_search:
+                new_pages = sum(1 for p in pages_from_search if p.get("is_new"))
+                existing_pages = len(pages_from_search) - new_pages
+
+                with st.expander(f"📄 **Pages trouvées ({len(pages_from_search)})** — 🆕 {new_pages} nouvelles | 📝 {existing_pages} mises à jour", expanded=False):
+                    # Créer DataFrame
+                    pages_df_data = []
+                    for p in pages_from_search:
+                        pages_df_data.append({
+                            "Status": "🆕 Nouveau" if p.get("is_new") else "📝 MAJ",
+                            "Page": p.get("page_name", "")[:30],
+                            "Site": (p.get("lien_site") or "")[:30],
+                            "CMS": p.get("cms", "-"),
+                            "État": p.get("etat", "-"),
+                            "Ads": p.get("nombre_ads_active", 0),
+                            "Produits": p.get("nombre_produits", 0),
+                            "Thématique": (p.get("thematique") or "-")[:20],
+                        })
+
+                    if pages_df_data:
+                        df_pages = pd.DataFrame(pages_df_data)
+                        st.dataframe(df_pages, hide_index=True, use_container_width=True)
+
+            # Tableau des winning ads
+            winning_from_search = get_winning_ads_by_search_log(db, log_id, limit=50)
+            if winning_from_search:
+                new_winning = sum(1 for a in winning_from_search if a.get("is_new"))
+                existing_winning = len(winning_from_search) - new_winning
+
+                with st.expander(f"🏆 **Winning Ads ({len(winning_from_search)})** — 🆕 {new_winning} nouvelles | 📝 {existing_winning} existantes", expanded=False):
+                    # Créer DataFrame
+                    winning_df_data = []
+                    for a in winning_from_search:
+                        reach = a.get("eu_total_reach")
+                        reach_str = f"{reach:,}".replace(",", " ") if reach else "-"
+
+                        winning_df_data.append({
+                            "Status": "🆕 Nouveau" if a.get("is_new") else "📝 Existant",
+                            "Page": (a.get("page_name") or "")[:25],
+                            "Âge": f"{a.get('ad_age_days', '-')}j" if a.get("ad_age_days") is not None else "-",
+                            "Reach": reach_str,
+                            "Critère": a.get("matched_criteria", "-"),
+                            "Site": (a.get("lien_site") or "")[:25],
+                        })
+
+                    if winning_df_data:
+                        df_winning = pd.DataFrame(winning_df_data)
+                        st.dataframe(df_winning, hide_index=True, use_container_width=True)
 
             # Paramètres de recherche
             st.markdown("**Paramètres:**")

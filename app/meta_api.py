@@ -196,6 +196,46 @@ class TokenRotator:
         """Alias pour rotate_to_next (compatibilité)"""
         return self.rotate_to_next(reason)
 
+    def get_tokens_with_proxies(self) -> List[Dict]:
+        """
+        Retourne la liste des tokens qui ont un proxy configuré.
+        Utilisé pour déterminer le niveau de parallélisation possible.
+        """
+        with self._lock:
+            return [t for t in self._token_data if t.get("proxy")]
+
+    def has_proxy_tokens(self) -> bool:
+        """Vérifie si au moins un token a un proxy configuré"""
+        with self._lock:
+            return any(t.get("proxy") for t in self._token_data)
+
+    def get_parallel_workers_count(self) -> int:
+        """
+        Retourne le nombre de workers parallèles possibles.
+        - Si des tokens ont des proxies: nombre de tokens avec proxy
+        - Sinon: 1 (séquentiel)
+        """
+        with self._lock:
+            proxied_count = sum(1 for t in self._token_data if t.get("proxy"))
+            return max(1, proxied_count)
+
+    def get_token_data_at_index(self, index: int) -> Dict:
+        """
+        Retourne les données d'un token à un index spécifique.
+        Utilisé pour assigner un token dédié à chaque worker parallèle.
+        """
+        with self._lock:
+            if not self._token_data:
+                return {"id": None, "token": "", "proxy": None, "name": "Unknown"}
+            # Wrap around si index dépasse
+            safe_index = index % len(self._token_data)
+            return self._token_data[safe_index].copy()
+
+    def get_all_token_data(self) -> List[Dict]:
+        """Retourne une copie de toutes les données de tokens"""
+        with self._lock:
+            return [t.copy() for t in self._token_data]
+
     def mark_rate_limited(self, cooldown_seconds: int = 60, error_message: str = None) -> bool:
         """
         Marque le token courant comme rate-limited et tourne.
@@ -757,18 +797,325 @@ class MetaAdsClient:
         return results
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# RECHERCHE PARALLÈLE INTELLIGENTE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def search_keywords_parallel(
+    keywords: List[str],
+    countries: List[str],
+    languages: List[str],
+    db=None,
+    progress_callback: Optional[Callable[[str, int, int], None]] = None
+) -> Tuple[List[dict], Dict[str, int]]:
+    """
+    Recherche des annonces pour plusieurs mots-clés avec stratégie adaptative:
+    - Si tokens avec proxies: recherche parallèle (1 worker par token avec proxy)
+    - Si pas de proxy: recherche séquentielle avec délai plus long
+
+    Args:
+        keywords: Liste des mots-clés à rechercher
+        countries: Liste des codes pays
+        languages: Liste des codes langues
+        db: DatabaseManager pour le cache (optionnel)
+        progress_callback: Callback(keyword, current, total) pour la progression
+
+    Returns:
+        Tuple (liste de toutes les ads, dict {keyword: nb_ads})
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    try:
+        from app.config import (
+            META_PARALLEL_ENABLED, META_DELAY_BETWEEN_KEYWORDS,
+            META_DELAY_SEQUENTIAL_NO_PROXY, META_MIN_DELAY_BETWEEN_PARALLEL
+        )
+    except ImportError:
+        META_PARALLEL_ENABLED = True
+        META_DELAY_BETWEEN_KEYWORDS = 1.5
+        META_DELAY_SEQUENTIAL_NO_PROXY = 3.5
+        META_MIN_DELAY_BETWEEN_PARALLEL = 0.5
+
+    rotator = get_token_rotator()
+    if not rotator or rotator.token_count == 0:
+        print("⚠️ Aucun token disponible pour la recherche")
+        return [], {}
+
+    all_ads = []
+    ads_by_keyword = {}
+    seen_ad_ids = set()
+
+    # Déterminer la stratégie de recherche
+    tokens_with_proxies = rotator.get_tokens_with_proxies() if rotator else []
+    use_parallel = META_PARALLEL_ENABLED and len(tokens_with_proxies) > 1
+
+    if use_parallel:
+        # ═══ STRATÉGIE PARALLÈLE ═══
+        # Chaque worker utilise un token+proxy dédié
+        num_workers = len(tokens_with_proxies)
+        print(f"🚀 Recherche parallèle activée: {num_workers} workers ({num_workers} tokens avec proxy)")
+
+        # Créer un lock pour les résultats partagés
+        from threading import Lock
+        results_lock = Lock()
+
+        def search_keyword_worker(args):
+            """Worker pour rechercher un mot-clé avec un token+proxy dédié"""
+            keyword, token_data, worker_idx = args
+
+            # Créer un client avec le token dédié
+            client = MetaAdsClient(token_data["token"])
+            # Override le token pour utiliser celui du worker (pas le rotator global)
+            client._dedicated_token = token_data["token"]
+            client._dedicated_proxy = token_data.get("proxy")
+
+            try:
+                # Faire la requête API directement avec le token+proxy dédié
+                ads = _search_ads_with_dedicated_token(
+                    keyword, countries, languages,
+                    token_data["token"], token_data.get("proxy"),
+                    token_data.get("id"), token_data.get("name", f"Token #{worker_idx+1}"),
+                    db
+                )
+                return keyword, ads, None
+            except Exception as e:
+                print(f"❌ Erreur worker #{worker_idx+1} pour '{keyword}': {e}")
+                return keyword, [], str(e)
+
+        # Distribuer les keywords aux workers
+        keyword_tasks = []
+        for i, kw in enumerate(keywords):
+            # Assigner un token avec proxy à chaque keyword (round-robin)
+            token_idx = i % len(tokens_with_proxies)
+            token_data = tokens_with_proxies[token_idx]
+            keyword_tasks.append((kw, token_data, token_idx))
+
+        completed = 0
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Soumettre toutes les tâches avec un petit délai entre chaque
+            futures = {}
+            for i, task in enumerate(keyword_tasks):
+                if i > 0:
+                    time.sleep(META_MIN_DELAY_BETWEEN_PARALLEL)
+                future = executor.submit(search_keyword_worker, task)
+                futures[future] = task[0]  # keyword
+
+            # Collecter les résultats au fur et à mesure
+            for future in as_completed(futures):
+                keyword = futures[future]
+                try:
+                    kw, ads, error = future.result()
+
+                    with results_lock:
+                        for ad in ads:
+                            ad_id = ad.get("id")
+                            if ad_id and ad_id not in seen_ad_ids:
+                                ad["_keyword"] = kw
+                                all_ads.append(ad)
+                                seen_ad_ids.add(ad_id)
+                        ads_by_keyword[kw] = len(ads)
+
+                    completed += 1
+                    if progress_callback:
+                        progress_callback(kw, completed, len(keywords))
+
+                except Exception as e:
+                    print(f"❌ Erreur future pour '{keyword}': {e}")
+                    completed += 1
+
+        print(f"✅ Recherche parallèle terminée: {len(all_ads)} ads uniques")
+
+    else:
+        # ═══ STRATÉGIE SÉQUENTIELLE ═══
+        # Un seul token, délai plus long entre les requêtes
+        delay = META_DELAY_SEQUENTIAL_NO_PROXY if not tokens_with_proxies else META_DELAY_BETWEEN_KEYWORDS
+        print(f"🔄 Recherche séquentielle: 1 token, délai {delay}s entre keywords")
+
+        client = MetaAdsClient(rotator.get_current_token())
+
+        for i, kw in enumerate(keywords):
+            if i > 0:
+                time.sleep(delay)
+
+            try:
+                ads = client.search_ads(kw, countries, languages)
+
+                for ad in ads:
+                    ad_id = ad.get("id")
+                    if ad_id and ad_id not in seen_ad_ids:
+                        ad["_keyword"] = kw
+                        all_ads.append(ad)
+                        seen_ad_ids.add(ad_id)
+
+                ads_by_keyword[kw] = len(ads)
+
+                if progress_callback:
+                    progress_callback(kw, i + 1, len(keywords))
+
+            except Exception as e:
+                print(f"❌ Erreur séquentielle pour '{kw}': {e}")
+                ads_by_keyword[kw] = 0
+
+            # Rotation vers le prochain token si disponible (pour répartir la charge)
+            if rotator.token_count > 1:
+                rotator.rotate_to_next(reason=f"keyword_{i+1}_done")
+
+        print(f"✅ Recherche séquentielle terminée: {len(all_ads)} ads uniques")
+
+    return all_ads, ads_by_keyword
+
+
+def _search_ads_with_dedicated_token(
+    keyword: str,
+    countries: List[str],
+    languages: List[str],
+    token: str,
+    proxy: Optional[str],
+    token_id: Optional[int],
+    token_name: str,
+    db=None
+) -> List[dict]:
+    """
+    Recherche des annonces avec un token+proxy dédié (pour recherche parallèle).
+    Ne passe pas par le rotator global.
+    """
+    start_time = time.time()
+    error_msg = None
+    success = True
+
+    url = ADS_ARCHIVE
+    params = {
+        "access_token": token,
+        "search_terms": keyword,
+        "search_type": "KEYWORD_UNORDERED",
+        "ad_type": "ALL",
+        "ad_active_status": "ACTIVE",
+        "ad_reached_countries": json.dumps(countries),
+        "fields": FIELDS_ADS_COMPLETE,
+        "limit": LIMIT_SEARCH
+    }
+    if languages:
+        params["languages"] = json.dumps(languages)
+
+    # Configurer le proxy si disponible
+    proxies = None
+    if proxy:
+        proxies = {"http": proxy, "https": proxy}
+
+    all_ads = []
+    limit_curr = LIMIT_SEARCH
+    max_retries = 3
+
+    while True:
+        for attempt in range(max_retries):
+            try:
+                r = requests.get(url, params=params, timeout=TIMEOUT, proxies=proxies, verify=False)
+
+                try:
+                    data = r.json()
+                except (ValueError, json.JSONDecodeError):
+                    data = {}
+
+                # Check for errors
+                if "error" in data:
+                    error_code = data["error"].get("code")
+                    error_msg_api = data["error"].get("message", "")
+
+                    if error_code == 613 or "rate limit" in error_msg_api.lower():
+                        # Rate limit - attendre et réessayer
+                        sleep_time = min(2 ** attempt, 30)
+                        print(f"⏳ Rate limit token {token_name}, attente {sleep_time}s...")
+                        time.sleep(sleep_time)
+                        continue
+
+                    # Réduire la limite si demandé
+                    if ("reduce" in error_msg_api or "code\":1" in error_msg_api) and limit_curr > LIMIT_MIN:
+                        limit_curr = max(LIMIT_MIN, limit_curr // 2)
+                        params["limit"] = limit_curr
+                        time.sleep(0.3)
+                        continue
+
+                    error_msg = error_msg_api
+                    success = False
+                    break
+
+                # Succès
+                batch = data.get("data", [])
+                all_ads.extend(batch)
+
+                next_url = data.get("paging", {}).get("next")
+                if not next_url:
+                    break
+
+                # Délai entre les pages
+                time.sleep(META_DELAY_BETWEEN_PAGES)
+                url = next_url
+                params = {}  # Next URL contient déjà les params
+                break
+
+            except requests.RequestException as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                error_msg = str(e)
+                success = False
+                break
+        else:
+            # Toutes les tentatives ont échoué
+            break
+
+        # Si on n'a plus de next_url ou erreur, sortir
+        if not data.get("paging", {}).get("next"):
+            break
+
+    # Log de l'utilisation du token
+    response_time_ms = int((time.time() - start_time) * 1000)
+    if token_id and db:
+        try:
+            from app.database import log_token_usage
+            countries_str = ",".join(countries) if isinstance(countries, list) else countries
+            log_token_usage(
+                db,
+                token_id=token_id,
+                token_name=token_name,
+                action_type="search_parallel",
+                keyword=keyword,
+                countries=countries_str,
+                success=success,
+                ads_count=len(all_ads),
+                error_message=error_msg,
+                response_time_ms=response_time_ms
+            )
+        except Exception as log_err:
+            print(f"⚠️ Erreur logging token: {log_err}")
+
+    return all_ads
+
+
 def extract_website_from_ads(ads_list: List[dict]) -> str:
     """
-    Extrait l'URL du site web depuis les annonces - Version améliorée
-    Utilise plusieurs méthodes et un système de scoring
+    Extrait l'URL du site web depuis les annonces - Version optimisée
+    Utilise patterns pré-compilés et système de scoring
     """
     if not ads_list:
         return ""
 
+    # Importer les patterns pré-compilés
+    try:
+        from app.config import COMPILED_URL_PATTERNS, COMPILED_CAPTION_DOMAIN, COMPILED_DOMAIN_VALIDATOR
+    except ImportError:
+        # Fallback si import échoue
+        COMPILED_URL_PATTERNS = [
+            re.compile(r'https?://(?:www\.)?([a-z0-9][-a-z0-9]*(?:\.[a-z0-9][-a-z0-9]*)*\.[a-z]{2,})'),
+            re.compile(r'www\.([a-z0-9][-a-z0-9]*(?:\.[a-z0-9][-a-z0-9]*)*\.[a-z]{2,})'),
+        ]
+        COMPILED_CAPTION_DOMAIN = re.compile(r'^[a-z0-9][-a-z0-9]*\.[a-z]{2,}(?:\.[a-z]{2,})?$')
+        COMPILED_DOMAIN_VALIDATOR = re.compile(r'^[a-z0-9][-a-z0-9]*\.[a-z]{2,}')
+
     url_counter = Counter()
 
-    # Liste étendue des domaines à exclure
-    excluded_domains = [
+    # Liste étendue des domaines à exclure (set pour lookups O(1))
+    excluded_domains = {
         # Réseaux sociaux
         "facebook.com", "instagram.com", "fb.me", "fb.com", "fb.watch",
         "messenger.com", "whatsapp.com", "meta.com",
@@ -781,38 +1128,10 @@ def extract_website_from_ads(ads_list: List[dict]) -> str:
         "rebrand.ly", "cutt.ly", "is.gd",
         # Autres
         "linktr.ee", "linkin.bio", "beacons.ai", "allmylinks.com",
-        "shopify.com", "myshopify.com",  # Domaines Shopify génériques
+        "shopify.com", "myshopify.com",
         "wixsite.com", "squarespace.com",
         "apple.com", "apps.apple.com", "play.google.com",
-    ]
-
-    # Extensions de domaines valides (étendu)
-    valid_tlds = (
-        # Génériques
-        "com", "net", "org", "co", "io", "app", "dev", "me", "info", "biz",
-        # E-commerce
-        "shop", "store", "boutique", "buy", "sale", "deals",
-        # Pays européens
-        "fr", "de", "es", "it", "pt", "nl", "be", "ch", "at", "lu",
-        "uk", "co.uk", "ie", "pl", "se", "no", "dk", "fi",
-        # Autres pays
-        "ca", "us", "au", "nz", "br", "mx", "ar",
-        # Nouveaux TLDs
-        "online", "site", "website", "web", "live", "world", "tech",
-        "fashion", "beauty", "style", "fit", "health", "life",
-    )
-
-    # Patterns regex améliorés
-    url_patterns = [
-        # URL complète avec protocole
-        r'https?://(?:www\.)?([a-z0-9][-a-z0-9]*(?:\.[a-z0-9][-a-z0-9]*)*\.[a-z]{2,})',
-        # Domaine avec www
-        r'www\.([a-z0-9][-a-z0-9]*(?:\.[a-z0-9][-a-z0-9]*)*\.[a-z]{2,})',
-        # Domaine simple (mot.extension)
-        r'\b([a-z0-9][-a-z0-9]{1,}\.(?:' + '|'.join(valid_tlds) + r'))\b',
-        # Domaine avec sous-domaine
-        r'\b([a-z0-9][-a-z0-9]*\.[a-z0-9][-a-z0-9]*\.(?:' + '|'.join(valid_tlds[:20]) + r'))\b',
-    ]
+    }
 
     for ad in ads_list:
         # Champs à vérifier (ordre de priorité)
@@ -840,19 +1159,17 @@ def extract_website_from_ads(ads_list: List[dict]) -> str:
 
                 # Méthode 1: Le caption EST souvent le domaine directement
                 if field == "ad_creative_link_captions":
-                    # Nettoyer et vérifier si c'est un domaine valide
                     clean_caption = val_str.replace("www.", "").strip("/").strip()
                     if "." in clean_caption and len(clean_caption) < 50:
-                        # Vérifier que ça ressemble à un domaine
-                        if re.match(r'^[a-z0-9][-a-z0-9]*\.[a-z]{2,}(?:\.[a-z]{2,})?$', clean_caption):
+                        # Utiliser pattern pré-compilé
+                        if COMPILED_CAPTION_DOMAIN.match(clean_caption):
                             if not any(exc in clean_caption for exc in excluded_domains):
-                                url_counter[clean_caption] += 10  # Très haute priorité
+                                url_counter[clean_caption] += 10
 
-                # Méthode 2: Extraction par regex
-                for pattern in url_patterns:
-                    matches = re.findall(pattern, val_str)
+                # Méthode 2: Extraction par regex (patterns pré-compilés)
+                for compiled_pattern in COMPILED_URL_PATTERNS:
+                    matches = compiled_pattern.findall(val_str)
                     for match in matches:
-                        # Nettoyer le domaine
                         clean = match.replace("www.", "").strip("/").strip(".")
 
                         # Vérifications de base
@@ -877,12 +1194,12 @@ def extract_website_from_ads(ads_list: List[dict]) -> str:
         page_name = ad.get("page_name", "")
         if page_name:
             page_name_lower = page_name.lower().strip()
-            # Vérifier si le page_name ressemble à un domaine
             if "." in page_name_lower and " " not in page_name_lower:
                 clean_name = page_name_lower.replace("www.", "").strip("/")
-                if re.match(r'^[a-z0-9][-a-z0-9]*\.[a-z]{2,}(?:\.[a-z]{2,})?$', clean_name):
+                # Utiliser pattern pré-compilé
+                if COMPILED_CAPTION_DOMAIN.match(clean_name):
                     if not any(exc in clean_name for exc in excluded_domains):
-                        url_counter[clean_name] += 2  # Poids moyen
+                        url_counter[clean_name] += 2
 
     if not url_counter:
         return ""
@@ -890,9 +1207,8 @@ def extract_website_from_ads(ads_list: List[dict]) -> str:
     # Prendre le domaine le plus fréquent
     most_common = url_counter.most_common(1)[0][0]
 
-    # Valider que c'est bien un domaine valide
-    if not re.match(r'^[a-z0-9][-a-z0-9]*\.[a-z]{2,}', most_common):
-        # Essayer le second choix
+    # Valider avec pattern pré-compilé
+    if not COMPILED_DOMAIN_VALIDATOR.match(most_common):
         if len(url_counter) > 1:
             most_common = url_counter.most_common(2)[1][0]
         else:

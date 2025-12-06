@@ -532,20 +532,33 @@ class GeminiClassifier:
     Utilise le batching pour optimiser les coûts et la latence.
     """
 
-    def __init__(self, api_key: str = None):
+    def __init__(self, api_key: str = None, model_name: str = None, db=None):
         """
         Initialise le client Gemini.
 
         Args:
             api_key: Clé API Gemini (ou variable d'env GEMINI_API_KEY)
+            model_name: Nom du modèle Gemini à utiliser (optionnel, lit depuis settings sinon)
+            db: DatabaseManager pour récupérer les settings (optionnel)
         """
         self.api_key = api_key or os.getenv('GEMINI_API_KEY')
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY non configurée")
 
-        # Note: gemini-2.0-flash-lite est le modèle lite de Gemini 2.0
-        self.model = "gemini-2.0-flash-lite"
+        # Récupérer le modèle depuis les settings ou utiliser la valeur par défaut
+        if model_name:
+            self.model = model_name
+        elif db:
+            try:
+                from app.database import get_app_setting, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT
+                self.model = get_app_setting(db, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT)
+            except Exception:
+                self.model = "gemini-1.5-flash"  # Fallback
+        else:
+            self.model = "gemini-1.5-flash"  # Default model
+
         self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent"
+        print(f"[Gemini] Utilisation du modèle: {self.model}")
 
     def _build_system_prompt(self, taxonomy_text: str) -> str:
         """Construit le prompt système avec la taxonomie"""
@@ -1030,8 +1043,8 @@ def classify_with_extracted_content(
     if progress_callback:
         progress_callback(0, len(valid_contents), "Classification en cours...")
 
-    # Classifier par batches
-    classifier = GeminiClassifier(api_key)
+    # Classifier par batches (utilise le modèle configuré en settings)
+    classifier = GeminiClassifier(api_key, db=db)
     all_results = []
     batch_size = BATCH_SIZE
 

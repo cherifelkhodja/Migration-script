@@ -237,35 +237,33 @@ def execute_background_search(
     blacklist_ids = get_blacklist_ids(db)
     print(f"[Search #{search_id}] {len(blacklist_ids)} pages en blacklist")
 
-    # ═══ PHASE 1: Recherche par mots-clés ═══
+    # ═══ PHASE 1: Recherche par mots-clés (parallèle si proxies) ═══
     tracker.start_phase(1, "Recherche par mots-clés", total_phases=9)
-    all_ads = []
-    seen_ad_ids = set()
 
-    for i, kw in enumerate(keywords):
-        tracker.update_step("Recherche", i + 1, len(keywords), f"Mot-clé: {kw}")
+    # Utiliser la recherche parallèle intelligente
+    from app.meta_api import search_keywords_parallel
 
-        if i > 0:
-            time.sleep(META_DELAY_BETWEEN_KEYWORDS)
+    def phase1_progress(kw, current, total):
+        """Callback pour la progression de la recherche"""
+        tracker.update_step("Recherche", current, total, f"Mot-clé: {kw}")
 
-        try:
-            ads = client.search_ads(kw, countries_list, languages_list)
-            for ad in ads:
-                ad_id = ad.get("id")
-                if ad_id and ad_id not in seen_ad_ids:
-                    ad["_keyword"] = kw
-                    all_ads.append(ad)
-                    seen_ad_ids.add(ad_id)
-        except Exception as e:
-            print(f"[Search #{search_id}] Erreur mot-clé '{kw}': {e}")
+    # Lancer la recherche (parallèle ou séquentielle selon les proxies)
+    all_ads, ads_by_keyword = search_keywords_parallel(
+        keywords=keywords,
+        countries=countries_list,
+        languages=languages_list,
+        db=db,
+        progress_callback=phase1_progress
+    )
 
-        # Rotation vers le prochain token+proxy pour le prochain keyword
-        rotator.rotate_to_next(reason=f"keyword_{i+1}_done")
+    # Compter les ads uniques (déjà dédupliquées par search_keywords_parallel)
+    seen_ad_ids = {ad.get("id") for ad in all_ads if ad.get("id")}
 
     phase1_stats = {
         "Mots-clés recherchés": len(keywords),
         "Annonces trouvées": len(all_ads),
         "Annonces uniques": len(seen_ad_ids),
+        "Mode": "parallèle" if rotator.has_proxy_tokens() else "séquentiel",
     }
     tracker.complete_phase(f"{len(all_ads)} annonces trouvées", stats=phase1_stats)
     tracker.update_metric("total_ads_found", len(all_ads))

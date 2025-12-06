@@ -56,6 +56,10 @@ class PageRecherche(Base):
     dernier_scan = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Lien vers la dernière recherche qui a mis à jour cette page
+    last_search_log_id = Column(Integer, nullable=True, index=True)
+    # Flag indiquant si la page a été créée (True) ou mise à jour (False) lors de la dernière recherche
+    was_created_in_last_search = Column(Boolean, default=True)
 
     __table_args__ = (
         Index('idx_page_etat', 'etat'),
@@ -147,6 +151,10 @@ class WinningAds(Base):
     ad_snapshot_url = Column(String(500))
     lien_site = Column(String(500))
     date_scan = Column(DateTime, default=datetime.utcnow)
+    # Lien vers la recherche qui a trouvé cette winning ad
+    search_log_id = Column(Integer, nullable=True, index=True)
+    # Flag: nouvelle winning ad ou mise à jour d'une existante
+    is_new = Column(Boolean, default=True)
 
     __table_args__ = (
         Index('idx_winning_ads_page', 'page_id'),
@@ -346,6 +354,17 @@ class TokenUsageLog(Base):
     )
 
 
+class AppSettings(Base):
+    """Table app_settings - Paramètres persistants de l'application"""
+    __tablename__ = "app_settings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    value = Column(Text)
+    description = Column(String(255))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class SearchLog(Base):
     """Table search_logs - Historique complet des recherches"""
     __tablename__ = "search_logs"
@@ -382,6 +401,11 @@ class SearchLog(Base):
     # Détails sauvegarde
     pages_saved = Column(Integer, default=0)
     ads_saved = Column(Integer, default=0)
+    # Comptage new vs existing
+    new_pages_count = Column(Integer, default=0)  # Nouvelles pages découvertes
+    existing_pages_updated = Column(Integer, default=0)  # Pages existantes mises à jour
+    new_winning_ads_count = Column(Integer, default=0)  # Nouvelles winning ads
+    existing_winning_ads_updated = Column(Integer, default=0)  # Winning ads mises à jour
 
     # ═══ STATS API ═══
     # Compteurs d'appels
@@ -699,6 +723,16 @@ def _run_migrations(db: DatabaseManager):
         ("search_logs", "api_details", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS api_details TEXT"),
         ("search_logs", "errors_list", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS errors_list TEXT"),
         ("search_logs", "scraper_errors_by_type", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS scraper_errors_by_type TEXT"),
+        # Comptage new vs existing pour Search Logs
+        ("search_logs", "new_pages_count", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS new_pages_count INTEGER DEFAULT 0"),
+        ("search_logs", "existing_pages_updated", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS existing_pages_updated INTEGER DEFAULT 0"),
+        ("search_logs", "new_winning_ads_count", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS new_winning_ads_count INTEGER DEFAULT 0"),
+        ("search_logs", "existing_winning_ads_updated", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS existing_winning_ads_updated INTEGER DEFAULT 0"),
+        # Lien search_log pour pages et winning ads
+        ("liste_page_recherche", "last_search_log_id", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS last_search_log_id INTEGER"),
+        ("liste_page_recherche", "was_created_in_last_search", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS was_created_in_last_search BOOLEAN DEFAULT TRUE"),
+        ("winning_ads", "search_log_id", "ALTER TABLE winning_ads ADD COLUMN IF NOT EXISTS search_log_id INTEGER"),
+        ("winning_ads", "is_new", "ALTER TABLE winning_ads ADD COLUMN IF NOT EXISTS is_new BOOLEAN DEFAULT TRUE"),
         # Colonnes classification pour PageRecherche
         ("liste_page_recherche", "subcategory", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS subcategory VARCHAR(100)"),
         ("liste_page_recherche", "classification_confidence", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS classification_confidence FLOAT"),
@@ -720,6 +754,8 @@ def _run_migrations(db: DatabaseManager):
         "CREATE INDEX IF NOT EXISTS idx_winning_ads_page_date ON winning_ads (page_id, date_scan)",
         "CREATE INDEX IF NOT EXISTS idx_winning_ads_reach ON winning_ads (eu_total_reach)",
         "CREATE INDEX IF NOT EXISTS idx_search_log_status_date ON search_logs (status, started_at)",
+        "CREATE INDEX IF NOT EXISTS idx_page_last_search ON liste_page_recherche (last_search_log_id)",
+        "CREATE INDEX IF NOT EXISTS idx_winning_search ON winning_ads (search_log_id)",
     ]
 
     with db.get_session() as session:
@@ -795,6 +831,71 @@ def to_str_list(val: Any) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# APP SETTINGS (paramètres persistants)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_app_setting(db: DatabaseManager, key: str, default: str = None) -> Optional[str]:
+    """
+    Récupère un paramètre de l'application.
+
+    Args:
+        db: Instance DatabaseManager
+        key: Clé du paramètre
+        default: Valeur par défaut si non trouvé
+
+    Returns:
+        Valeur du paramètre ou default
+    """
+    with db.get_session() as session:
+        setting = session.query(AppSettings).filter(AppSettings.key == key).first()
+        if setting:
+            return setting.value
+        return default
+
+
+def set_app_setting(db: DatabaseManager, key: str, value: str, description: str = None) -> bool:
+    """
+    Définit ou met à jour un paramètre de l'application.
+
+    Args:
+        db: Instance DatabaseManager
+        key: Clé du paramètre
+        value: Valeur à stocker
+        description: Description du paramètre (optionnel)
+
+    Returns:
+        True si succès
+    """
+    with db.get_session() as session:
+        setting = session.query(AppSettings).filter(AppSettings.key == key).first()
+        if setting:
+            setting.value = value
+            if description:
+                setting.description = description
+            setting.updated_at = datetime.utcnow()
+        else:
+            setting = AppSettings(
+                key=key,
+                value=value,
+                description=description
+            )
+            session.add(setting)
+        return True
+
+
+def get_all_app_settings(db: DatabaseManager) -> Dict[str, str]:
+    """Récupère tous les paramètres de l'application"""
+    with db.get_session() as session:
+        settings = session.query(AppSettings).all()
+        return {s.key: s.value for s in settings}
+
+
+# Constantes pour les clés de paramètres
+SETTING_GEMINI_MODEL = "gemini_model_name"
+SETTING_GEMINI_MODEL_DEFAULT = "gemini-1.5-flash"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # OPÉRATIONS CRUD
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -804,7 +905,8 @@ def save_pages_recherche(
     web_results: Dict,
     countries: List[str],
     languages: List[str],
-    thresholds: Dict = None
+    thresholds: Dict = None,
+    search_log_id: int = None
 ) -> int:
     """
     Sauvegarde ou met à jour les pages dans liste_page_recherche
@@ -817,12 +919,15 @@ def save_pages_recherche(
         countries: Liste des pays
         languages: Liste des langues
         thresholds: Seuils personnalisés pour les états (optionnel)
+        search_log_id: ID du SearchLog pour tracer l'origine (optionnel)
 
     Returns:
-        Nombre de pages sauvegardées
+        Nombre de pages sauvegardées (ou tuple (total, new, existing) si search_log_id fourni)
     """
     scan_time = datetime.utcnow()
     count = 0
+    new_count = 0
+    existing_count = 0
 
     with db.get_session() as session:
         for pid, data in pages_final.items():
@@ -888,6 +993,11 @@ def save_pages_recherche(
                 existing_page.nombre_produits = web.get("product_count", 0) or existing_page.nombre_produits
                 existing_page.dernier_scan = scan_time
                 existing_page.updated_at = scan_time
+                # Tracking recherche
+                if search_log_id:
+                    existing_page.last_search_log_id = search_log_id
+                    existing_page.was_created_in_last_search = False
+                existing_count += 1
             else:
                 # Nouvelle page - insertion
                 keywords_str = " | ".join(new_keywords) if new_keywords else ""
@@ -913,11 +1023,15 @@ def save_pages_recherche(
                     dernier_scan=scan_time,
                     created_at=scan_time,
                     updated_at=scan_time,
+                    last_search_log_id=search_log_id,
+                    was_created_in_last_search=True,
                 )
                 session.add(new_page)
+                new_count += 1
 
             count += 1
 
+    # Retourner le tuple si search_log_id fourni, sinon juste le count (rétro-compatibilité)
     return count
 
 
@@ -1885,7 +1999,8 @@ def is_winning_ad(
 def save_winning_ads(
     db: DatabaseManager,
     winning_ads_data: List[Dict],
-    pages_final: Dict = None
+    pages_final: Dict = None,
+    search_log_id: int = None
 ) -> tuple:
     """
     Sauvegarde les winning ads dans la base de données.
@@ -1895,6 +2010,7 @@ def save_winning_ads(
         db: Instance DatabaseManager
         winning_ads_data: Liste de dictionnaires avec les données des winning ads
         pages_final: Dictionnaire des pages (optionnel, pour récupérer le website)
+        search_log_id: ID du SearchLog pour tracer l'origine (optionnel)
 
     Returns:
         Tuple (nombre nouvelles, nombre mises à jour)
@@ -1951,6 +2067,10 @@ def save_winning_ads(
                 if website:
                     existing.lien_site = website
                 existing.date_scan = scan_time  # Mettre à jour la date du scan
+                # Tracking recherche
+                if search_log_id:
+                    existing.search_log_id = search_log_id
+                    existing.is_new = False
                 updated_count += 1
             else:
                 # Créer une nouvelle entrée
@@ -1967,7 +2087,9 @@ def save_winning_ads(
                     ad_creative_link_titles=to_str_list(ad.get("ad_creative_link_titles")),
                     ad_snapshot_url=ad.get("ad_snapshot_url", ""),
                     lien_site=website,
-                    date_scan=scan_time
+                    date_scan=scan_time,
+                    search_log_id=search_log_id,
+                    is_new=True
                 )
                 session.add(winning_entry)
                 new_count += 1
@@ -3251,6 +3373,70 @@ def delete_search_log(db: DatabaseManager, log_id: int) -> bool:
     with db.get_session() as session:
         deleted = session.query(SearchLog).filter(SearchLog.id == log_id).delete()
         return deleted > 0
+
+
+def get_pages_by_search_log(db: DatabaseManager, search_log_id: int, limit: int = 100) -> List[Dict]:
+    """
+    Récupère les pages associées à une recherche (créées ou mises à jour).
+
+    Args:
+        db: Instance DatabaseManager
+        search_log_id: ID du SearchLog
+        limit: Nombre max de pages à retourner
+
+    Returns:
+        Liste de dictionnaires avec les données des pages
+    """
+    with db.get_session() as session:
+        pages = session.query(PageRecherche).filter(
+            PageRecherche.last_search_log_id == search_log_id
+        ).order_by(PageRecherche.nombre_ads_active.desc()).limit(limit).all()
+
+        return [{
+            "id": p.id,
+            "page_id": p.page_id,
+            "page_name": p.page_name,
+            "lien_site": p.lien_site,
+            "cms": p.cms,
+            "etat": p.etat,
+            "nombre_ads_active": p.nombre_ads_active,
+            "nombre_produits": p.nombre_produits,
+            "thematique": p.thematique,
+            "is_new": p.was_created_in_last_search,
+            "keywords": p.keywords
+        } for p in pages]
+
+
+def get_winning_ads_by_search_log(db: DatabaseManager, search_log_id: int, limit: int = 100) -> List[Dict]:
+    """
+    Récupère les winning ads associées à une recherche.
+
+    Args:
+        db: Instance DatabaseManager
+        search_log_id: ID du SearchLog
+        limit: Nombre max de winning ads à retourner
+
+    Returns:
+        Liste de dictionnaires avec les données des winning ads
+    """
+    with db.get_session() as session:
+        ads = session.query(WinningAds).filter(
+            WinningAds.search_log_id == search_log_id
+        ).order_by(WinningAds.eu_total_reach.desc().nullslast()).limit(limit).all()
+
+        return [{
+            "id": a.id,
+            "ad_id": a.ad_id,
+            "page_id": a.page_id,
+            "page_name": a.page_name,
+            "ad_creation_time": a.ad_creation_time,
+            "ad_age_days": a.ad_age_days,
+            "eu_total_reach": a.eu_total_reach,
+            "matched_criteria": a.matched_criteria,
+            "ad_snapshot_url": a.ad_snapshot_url,
+            "lien_site": a.lien_site,
+            "is_new": a.is_new
+        } for a in ads]
 
 
 def get_search_logs_stats(db: DatabaseManager, days: int = 30) -> Dict:

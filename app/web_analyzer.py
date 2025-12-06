@@ -12,7 +12,12 @@ try:
     from app.config import (
         REQUEST_TIMEOUT, HEADERS, DEFAULT_PAYMENTS, TAXONOMY, KEYWORD_OVERRIDES,
         THEME_ASSET_CANDIDATES, REQUEST_SNIPPET, INLINE_NAME_PATTERNS,
-        ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_random_headers, get_proxied_url, is_proxy_enabled
+        ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_random_headers, get_proxied_url, is_proxy_enabled,
+        # Patterns pré-compilés
+        COMPILED_INLINE_PATTERNS, COMPILED_ASSET_PATTERNS, COMPILED_THEME_ID_PATTERN,
+        COMPILED_THEME_CLEAN_PATTERN, COMPILED_SITEMAP_LOC, COMPILED_SITEMAP_URL_TAG,
+        COMPILED_SITEMAP_LANG_PREFIX, COMPILED_CURRENCY_SHOPIFY, COMPILED_CURRENCY_OG,
+        MAX_SITEMAPS_TO_PARSE, MAX_PRODUCTS_FROM_SITEMAP
     )
     from app.api_tracker import get_current_tracker
 except ImportError:
@@ -21,6 +26,18 @@ except ImportError:
         THEME_ASSET_CANDIDATES, REQUEST_SNIPPET, INLINE_NAME_PATTERNS,
         ASSET_HEADER_PATTERNS, TIMEOUT_WEB, get_random_headers, get_proxied_url, is_proxy_enabled
     )
+    # Fallback: compiler les patterns si import échoue
+    COMPILED_INLINE_PATTERNS = [re.compile(p, re.I | re.M | re.S) for p in INLINE_NAME_PATTERNS]
+    COMPILED_ASSET_PATTERNS = [re.compile(p, re.I | re.M) for p in ASSET_HEADER_PATTERNS]
+    COMPILED_THEME_ID_PATTERN = re.compile(r'/cdn/shop/t/(\d+)/', re.I)
+    COMPILED_THEME_CLEAN_PATTERN = re.compile(r'\btheme[_-]?t?_\d+\b', re.I)
+    COMPILED_SITEMAP_LOC = re.compile(r"<loc>([^<]+)</loc>", re.I)
+    COMPILED_SITEMAP_URL_TAG = re.compile(r"<url>")
+    COMPILED_SITEMAP_LANG_PREFIX = re.compile(r'^/([a-z]{2})(?:-[a-z]{2})?/')
+    COMPILED_CURRENCY_SHOPIFY = re.compile(r'Shopify\.currency\s*=\s*{[^}]*"active"\s*:\s*"([A-Z]{3})"')
+    COMPILED_CURRENCY_OG = re.compile(r'property=["\']og:price:currency["\']\s+content=["\']([A-Z]{3})["\']', re.I)
+    MAX_SITEMAPS_TO_PARSE = 10
+    MAX_PRODUCTS_FROM_SITEMAP = 5000
     try:
         from api_tracker import get_current_tracker
     except ImportError:
@@ -203,25 +220,26 @@ def _clean_theme(name: Optional[str]) -> Optional[str]:
     n = name.strip().strip("/*-—–:=> \t\"'")
     if len(n) < 2 or len(n) > 120:
         return None
-    if re.search(r'\btheme[_-]?t?_\d+\b', n, re.I):
+    # Utiliser le pattern pré-compilé
+    if COMPILED_THEME_CLEAN_PATTERN.search(n):
         return None
     return n
 
 
 def _theme_shopify(html: str, base_url: str) -> Tuple[Optional[str], list]:
-    """Détecte le thème Shopify"""
+    """Détecte le thème Shopify - Version optimisée avec patterns pré-compilés"""
     evidence = []
 
-    # Patterns inline
-    for rgx in INLINE_NAME_PATTERNS:
-        m = re.search(rgx, html, re.I | re.M | re.S)
+    # Patterns inline (pré-compilés)
+    for compiled_rgx in COMPILED_INLINE_PATTERNS:
+        m = compiled_rgx.search(html)
         if m:
             nm = _clean_theme(m.group(1))
             if nm:
                 return nm, evidence
 
-    # Chercher l'ID du thème
-    m_id = re.search(r'/cdn/shop/t/(\d+)/', html, re.I)
+    # Chercher l'ID du thème (pattern pré-compilé)
+    m_id = COMPILED_THEME_ID_PATTERN.search(html)
     theme_id = m_id.group(1) if m_id else None
 
     origin = _origin(base_url)
@@ -243,8 +261,9 @@ def _theme_shopify(html: str, base_url: str) -> Tuple[Optional[str], list]:
         if not txt:
             continue
         head = txt[:REQUEST_SNIPPET]
-        for rgx in ASSET_HEADER_PATTERNS:
-            m = re.search(rgx, head, re.I | re.M)
+        # Patterns pré-compilés pour assets
+        for compiled_rgx in COMPILED_ASSET_PATTERNS:
+            m = compiled_rgx.search(head)
             if m:
                 nm = _clean_theme(m.group(1))
                 if nm:
@@ -372,8 +391,10 @@ def collect_text_for_classification(base_url: str, html: str) -> str:
 
 def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> int:
     """
-    Compte les produits Shopify via sitemaps - Version améliorée
-    Gère les différents formats de sitemaps multi-pays Shopify
+    Compte les produits Shopify via sitemaps - Version optimisée
+    - Patterns regex pré-compilés
+    - Limite max de sitemaps à parser (MAX_SITEMAPS_TO_PARSE)
+    - Arrêt anticipé si MAX_PRODUCTS_FROM_SITEMAP atteint
 
     Logique:
     1. Sitemap avec code pays explicite (/{country}/) -> priorité haute
@@ -406,7 +427,8 @@ def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> 
     if not sm:
         return _count_products_via_api(origin)
 
-    locs = re.findall(r"<loc>([^<]+)</loc>", sm)
+    # Utiliser pattern pré-compilé
+    locs = COMPILED_SITEMAP_LOC.findall(sm)
 
     # Séparer les sitemaps produits
     product_sitemaps_country = []  # Sitemaps avec notre code pays
@@ -426,12 +448,11 @@ def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> 
         except:
             path = loc_lower
 
-        # Vérifier si c'est un sitemap avec préfixe de langue
+        # Vérifier si c'est un sitemap avec préfixe de langue (pattern pré-compilé)
         has_language_prefix = False
         is_our_country = False
 
-        # Pattern: /xx/ ou /xx-xx/ au début du path
-        lang_match = re.match(r'^/([a-z]{2})(?:-[a-z]{2})?/', path)
+        lang_match = COMPILED_SITEMAP_LANG_PREFIX.match(path)
         if lang_match:
             lang = lang_match.group(1)
             has_language_prefix = True
@@ -458,8 +479,13 @@ def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> 
         # Fallback: essayer l'API
         return _count_products_via_api(origin)
 
+    # Limiter le nombre de sitemaps à parser
+    product_sitemaps = product_sitemaps[:MAX_SITEMAPS_TO_PARSE]
+
     # Compter les produits
     seen_urls = set()
+    sitemaps_parsed = 0
+
     for smu in product_sitemaps:
         if smu in seen_urls:
             continue
@@ -469,11 +495,14 @@ def count_products_shopify_by_country(origin: str, country_code: str = "FR") -> 
         if not txt:
             continue
 
-        # Compter les URLs
-        count = len(re.findall(r"<url>", txt))
+        # Compter les URLs (pattern pré-compilé)
+        count = len(COMPILED_SITEMAP_URL_TAG.findall(txt))
         total += count
+        sitemaps_parsed += 1
 
-        if total > 10000:
+        # Arrêt anticipé si limite atteinte
+        if total >= MAX_PRODUCTS_FROM_SITEMAP:
+            print(f"⚡ Limite {MAX_PRODUCTS_FROM_SITEMAP} produits atteinte, arrêt anticipé")
             break
 
     # Si toujours 0, essayer l'API
@@ -524,11 +553,11 @@ def _count_products_via_api(origin: str) -> int:
 
 
 def extract_currency_from_html(html: str) -> Optional[str]:
-    """Extrait la devise depuis le HTML Shopify"""
-    m = re.search(r'Shopify\.currency\s*=\s*{[^}]*"active"\s*:\s*"([A-Z]{3})"', html)
+    """Extrait la devise depuis le HTML Shopify - Version optimisée avec patterns pré-compilés"""
+    m = COMPILED_CURRENCY_SHOPIFY.search(html)
     if m:
         return m.group(1)
-    m = re.search(r'property=["\']og:price:currency["\']\s+content=["\']([A-Z]{3})["\']', html, re.I)
+    m = COMPILED_CURRENCY_OG.search(html)
     if m:
         return m.group(1)
     return None

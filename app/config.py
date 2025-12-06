@@ -64,10 +64,15 @@ TIMEOUT_SHOPIFY_CHECK = 10
 # ─────────────────────────────────────────────────────────────────────────────
 # Throttling API (délais pour éviter les rate limits)
 # Meta API
-META_DELAY_BETWEEN_KEYWORDS = 1.5      # Secondes entre chaque mot-clé
+META_DELAY_BETWEEN_KEYWORDS = 1.5      # Secondes entre chaque mot-clé (avec proxy)
+META_DELAY_SEQUENTIAL_NO_PROXY = 3.5   # Délai plus long sans proxy (protège le token unique)
 META_DELAY_BETWEEN_PAGES = 0.3         # Secondes entre chaque page de pagination
 META_DELAY_BETWEEN_BATCHES = 0.5       # Secondes entre chaque batch de 10 pages
 META_DELAY_ON_ERROR = 2.0              # Délai supplémentaire après une erreur
+
+# Recherche parallèle par keywords
+META_PARALLEL_ENABLED = True           # Activer la recherche parallèle si proxies disponibles
+META_MIN_DELAY_BETWEEN_PARALLEL = 0.5  # Délai minimum entre lancements parallèles
 
 # Web/Shopify scraping
 WEB_DELAY_BETWEEN_REQUESTS = 0.5       # Secondes entre chaque requête web
@@ -210,6 +215,7 @@ THEME_ASSET_CANDIDATES = [
 ]
 REQUEST_SNIPPET = 200_000
 
+# Patterns regex (chaînes brutes)
 INLINE_NAME_PATTERNS = [
     r'Shopify\.theme\s*=\s*{[^}]*?\bname\s*:\s*["\']([^"\']+)["\']',
     r'Shopify\.theme\.name\s*=\s*["\']([^"\']+)["\']',
@@ -223,6 +229,53 @@ ASSET_HEADER_PATTERNS = [
     r'(?im)^\s*//\s*(?:theme|theme name)\s*[:=-]?\s*([^\n<"\*]{2,120})$',
     r'Shopify\.theme\s*=\s*{[^}]*?\bname\s*:\s*["\']([^"\']+)["\']',
 ]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PATTERNS REGEX PRÉ-COMPILÉS (performance)
+import re
+
+# Patterns pré-compilés pour détection de thème
+COMPILED_INLINE_PATTERNS = [re.compile(p, re.I | re.M | re.S) for p in INLINE_NAME_PATTERNS]
+COMPILED_ASSET_PATTERNS = [re.compile(p, re.I | re.M) for p in ASSET_HEADER_PATTERNS]
+COMPILED_THEME_ID_PATTERN = re.compile(r'/cdn/shop/t/(\d+)/', re.I)
+COMPILED_THEME_CLEAN_PATTERN = re.compile(r'\btheme[_-]?t?_\d+\b', re.I)
+
+# Patterns pré-compilés pour extraction URL des ads
+VALID_TLDS_PATTERN = (
+    "com|net|org|co|io|app|dev|me|info|biz|"
+    "shop|store|boutique|buy|sale|deals|"
+    "fr|de|es|it|pt|nl|be|ch|at|lu|uk|ie|pl|se|no|dk|fi|"
+    "ca|us|au|nz|br|mx|ar|"
+    "online|site|website|web|live|world|tech|fashion|beauty|style|fit|health|life"
+)
+
+COMPILED_URL_PATTERNS = [
+    # URL complète avec protocole
+    re.compile(r'https?://(?:www\.)?([a-z0-9][-a-z0-9]*(?:\.[a-z0-9][-a-z0-9]*)*\.[a-z]{2,})'),
+    # Domaine avec www
+    re.compile(r'www\.([a-z0-9][-a-z0-9]*(?:\.[a-z0-9][-a-z0-9]*)*\.[a-z]{2,})'),
+    # Domaine simple (mot.extension)
+    re.compile(r'\b([a-z0-9][-a-z0-9]{1,}\.(?:' + VALID_TLDS_PATTERN + r'))\b'),
+    # Domaine avec sous-domaine
+    re.compile(r'\b([a-z0-9][-a-z0-9]*\.[a-z0-9][-a-z0-9]*\.(?:com|net|org|co|io|fr|de|es|it|uk))\b'),
+]
+
+# Pattern pour valider domaine final
+COMPILED_DOMAIN_VALIDATOR = re.compile(r'^[a-z0-9][-a-z0-9]*\.[a-z]{2,}')
+COMPILED_CAPTION_DOMAIN = re.compile(r'^[a-z0-9][-a-z0-9]*\.[a-z]{2,}(?:\.[a-z]{2,})?$')
+
+# Patterns pour sitemap
+COMPILED_SITEMAP_LOC = re.compile(r"<loc>([^<]+)</loc>", re.I)
+COMPILED_SITEMAP_URL_TAG = re.compile(r"<url>")
+COMPILED_SITEMAP_LANG_PREFIX = re.compile(r'^/([a-z]{2})(?:-[a-z]{2})?/')
+
+# Patterns pour extraction de devise
+COMPILED_CURRENCY_SHOPIFY = re.compile(r'Shopify\.currency\s*=\s*{[^}]*"active"\s*:\s*"([A-Z]{3})"')
+COMPILED_CURRENCY_OG = re.compile(r'property=["\']og:price:currency["\']\s+content=["\']([A-Z]{3})["\']', re.I)
+
+# Limite sitemap (optimisation mémoire)
+MAX_SITEMAPS_TO_PARSE = 10
+MAX_PRODUCTS_FROM_SITEMAP = 5000
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pays et langues par défaut
