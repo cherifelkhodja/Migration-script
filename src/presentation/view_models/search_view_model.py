@@ -6,7 +6,6 @@ de recherche d'annonces.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 
 from src.application.ports.services.ads_search_service import AdsSearchService
@@ -20,7 +19,6 @@ from src.application.use_cases.search_ads import (
     SearchAdsUseCase,
 )
 from src.domain.entities.ad import Ad
-from src.domain.entities.page import Page
 from src.domain.entities.winning_ad import WinningAd
 
 

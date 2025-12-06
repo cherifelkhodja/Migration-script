@@ -9,7 +9,7 @@ from typing import Any
 
 from src.application.ports.repositories.page_repository import PageRepository
 from src.domain.entities.page import Page
-from src.domain.value_objects import CMS, Etat, PageId, ThematiqueClassification
+from src.domain.value_objects import PageId, ThematiqueClassification
 
 
 class SQLAlchemyPageRepository(PageRepository):

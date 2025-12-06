@@ -6,7 +6,7 @@ tous les composants de l'architecture hexagonale.
 """
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from src.application.ports.repositories.page_repository import PageRepository
 from src.application.ports.repositories.winning_ad_repository import WinningAdRepository
@@ -48,10 +48,10 @@ class Container:
     search_view_model: SearchViewModel
 
     # Optional repositories
-    winning_ad_repository: Optional[WinningAdRepository] = None
+    winning_ad_repository: WinningAdRepository | None = None
 
     # External Services (optional)
-    meta_adapter: Optional[MetaAdsSearchAdapter] = None
+    meta_adapter: MetaAdsSearchAdapter | None = None
 
     @classmethod
     def create(
@@ -146,7 +146,7 @@ class Container:
 
 
 # Singleton global pour le dashboard
-_container: Optional[Container] = None
+_container: Container | None = None
 
 
 def get_container(db_manager: Any = None) -> Container:

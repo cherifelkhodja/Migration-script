@@ -5,7 +5,7 @@ Implemente l'interface WinningAdRepository en utilisant SQLAlchemy
 pour la persistence dans PostgreSQL.
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 
 from src.application.ports.repositories.winning_ad_repository import WinningAdRepository

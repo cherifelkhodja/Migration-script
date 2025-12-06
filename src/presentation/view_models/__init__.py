@@ -5,8 +5,8 @@ Les View Models encapsulent la logique de presentation
 et fournissent des donnees formatees pour l'interface utilisateur.
 """
 
-from src.presentation.view_models.search_view_model import SearchViewModel
 from src.presentation.view_models.page_view_model import PageViewModel
+from src.presentation.view_models.search_view_model import SearchViewModel
 
 __all__ = [
     "SearchViewModel",
