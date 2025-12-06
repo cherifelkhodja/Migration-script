@@ -710,7 +710,14 @@ def execute_background_search(
                 existing_ad_ids = {a.ad_id for a in existing_ads}
 
         tracker.update_step("Sauvegarde pages", 1, 5)
-        pages_saved = save_pages_recherche(db, pages_final, web_results, countries_list, languages_list, None, log_id)
+        pages_result = save_pages_recherche(db, pages_final, web_results, countries_list, languages_list, None, log_id)
+        # Gérer le retour tuple (total, new, existing)
+        if isinstance(pages_result, tuple):
+            pages_saved, pages_new, pages_existing = pages_result
+        else:
+            pages_saved = pages_result
+            pages_new = pages_saved
+            pages_existing = 0
 
         tracker.update_step("Sauvegarde suivi", 2, 5)
         suivi_saved = save_suivi_page(db, pages_final, web_results, MIN_ADS_SUIVI)
@@ -763,16 +770,24 @@ def execute_background_search(
         new_pages_count = sum(1 for d in pages_history_data if d.get("was_new"))
         new_winning_count = sum(1 for d in winning_history_data if d.get("was_new"))
 
+        # Log détaillé
+        print(f"[Search #{search_id}] Phase 8 - Sauvegarde:")
+        print(f"   📄 Pages: {pages_saved} total ({pages_new} nouvelles, {pages_existing} mises à jour)")
+        print(f"   📊 Suivi: {suivi_saved}")
+        print(f"   📢 Ads: {ads_saved}")
+        print(f"   🏆 Winning: {winning_saved} sauvées, {winning_skipped} doublons ignorés")
+        print(f"   💾 Cache phase 6: {pages_cached} pages utilisaient le cache")
+
         phase8_stats = {
             "Pages sauvées": pages_saved,
-            "Nouvelles pages": new_pages_count,
-            "Pages existantes": pages_saved - new_pages_count,
+            "🆕 Nouvelles pages": pages_new,
+            "📝 Pages mises à jour": pages_existing,
             "Suivi pages": suivi_saved,
             "Annonces sauvées": ads_saved,
             "Winning ads sauvées": winning_saved,
-            "Nouvelles winning": new_winning_count,
+            "Winning doublons ignorés": winning_skipped,
         }
-        tracker.complete_phase(f"{pages_saved} pages ({new_pages_count} new), {winning_saved} winning ({new_winning_count} new)", stats=phase8_stats)
+        tracker.complete_phase(f"{pages_saved} pages ({pages_new} 🆕, {pages_existing} 📝), {winning_saved} winning", stats=phase8_stats)
 
     except Exception as e:
         print(f"[Search #{search_id}] Erreur sauvegarde: {e}")

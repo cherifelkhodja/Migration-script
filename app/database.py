@@ -1179,8 +1179,11 @@ def save_pages_recherche(
 
             count += 1
 
-    # Retourner le tuple si search_log_id fourni, sinon juste le count (rétro-compatibilité)
-    return count
+    # Log détaillé
+    print(f"[DB] Pages sauvées: {count} total ({new_count} nouvelles, {existing_count} mises à jour)")
+
+    # Retourner tuple (total, new, existing)
+    return (count, new_count, existing_count)
 
 
 def save_suivi_page(

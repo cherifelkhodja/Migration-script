@@ -1644,27 +1644,6 @@ def render_sidebar():
 
         st.markdown("---")
 
-        # ═══ RECHERCHE RAPIDE GLOBALE ═══
-        global_search = st.text_input("🔍", placeholder="Recherche rapide...", key="global_search", label_visibility="collapsed")
-
-        if global_search and len(global_search) >= 2:
-            db = get_database()
-            if db:
-                # Rechercher dans les pages
-                results = search_pages(db, search_term=global_search, limit=10)
-                if results:
-                    st.markdown(f"**{len(results)} page(s) trouvée(s)**")
-                    for page in results[:5]:
-                        page_name = page.get("page_name", "")[:25]
-                        if st.button(f"📄 {page_name}", key=f"quick_{page.get('page_id')}", use_container_width=True):
-                            st.session_state.selected_page_id = page.get("page_id")
-                            st.session_state.current_page = "Pages / Shops"
-                            st.rerun()
-                else:
-                    st.caption("Aucun résultat")
-
-        st.markdown("---")
-
         # Main Navigation
         st.markdown("### Main")
 
@@ -3001,7 +2980,14 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
             try:
                 tracker.update_step("Sauvegarde pages", 1, 4)
                 thresholds = st.session_state.get("state_thresholds", None)
-                pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds)
+                pages_result = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds)
+                # Gérer le retour tuple (total, new, existing)
+                if isinstance(pages_result, tuple):
+                    pages_saved, pages_new, pages_existing = pages_result
+                else:
+                    pages_saved = pages_result
+                    pages_new = pages_saved
+                    pages_existing = 0
 
                 tracker.update_step("Sauvegarde suivi", 2, 4)
                 det = st.session_state.get("detection_thresholds", {})
@@ -3013,13 +2999,23 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
                 tracker.update_step("Sauvegarde winning ads", 4, 4)
                 winning_saved, winning_skipped = save_winning_ads(db, winning_ads_data, pages_final)
 
-                msg = f"{pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads, {winning_saved} winning"
+                msg = f"{pages_saved} pages ({pages_new} 🆕, {pages_existing} 📝), {ads_saved} ads, {winning_saved} winning"
                 if winning_skipped > 0:
                     msg += f" ({winning_skipped} doublons)"
+
+                # Log détaillé
+                print(f"[UI Search] Phase 8 - Sauvegarde:")
+                print(f"   📄 Pages: {pages_saved} total ({pages_new} nouvelles, {pages_existing} mises à jour)")
+                print(f"   📊 Suivi: {suivi_saved}")
+                print(f"   📢 Ads: {ads_saved}")
+                print(f"   🏆 Winning: {winning_saved} sauvées, {winning_skipped} doublons ignorés")
+                print(f"   💾 Cache phase 6: {pages_cached} pages utilisaient le cache")
 
                 # Stats détaillées Phase 8
                 phase8_stats = {
                     "Pages sauvées": pages_saved,
+                    "🆕 Nouvelles pages": pages_new,
+                    "📝 Pages mises à jour": pages_existing,
                     "Suivi pages": suivi_saved,
                     "Annonces sauvées": ads_saved,
                     "Winning ads sauvées": winning_saved,
