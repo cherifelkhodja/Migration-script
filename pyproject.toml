@@ -85,6 +85,7 @@ branch = true
 omit = [
     "*/tests/*",
     "*/__init__.py",
+    "*/streamlit/*",
 ]
 
 [tool.coverage.report]
