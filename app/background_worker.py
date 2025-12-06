@@ -320,6 +320,7 @@ class BackgroundSearchWorker:
                     "progress": s.progress_percent,
                     "message": s.progress_message,
                     "keywords": json.loads(s.keywords) if s.keywords else [],
+                    "phases_data": json.loads(s.phases_data) if s.phases_data else [],
                     "created_at": s.created_at,
                     "started_at": s.started_at,
                 }

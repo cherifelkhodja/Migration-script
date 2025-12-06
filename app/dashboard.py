@@ -5846,7 +5846,7 @@ def render_background_searches():
 
             col1, col2, col3 = st.columns([4, 1, 1])
             with col1:
-                st.write(f"**{search.created_at:%d/%m %H:%M}** - Phase {search.current_phase}/9")
+                st.write(f"**Recherche #{search.id}** - {search.created_at:%d/%m %H:%M} - Phase {search.current_phase}/9")
                 st.caption(f"Mots-clés: {keywords_display}")
             with col2:
                 if st.button("🔄 Reprendre", key=f"resume_{search.id}"):
@@ -5892,9 +5892,19 @@ def render_background_searches():
                     phase_name = search.get("phase_name", "")
                     progress = search.get("progress", 0)
                     message = search.get("message", "")
+                    phases_data = search.get("phases_data", [])
 
-                    # Titre avec phase
-                    st.markdown(f"### 🟢 Recherche #{search['id']} - En cours")
+                    # Titre avec phase et temps écoulé
+                    header_col1, header_col2 = st.columns([3, 1])
+                    with header_col1:
+                        st.markdown(f"### 🟢 Recherche #{search['id']} - En cours")
+                    with header_col2:
+                        if search.get("started_at"):
+                            started = search["started_at"]
+                            elapsed = datetime.now() - started.replace(tzinfo=None)
+                            minutes = int(elapsed.total_seconds() // 60)
+                            seconds = int(elapsed.total_seconds() % 60)
+                            st.markdown(f"**⏱️ {minutes}m {seconds}s**")
 
                     # Informations de la phase actuelle
                     phase_col1, phase_col2 = st.columns([3, 1])
@@ -5910,17 +5920,33 @@ def render_background_searches():
                     if message:
                         st.info(f"📍 {message}")
 
-                    # Détails de la recherche
-                    with st.expander("📋 Détails de la recherche", expanded=False):
-                        st.write(f"**Mots-clés:** {keywords_display}")
-                        if search.get("started_at"):
-                            started = search["started_at"]
-                            elapsed = datetime.now() - started.replace(tzinfo=None)
-                            minutes = int(elapsed.total_seconds() // 60)
-                            seconds = int(elapsed.total_seconds() % 60)
-                            st.write(f"**Démarrée:** {started:%H:%M:%S} (il y a {minutes}m {seconds}s)")
-                        if search.get("created_at"):
-                            st.write(f"**Créée:** {search['created_at']:%d/%m/%Y %H:%M}")
+                    # ═══ Journal d'activité détaillé ═══
+                    st.markdown("##### 📋 Journal d'activité")
+
+                    # Afficher les phases complétées
+                    if phases_data:
+                        for phase_info in phases_data:
+                            phase_num = phase_info.get("num", "?")
+                            phase_name_log = phase_info.get("name", "")
+                            phase_result = phase_info.get("result", "")
+                            phase_duration = phase_info.get("duration", "")
+
+                            # Formater la durée
+                            duration_str = ""
+                            if phase_duration:
+                                if phase_duration >= 60:
+                                    duration_str = f" ({phase_duration/60:.1f}m)"
+                                else:
+                                    duration_str = f" ({phase_duration:.1f}s)"
+
+                            st.markdown(f"✅ **Phase {phase_num}:** {phase_name_log} → {phase_result}{duration_str}")
+
+                    # Phase en cours (non encore complétée)
+                    if phase and phase_name:
+                        st.markdown(f"🔄 **Phase {phase}:** {phase_name} ...")
+
+                    # Afficher les mots-clés
+                    st.caption(f"🔍 Mots-clés: {keywords_display}")
 
                 else:
                     # Recherche en attente
@@ -5949,21 +5975,6 @@ def render_background_searches():
 
         La recherche continuera même si vous quittez la page.
         """)
-
-    # ═══ Stats du worker (optionnel) ═══
-    with st.expander("📊 Statistiques du worker"):
-        stats = worker.get_stats()
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Worker actif", "Oui" if stats["worker_active"] else "Non")
-        with col2:
-            st.metric("Workers max", stats["max_workers"])
-        with col3:
-            st.metric("En mémoire", stats["active_in_memory"])
-
-        queue_stats = stats.get("queue_stats", {})
-        st.write("**File d'attente:**")
-        st.json(queue_stats)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
