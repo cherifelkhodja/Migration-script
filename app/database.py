@@ -414,6 +414,7 @@ class SearchQueue(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Session utilisateur (pour identifier les recherches d'un utilisateur)
     user_session = Column(String(100), nullable=True, index=True)
@@ -579,6 +580,8 @@ def _run_migrations(db: DatabaseManager):
         ("liste_page_recherche", "pays_resize", "ALTER TABLE liste_page_recherche ALTER COLUMN pays TYPE VARCHAR(255)"),
         # Proxy URL pour tokens Meta
         ("meta_tokens", "proxy_url", "ALTER TABLE meta_tokens ADD COLUMN IF NOT EXISTS proxy_url VARCHAR(255)"),
+        # Updated_at pour SearchQueue (suivi des recherches actives)
+        ("search_queue", "updated_at", "ALTER TABLE search_queue ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"),
     ]
 
     # Index migrations (CREATE INDEX IF NOT EXISTS)
@@ -3817,6 +3820,7 @@ def update_search_queue_progress(
             search.current_phase_name = phase_name
             search.progress_percent = percent
             search.progress_message = message
+            search.updated_at = datetime.utcnow()  # Marquer comme mis à jour
 
             if phases_data is not None:
                 search.phases_data = json.dumps(phases_data)
@@ -3869,12 +3873,18 @@ def restart_search_queue(db: DatabaseManager, search_id: int) -> bool:
 
 def recover_interrupted_searches(db: DatabaseManager) -> int:
     """
-    Marque les recherches 'running' comme 'interrupted'.
+    Marque les recherches 'running' comme 'interrupted' si elles n'ont pas été
+    mises à jour récemment (plus de 2 minutes).
     Appelé au démarrage de l'application.
 
     Returns:
         Nombre de recherches interrompues
     """
+    from datetime import timedelta
+
+    # Seuil: une recherche non mise à jour depuis 2 minutes est considérée comme morte
+    threshold = datetime.utcnow() - timedelta(minutes=2)
+
     with db.get_session() as session:
         running = session.query(SearchQueue).filter(
             SearchQueue.status == "running"
@@ -3882,9 +3892,17 @@ def recover_interrupted_searches(db: DatabaseManager) -> int:
 
         count = 0
         for search in running:
-            search.status = "interrupted"
-            search.error_message = "Service redémarré - recherche interrompue"
-            count += 1
+            # Utiliser updated_at si disponible, sinon started_at
+            last_activity = search.updated_at or search.started_at or search.created_at
+
+            # Ne marquer comme interrompue que si pas d'activité récente
+            if last_activity and last_activity < threshold:
+                search.status = "interrupted"
+                search.error_message = "Service redémarré - recherche interrompue"
+                count += 1
+                print(f"[DB] Recherche #{search.id} marquée comme interrompue (dernière activité: {last_activity})")
+            else:
+                print(f"[DB] Recherche #{search.id} toujours active (dernière activité: {last_activity})")
 
         return count
 
