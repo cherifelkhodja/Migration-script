@@ -170,6 +170,28 @@ def get_database() -> DatabaseManager:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# EXPORT CSV HELPER
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def df_to_csv(df: pd.DataFrame) -> bytes:
+    """Convertit un DataFrame en CSV bytes pour le téléchargement"""
+    return df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+
+
+def render_csv_download(df: pd.DataFrame, filename: str, label: str = "📥 Exporter CSV"):
+    """Affiche un bouton de téléchargement CSV pour un DataFrame"""
+    if df is not None and len(df) > 0:
+        csv_data = df_to_csv(df)
+        st.download_button(
+            label=label,
+            data=csv_data,
+            file_name=filename,
+            mime="text/csv",
+            key=f"download_{filename}_{hash(str(df.columns.tolist()))}"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # UI HELPERS - Badges, Colors, Styles
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -3696,7 +3718,12 @@ def render_watchlists():
                 cols = ["page_name", "lien_site", "cms", "etat", "nombre_ads_active", "dernier_scan", "subcategory", "pays"]
                 df_display = df[[c for c in cols if c in df.columns]]
                 df_display.columns = ["Page", "Site", "CMS", "État", "Ads Actives", "Dernier Scan", "Catégorie", "Pays"][:len(df_display.columns)]
-                st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+                col_table, col_export = st.columns([4, 1])
+                with col_table:
+                    st.dataframe(df_display, use_container_width=True, hide_index=True)
+                with col_export:
+                    render_csv_download(df_display, f"top_performers_{datetime.now().strftime('%Y%m%d')}.csv", "📥 CSV")
             else:
                 st.info("Aucune page XXL/XL trouvée")
         except Exception as e:
@@ -3749,7 +3776,12 @@ def render_watchlists():
                     })
 
                 df = pd.DataFrame(ads_data)
-                st.dataframe(df, use_container_width=True, hide_index=True)
+
+                col_table, col_export = st.columns([4, 1])
+                with col_table:
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                with col_export:
+                    render_csv_download(df, f"top_winning_ads_{datetime.now().strftime('%Y%m%d')}.csv", "📥 CSV")
 
                 # Bouton pour voir les détails
                 with st.expander("📋 Détails des Winning Ads"):
@@ -3830,7 +3862,12 @@ def render_watchlists():
                     df = pd.DataFrame(pages_data)
                     # Afficher sans le page_id
                     display_cols = ["Page", "Site", "Winning Ads", "Ads Actives", "Dernier Scan", "CMS", "État", "Catégorie"]
-                    st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+
+                    col_table, col_export = st.columns([4, 1])
+                    with col_table:
+                        st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+                    with col_export:
+                        render_csv_download(df[display_cols], f"pages_winning_ranking_{datetime.now().strftime('%Y%m%d')}.csv", "📥 CSV")
 
                     # Top 3 en métrique
                     st.markdown("##### 🥇 Podium")
@@ -4234,6 +4271,149 @@ def render_analytics():
                 st.plotly_chart(fig, key="analytics_themes", width="stretch")
         else:
             st.info("Aucune donnée disponible")
+
+        # ═══════════════════════════════════════════════════════════════════════════
+        # GRAPHIQUES D'ÉVOLUTION
+        # ═══════════════════════════════════════════════════════════════════════════
+        st.markdown("---")
+        chart_header(
+            "📈 Évolution temporelle",
+            "Historique des scans et tendances",
+            "Suivez l'évolution de votre base de données au fil du temps"
+        )
+
+        # Récupérer les données de suivi pour les graphiques
+        from app.database import SuiviPage
+        from sqlalchemy import func
+
+        with db.get_session() as session:
+            # Données agrégées par jour
+            daily_stats = session.query(
+                func.date(SuiviPage.date_scan).label('date'),
+                func.count(func.distinct(SuiviPage.page_id)).label('pages_scanned'),
+                func.avg(SuiviPage.nombre_ads_active).label('avg_ads'),
+                func.sum(SuiviPage.nombre_ads_active).label('total_ads')
+            ).group_by(
+                func.date(SuiviPage.date_scan)
+            ).order_by(
+                func.date(SuiviPage.date_scan)
+            ).limit(60).all()
+
+        if daily_stats:
+            df_evolution = pd.DataFrame([
+                {
+                    "Date": row.date,
+                    "Pages scannées": row.pages_scanned,
+                    "Ads moyennes": round(row.avg_ads or 0, 1),
+                    "Total ads": row.total_ads or 0
+                }
+                for row in daily_stats
+            ])
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown("##### 📊 Pages scannées par jour")
+                fig1 = px.area(
+                    df_evolution,
+                    x="Date",
+                    y="Pages scannées",
+                    color_discrete_sequence=[CHART_COLORS["primary"]]
+                )
+                fig1.update_layout(
+                    height=300,
+                    margin=dict(l=20, r=20, t=20, b=20),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    xaxis=dict(showgrid=False),
+                    yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)')
+                )
+                st.plotly_chart(fig1, key="evolution_pages", use_container_width=True)
+
+            with col2:
+                st.markdown("##### 📈 Moyenne d'ads actives")
+                fig2 = px.line(
+                    df_evolution,
+                    x="Date",
+                    y="Ads moyennes",
+                    color_discrete_sequence=[CHART_COLORS["success"]]
+                )
+                fig2.update_layout(
+                    height=300,
+                    margin=dict(l=20, r=20, t=20, b=20),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    xaxis=dict(showgrid=False),
+                    yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)')
+                )
+                fig2.update_traces(line=dict(width=3))
+                st.plotly_chart(fig2, key="evolution_ads", use_container_width=True)
+
+            # Export CSV
+            render_csv_download(df_evolution, f"evolution_stats_{datetime.now().strftime('%Y%m%d')}.csv", "📥 Export données évolution")
+        else:
+            st.info("Pas assez de données pour afficher l'évolution")
+
+        # ═══ ÉVOLUTION D'UNE PAGE SPÉCIFIQUE ═══
+        st.markdown("---")
+        st.markdown("##### 🔍 Évolution d'une page spécifique")
+
+        page_id_input = st.text_input("Entrez un Page ID", placeholder="Ex: 123456789", key="evolution_page_id")
+
+        if page_id_input:
+            page_history = get_page_evolution_history(db, page_id_input, limit=30)
+
+            if page_history:
+                df_page = pd.DataFrame(page_history)
+                df_page["Date"] = pd.to_datetime(df_page["date_scan"]).dt.strftime("%d/%m")
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    fig_ads = px.bar(
+                        df_page,
+                        x="Date",
+                        y="nombre_ads_active",
+                        title="📊 Évolution des Ads actives",
+                        color_discrete_sequence=[CHART_COLORS["primary"]]
+                    )
+                    fig_ads.update_layout(
+                        height=300,
+                        margin=dict(l=20, r=20, t=40, b=20),
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)'
+                    )
+                    st.plotly_chart(fig_ads, key="page_ads_evolution", use_container_width=True)
+
+                with col2:
+                    fig_prod = px.bar(
+                        df_page,
+                        x="Date",
+                        y="nombre_produits",
+                        title="📦 Évolution des Produits",
+                        color_discrete_sequence=[CHART_COLORS["success"]]
+                    )
+                    fig_prod.update_layout(
+                        height=300,
+                        margin=dict(l=20, r=20, t=40, b=20),
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        plot_bgcolor='rgba(0,0,0,0)'
+                    )
+                    st.plotly_chart(fig_prod, key="page_prod_evolution", use_container_width=True)
+
+                # Tableau des deltas
+                st.dataframe(
+                    df_page[["Date", "nombre_ads_active", "delta_ads", "nombre_produits", "delta_produits"]].rename(columns={
+                        "nombre_ads_active": "Ads",
+                        "delta_ads": "Δ Ads",
+                        "nombre_produits": "Produits",
+                        "delta_produits": "Δ Produits"
+                    }),
+                    hide_index=True,
+                    use_container_width=True
+                )
+            else:
+                st.warning(f"Aucun historique trouvé pour la page {page_id_input}")
 
     except Exception as e:
         st.error(f"Erreur: {e}")
@@ -5525,6 +5705,7 @@ def render_settings():
         st.markdown("Supprimez les entrées en doublon dans la base de données (garde les plus récentes).")
 
         from sqlalchemy import func
+        from app.database import AdsRecherche, WinningAds
 
         with db.get_session() as session:
             # Compter les doublons dans liste_ads_recherche
