@@ -445,6 +445,53 @@ class SearchLog(Base):
     )
 
 
+class PageSearchHistory(Base):
+    """
+    Table de liaison many-to-many entre SearchLog et PageRecherche.
+    Garde l'historique de toutes les recherches ayant trouvé chaque page.
+    """
+    __tablename__ = "page_search_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    search_log_id = Column(Integer, nullable=False, index=True)
+    page_id = Column(String(50), nullable=False, index=True)
+    found_at = Column(DateTime, default=datetime.utcnow)
+    was_new = Column(Boolean, default=True)  # True si la page était nouvelle lors de cette recherche
+    # Infos snapshot au moment de la découverte
+    ads_count_at_discovery = Column(Integer, default=0)
+    keyword_matched = Column(String(255))  # Le mot-clé qui a trouvé cette page
+
+    __table_args__ = (
+        Index('idx_page_search_history_search', 'search_log_id'),
+        Index('idx_page_search_history_page', 'page_id'),
+        Index('idx_page_search_history_composite', 'search_log_id', 'page_id'),
+    )
+
+
+class WinningAdSearchHistory(Base):
+    """
+    Table de liaison many-to-many entre SearchLog et WinningAds.
+    Garde l'historique de toutes les recherches ayant trouvé chaque winning ad.
+    """
+    __tablename__ = "winning_ad_search_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    search_log_id = Column(Integer, nullable=False, index=True)
+    ad_id = Column(String(50), nullable=False, index=True)
+    found_at = Column(DateTime, default=datetime.utcnow)
+    was_new = Column(Boolean, default=True)  # True si l'ad était nouvelle lors de cette recherche
+    # Infos snapshot au moment de la découverte
+    reach_at_discovery = Column(Integer, default=0)
+    age_days_at_discovery = Column(Integer, default=0)
+    matched_criteria = Column(String(100))
+
+    __table_args__ = (
+        Index('idx_winning_ad_search_history_search', 'search_log_id'),
+        Index('idx_winning_ad_search_history_ad', 'ad_id'),
+        Index('idx_winning_ad_search_history_composite', 'search_log_id', 'ad_id'),
+    )
+
+
 class SearchQueue(Base):
     """Table search_queue - File d'attente des recherches en arrière-plan"""
     __tablename__ = "search_queue"
@@ -2200,6 +2247,395 @@ def cleanup_duplicate_winning_ads(db: DatabaseManager) -> int:
             session.rollback()
             print(f"[cleanup_duplicate_winning_ads] Erreur: {e}")
             return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FONCTIONS HISTORIQUE DE RECHERCHE (many-to-many)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def record_page_search_history(
+    db: DatabaseManager,
+    search_log_id: int,
+    page_id: str,
+    was_new: bool,
+    ads_count: int = 0,
+    keyword: str = None
+) -> bool:
+    """
+    Enregistre qu'une page a été trouvée dans une recherche.
+
+    Args:
+        db: Instance DatabaseManager
+        search_log_id: ID de la recherche
+        page_id: ID de la page
+        was_new: True si la page était nouvelle lors de cette recherche
+        ads_count: Nombre d'ads au moment de la découverte
+        keyword: Mot-clé qui a trouvé la page
+    """
+    with db.get_session() as session:
+        try:
+            # Vérifier si déjà enregistré pour éviter les doublons
+            existing = session.query(PageSearchHistory).filter(
+                PageSearchHistory.search_log_id == search_log_id,
+                PageSearchHistory.page_id == page_id
+            ).first()
+
+            if not existing:
+                history = PageSearchHistory(
+                    search_log_id=search_log_id,
+                    page_id=str(page_id),
+                    was_new=was_new,
+                    ads_count_at_discovery=ads_count,
+                    keyword_matched=keyword[:255] if keyword else None
+                )
+                session.add(history)
+            return True
+        except Exception as e:
+            print(f"[record_page_search_history] Erreur: {e}")
+            return False
+
+
+def record_winning_ad_search_history(
+    db: DatabaseManager,
+    search_log_id: int,
+    ad_id: str,
+    was_new: bool,
+    reach: int = 0,
+    age_days: int = 0,
+    matched_criteria: str = None
+) -> bool:
+    """
+    Enregistre qu'une winning ad a été trouvée dans une recherche.
+    """
+    with db.get_session() as session:
+        try:
+            # Vérifier si déjà enregistré
+            existing = session.query(WinningAdSearchHistory).filter(
+                WinningAdSearchHistory.search_log_id == search_log_id,
+                WinningAdSearchHistory.ad_id == ad_id
+            ).first()
+
+            if not existing:
+                history = WinningAdSearchHistory(
+                    search_log_id=search_log_id,
+                    ad_id=str(ad_id),
+                    was_new=was_new,
+                    reach_at_discovery=reach,
+                    age_days_at_discovery=age_days,
+                    matched_criteria=matched_criteria[:100] if matched_criteria else None
+                )
+                session.add(history)
+            return True
+        except Exception as e:
+            print(f"[record_winning_ad_search_history] Erreur: {e}")
+            return False
+
+
+def record_pages_search_history_batch(
+    db: DatabaseManager,
+    search_log_id: int,
+    pages_data: List[Dict]
+) -> int:
+    """
+    Enregistre plusieurs pages en batch pour une recherche.
+
+    Args:
+        pages_data: Liste de dicts avec {page_id, was_new, ads_count, keyword}
+
+    Returns:
+        Nombre d'entrées créées
+    """
+    if not pages_data:
+        return 0
+
+    count = 0
+    with db.get_session() as session:
+        try:
+            for data in pages_data:
+                page_id = str(data.get("page_id", ""))
+                if not page_id:
+                    continue
+
+                # Vérifier si déjà enregistré
+                existing = session.query(PageSearchHistory).filter(
+                    PageSearchHistory.search_log_id == search_log_id,
+                    PageSearchHistory.page_id == page_id
+                ).first()
+
+                if not existing:
+                    history = PageSearchHistory(
+                        search_log_id=search_log_id,
+                        page_id=page_id,
+                        was_new=data.get("was_new", True),
+                        ads_count_at_discovery=data.get("ads_count", 0),
+                        keyword_matched=str(data.get("keyword", ""))[:255] if data.get("keyword") else None
+                    )
+                    session.add(history)
+                    count += 1
+
+            return count
+        except Exception as e:
+            print(f"[record_pages_search_history_batch] Erreur: {e}")
+            return count
+
+
+def record_winning_ads_search_history_batch(
+    db: DatabaseManager,
+    search_log_id: int,
+    ads_data: List[Dict]
+) -> int:
+    """
+    Enregistre plusieurs winning ads en batch pour une recherche.
+
+    Args:
+        ads_data: Liste de dicts avec {ad_id, was_new, reach, age_days, matched_criteria}
+    """
+    if not ads_data:
+        return 0
+
+    count = 0
+    with db.get_session() as session:
+        try:
+            for data in ads_data:
+                ad_id = str(data.get("ad_id", ""))
+                if not ad_id:
+                    continue
+
+                existing = session.query(WinningAdSearchHistory).filter(
+                    WinningAdSearchHistory.search_log_id == search_log_id,
+                    WinningAdSearchHistory.ad_id == ad_id
+                ).first()
+
+                if not existing:
+                    history = WinningAdSearchHistory(
+                        search_log_id=search_log_id,
+                        ad_id=ad_id,
+                        was_new=data.get("was_new", True),
+                        reach_at_discovery=data.get("reach", 0),
+                        age_days_at_discovery=data.get("age_days", 0),
+                        matched_criteria=str(data.get("matched_criteria", ""))[:100] if data.get("matched_criteria") else None
+                    )
+                    session.add(history)
+                    count += 1
+
+            return count
+        except Exception as e:
+            print(f"[record_winning_ads_search_history_batch] Erreur: {e}")
+            return count
+
+
+def get_pages_for_search(
+    db: DatabaseManager,
+    search_log_id: int,
+    limit: int = 500
+) -> List[Dict]:
+    """
+    Récupère toutes les pages trouvées dans une recherche spécifique.
+    Joint avec PageRecherche pour avoir les infos actuelles.
+    """
+    with db.get_session() as session:
+        try:
+            # Query avec jointure
+            results = session.query(
+                PageSearchHistory,
+                PageRecherche
+            ).outerjoin(
+                PageRecherche,
+                PageSearchHistory.page_id == PageRecherche.page_id
+            ).filter(
+                PageSearchHistory.search_log_id == search_log_id
+            ).order_by(
+                PageSearchHistory.was_new.desc(),  # Nouvelles pages d'abord
+                PageSearchHistory.ads_count_at_discovery.desc()
+            ).limit(limit).all()
+
+            pages = []
+            for history, page in results:
+                page_data = {
+                    "page_id": history.page_id,
+                    "was_new": history.was_new,
+                    "found_at": history.found_at,
+                    "ads_count_at_discovery": history.ads_count_at_discovery,
+                    "keyword_matched": history.keyword_matched,
+                }
+
+                # Ajouter les infos actuelles de la page si elle existe
+                if page:
+                    page_data.update({
+                        "page_name": page.page_name,
+                        "lien_site": page.lien_site,
+                        "cms": page.cms,
+                        "etat": page.etat,
+                        "nombre_ads_active": page.nombre_ads_active,
+                        "thematique": page.thematique,
+                        "pays": page.pays,
+                    })
+                else:
+                    page_data.update({
+                        "page_name": "[Supprimée]",
+                        "lien_site": "",
+                        "cms": "",
+                        "etat": "",
+                        "nombre_ads_active": 0,
+                        "thematique": "",
+                        "pays": "",
+                    })
+
+                pages.append(page_data)
+
+            return pages
+        except Exception as e:
+            print(f"[get_pages_for_search] Erreur: {e}")
+            return []
+
+
+def get_winning_ads_for_search(
+    db: DatabaseManager,
+    search_log_id: int,
+    limit: int = 500
+) -> List[Dict]:
+    """
+    Récupère toutes les winning ads trouvées dans une recherche spécifique.
+    Joint avec WinningAds pour avoir les infos actuelles.
+    """
+    with db.get_session() as session:
+        try:
+            results = session.query(
+                WinningAdSearchHistory,
+                WinningAds
+            ).outerjoin(
+                WinningAds,
+                WinningAdSearchHistory.ad_id == WinningAds.ad_id
+            ).filter(
+                WinningAdSearchHistory.search_log_id == search_log_id
+            ).order_by(
+                WinningAdSearchHistory.was_new.desc(),
+                WinningAdSearchHistory.reach_at_discovery.desc()
+            ).limit(limit).all()
+
+            ads = []
+            for history, winning_ad in results:
+                ad_data = {
+                    "ad_id": history.ad_id,
+                    "was_new": history.was_new,
+                    "found_at": history.found_at,
+                    "reach_at_discovery": history.reach_at_discovery,
+                    "age_days_at_discovery": history.age_days_at_discovery,
+                    "matched_criteria": history.matched_criteria,
+                }
+
+                if winning_ad:
+                    ad_data.update({
+                        "page_id": winning_ad.page_id,
+                        "page_name": winning_ad.page_name,
+                        "eu_total_reach": winning_ad.eu_total_reach,
+                        "ad_age_days": winning_ad.ad_age_days,
+                        "ad_snapshot_url": winning_ad.ad_snapshot_url,
+                        "lien_site": winning_ad.lien_site,
+                    })
+                else:
+                    ad_data.update({
+                        "page_id": "",
+                        "page_name": "[Supprimée]",
+                        "eu_total_reach": 0,
+                        "ad_age_days": 0,
+                        "ad_snapshot_url": "",
+                        "lien_site": "",
+                    })
+
+                ads.append(ad_data)
+
+            return ads
+        except Exception as e:
+            print(f"[get_winning_ads_for_search] Erreur: {e}")
+            return []
+
+
+def get_searches_for_page(
+    db: DatabaseManager,
+    page_id: str,
+    limit: int = 50
+) -> List[Dict]:
+    """
+    Récupère l'historique de toutes les recherches ayant trouvé une page.
+    """
+    with db.get_session() as session:
+        try:
+            results = session.query(
+                PageSearchHistory,
+                SearchLog
+            ).join(
+                SearchLog,
+                PageSearchHistory.search_log_id == SearchLog.id
+            ).filter(
+                PageSearchHistory.page_id == str(page_id)
+            ).order_by(
+                PageSearchHistory.found_at.desc()
+            ).limit(limit).all()
+
+            searches = []
+            for history, search_log in results:
+                searches.append({
+                    "search_log_id": search_log.id,
+                    "found_at": history.found_at,
+                    "was_new": history.was_new,
+                    "ads_count_at_discovery": history.ads_count_at_discovery,
+                    "keyword_matched": history.keyword_matched,
+                    "search_keywords": search_log.keywords,
+                    "search_countries": search_log.countries,
+                    "search_started_at": search_log.started_at,
+                    "search_status": search_log.status,
+                })
+
+            return searches
+        except Exception as e:
+            print(f"[get_searches_for_page] Erreur: {e}")
+            return []
+
+
+def get_search_history_stats(
+    db: DatabaseManager,
+    search_log_id: int
+) -> Dict:
+    """
+    Récupère les statistiques d'historique pour une recherche.
+    """
+    with db.get_session() as session:
+        try:
+            # Compter les pages
+            total_pages = session.query(PageSearchHistory).filter(
+                PageSearchHistory.search_log_id == search_log_id
+            ).count()
+
+            new_pages = session.query(PageSearchHistory).filter(
+                PageSearchHistory.search_log_id == search_log_id,
+                PageSearchHistory.was_new == True
+            ).count()
+
+            # Compter les winning ads
+            total_winning = session.query(WinningAdSearchHistory).filter(
+                WinningAdSearchHistory.search_log_id == search_log_id
+            ).count()
+
+            new_winning = session.query(WinningAdSearchHistory).filter(
+                WinningAdSearchHistory.search_log_id == search_log_id,
+                WinningAdSearchHistory.was_new == True
+            ).count()
+
+            return {
+                "total_pages": total_pages,
+                "new_pages": new_pages,
+                "existing_pages": total_pages - new_pages,
+                "total_winning_ads": total_winning,
+                "new_winning_ads": new_winning,
+                "existing_winning_ads": total_winning - new_winning,
+            }
+        except Exception as e:
+            print(f"[get_search_history_stats] Erreur: {e}")
+            return {
+                "total_pages": 0, "new_pages": 0, "existing_pages": 0,
+                "total_winning_ads": 0, "new_winning_ads": 0, "existing_winning_ads": 0
+            }
 
 
 def get_winning_ads(

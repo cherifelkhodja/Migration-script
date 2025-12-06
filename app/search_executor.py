@@ -178,7 +178,8 @@ def execute_background_search(
         get_active_meta_tokens_with_proxies, get_blacklist_ids, get_cached_pages_info,
         create_search_log, update_search_log, save_pages_recherche,
         save_suivi_page, save_ads_recherche, save_winning_ads,
-        ensure_tables_exist, is_winning_ad
+        ensure_tables_exist, is_winning_ad,
+        record_pages_search_history_batch, record_winning_ads_search_history_batch
     )
     from app.api_tracker import APITracker, set_current_tracker
 
@@ -606,25 +607,92 @@ def execute_background_search(
     winning_skipped = 0
 
     try:
-        tracker.update_step("Sauvegarde pages", 1, 4)
-        pages_saved = save_pages_recherche(db, pages_final, web_results, countries_list, languages_list, None)
+        # D'abord, vérifier quelles pages existent déjà (pour l'historique)
+        from app.database import PageRecherche, WinningAds
+        existing_page_ids = set()
+        existing_ad_ids = set()
 
-        tracker.update_step("Sauvegarde suivi", 2, 4)
+        with db.get_session() as session:
+            # Récupérer les page_ids existants
+            page_ids_to_check = list(pages_final.keys())
+            if page_ids_to_check:
+                existing_pages = session.query(PageRecherche.page_id).filter(
+                    PageRecherche.page_id.in_([str(pid) for pid in page_ids_to_check])
+                ).all()
+                existing_page_ids = {p.page_id for p in existing_pages}
+
+            # Récupérer les ad_ids existants pour les winning ads
+            ad_ids_to_check = [str(data.get("ad", {}).get("id", "")) for data in winning_ads_data if data.get("ad", {}).get("id")]
+            if ad_ids_to_check:
+                existing_ads = session.query(WinningAds.ad_id).filter(
+                    WinningAds.ad_id.in_(ad_ids_to_check)
+                ).all()
+                existing_ad_ids = {a.ad_id for a in existing_ads}
+
+        tracker.update_step("Sauvegarde pages", 1, 5)
+        pages_saved = save_pages_recherche(db, pages_final, web_results, countries_list, languages_list, None, log_id)
+
+        tracker.update_step("Sauvegarde suivi", 2, 5)
         suivi_saved = save_suivi_page(db, pages_final, web_results, MIN_ADS_SUIVI)
 
-        tracker.update_step("Sauvegarde annonces", 3, 4)
+        tracker.update_step("Sauvegarde annonces", 3, 5)
         ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries_list, MIN_ADS_LISTE)
 
-        tracker.update_step("Sauvegarde winning ads", 4, 4)
-        winning_saved, winning_skipped = save_winning_ads(db, winning_ads_data, pages_final)
+        tracker.update_step("Sauvegarde winning ads", 4, 5)
+        winning_saved, winning_skipped = save_winning_ads(db, winning_ads_data, pages_final, log_id)
+
+        # ═══ Enregistrer l'historique de recherche ═══
+        tracker.update_step("Historique recherche", 5, 5)
+
+        # Préparer les données d'historique pour les pages
+        pages_history_data = []
+        for pid, data in pages_final.items():
+            pid_str = str(pid)
+            # Trouver le keyword qui a trouvé cette page
+            keyword = None
+            for ad in data.get("_ads", []):
+                if ad.get("_keyword"):
+                    keyword = ad.get("_keyword")
+                    break
+
+            pages_history_data.append({
+                "page_id": pid_str,
+                "was_new": pid_str not in existing_page_ids,
+                "ads_count": data.get("ads_active_total", 0),
+                "keyword": keyword
+            })
+
+        # Préparer les données d'historique pour les winning ads
+        winning_history_data = []
+        for data in winning_ads_data:
+            ad = data.get("ad", {})
+            ad_id = str(ad.get("id", ""))
+            if ad_id:
+                winning_history_data.append({
+                    "ad_id": ad_id,
+                    "was_new": ad_id not in existing_ad_ids,
+                    "reach": data.get("reach", 0),
+                    "age_days": data.get("age_days", 0),
+                    "matched_criteria": data.get("matched_criteria", "")
+                })
+
+        # Enregistrer l'historique
+        pages_history_count = record_pages_search_history_batch(db, log_id, pages_history_data)
+        winning_history_count = record_winning_ads_search_history_batch(db, log_id, winning_history_data)
+
+        new_pages_count = sum(1 for d in pages_history_data if d.get("was_new"))
+        new_winning_count = sum(1 for d in winning_history_data if d.get("was_new"))
 
         phase8_stats = {
             "Pages sauvées": pages_saved,
+            "Nouvelles pages": new_pages_count,
+            "Pages existantes": pages_saved - new_pages_count,
             "Suivi pages": suivi_saved,
             "Annonces sauvées": ads_saved,
             "Winning ads sauvées": winning_saved,
+            "Nouvelles winning": new_winning_count,
         }
-        tracker.complete_phase(f"{pages_saved} pages, {ads_saved} ads, {winning_saved} winning", stats=phase8_stats)
+        tracker.complete_phase(f"{pages_saved} pages ({new_pages_count} new), {winning_saved} winning ({new_winning_count} new)", stats=phase8_stats)
 
     except Exception as e:
         print(f"[Search #{search_id}] Erreur sauvegarde: {e}")

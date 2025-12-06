@@ -5896,6 +5896,65 @@ def render_settings():
 
         # Afficher les modèles suggérés
         st.caption(f"**Modèles suggérés:** {', '.join(model_options[:4])}")
+
+        # ═══ TEST API GEMINI ═══
+        st.markdown("##### Tester l'API Gemini")
+        st.caption("Vérifiez que la clé API et le modèle fonctionnent correctement.")
+
+        test_col1, test_col2 = st.columns([1, 2])
+        with test_col1:
+            if st.button("🧪 Tester API", key="test_gemini_api", type="primary"):
+                if not gemini_key:
+                    st.error("❌ Clé API Gemini non configurée")
+                else:
+                    with st.spinner("Test en cours..."):
+                        try:
+                            import google.generativeai as genai
+
+                            # Configurer l'API
+                            genai.configure(api_key=gemini_key)
+
+                            # Récupérer le modèle configuré
+                            test_model_name = get_app_setting(db, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT)
+
+                            # Créer le modèle
+                            model = genai.GenerativeModel(test_model_name)
+
+                            # Test simple avec une classification exemple
+                            test_prompt = """Tu es un expert en classification de sites e-commerce.
+Classifie ce site fictif de test dans une catégorie.
+
+Site: "SuperShoes.com" - Vente de chaussures de sport et baskets pour hommes et femmes.
+
+Réponds uniquement avec:
+- Catégorie: [catégorie principale]
+- Confiance: [haute/moyenne/basse]
+- Raison: [1 phrase]"""
+
+                            response = model.generate_content(test_prompt)
+
+                            if response and response.text:
+                                st.success(f"✅ API Gemini fonctionne!")
+                                st.markdown(f"**Modèle testé:** `{test_model_name}`")
+                                st.markdown("**Réponse de test:**")
+                                st.code(response.text[:500])
+                            else:
+                                st.warning("⚠️ API accessible mais réponse vide")
+
+                        except Exception as e:
+                            error_msg = str(e)
+                            if "API_KEY" in error_msg or "401" in error_msg:
+                                st.error("❌ Clé API invalide ou expirée")
+                            elif "model" in error_msg.lower() or "404" in error_msg:
+                                st.error(f"❌ Modèle '{test_model_name}' non trouvé. Vérifiez le nom du modèle.")
+                            elif "quota" in error_msg.lower() or "429" in error_msg:
+                                st.error("❌ Quota API dépassé")
+                            else:
+                                st.error(f"❌ Erreur: {error_msg[:200]}")
+
+        with test_col2:
+            st.info("Le test envoie une requête simple pour vérifier que la clé API et le modèle sont valides.")
+
         st.markdown("---")
 
     if db:
@@ -7213,55 +7272,108 @@ def render_search_logs():
             with m4:
                 st.metric("Winning Ads", log.get("winning_ads_count", 0))
 
-            # ═══ TABLEAUX PAGES ET WINNING ADS ═══
-            from app.database import get_pages_by_search_log, get_winning_ads_by_search_log
+            # ═══ TABLEAUX PAGES ET WINNING ADS (avec historique complet) ═══
+            from app.database import get_pages_for_search, get_winning_ads_for_search, get_search_history_stats
 
-            # Tableau des pages trouvées
-            pages_from_search = get_pages_by_search_log(db, log_id, limit=50)
+            # Récupérer les stats d'historique
+            history_stats = get_search_history_stats(db, log_id)
+
+            # Tableau des pages trouvées (utilise les tables d'historique many-to-many)
+            pages_from_search = get_pages_for_search(db, log_id, limit=100)
             if pages_from_search:
-                new_pages = sum(1 for p in pages_from_search if p.get("is_new"))
-                existing_pages = len(pages_from_search) - new_pages
+                new_pages = history_stats.get("new_pages", 0)
+                existing_pages = history_stats.get("existing_pages", 0)
 
-                with st.expander(f"📄 **Pages trouvées ({len(pages_from_search)})** — 🆕 {new_pages} nouvelles | 📝 {existing_pages} mises à jour", expanded=False):
-                    # Créer DataFrame
+                with st.expander(f"📄 **Pages trouvées ({len(pages_from_search)})** — 🆕 {new_pages} nouvelles | 📝 {existing_pages} existantes", expanded=False):
+                    # Sélecteur de colonnes
+                    all_page_columns = ["Status", "Page", "Site", "CMS", "État", "Ads", "Thématique", "Pays", "Keyword", "Ads (découverte)"]
+                    default_page_cols = ["Status", "Page", "Site", "CMS", "État", "Ads"]
+
+                    selected_page_cols = st.multiselect(
+                        "Colonnes à afficher",
+                        options=all_page_columns,
+                        default=default_page_cols,
+                        key=f"page_cols_{log_id}"
+                    )
+
+                    # Créer DataFrame avec toutes les colonnes disponibles
                     pages_df_data = []
                     for p in pages_from_search:
-                        pages_df_data.append({
-                            "Status": "🆕 Nouveau" if p.get("is_new") else "📝 MAJ",
-                            "Page": p.get("page_name", "")[:30],
-                            "Site": (p.get("lien_site") or "")[:30],
-                            "CMS": p.get("cms", "-"),
-                            "État": p.get("etat", "-"),
-                            "Ads": p.get("nombre_ads_active", 0),
-                            "Produits": p.get("nombre_produits", 0),
-                            "Thématique": (p.get("thematique") or "-")[:20],
-                        })
+                        row = {}
+                        if "Status" in selected_page_cols:
+                            row["Status"] = "🆕 Nouveau" if p.get("was_new") else "📝 Existant"
+                        if "Page" in selected_page_cols:
+                            row["Page"] = (p.get("page_name") or "")[:30]
+                        if "Site" in selected_page_cols:
+                            row["Site"] = (p.get("lien_site") or "")[:35]
+                        if "CMS" in selected_page_cols:
+                            row["CMS"] = p.get("cms", "-")
+                        if "État" in selected_page_cols:
+                            row["État"] = p.get("etat", "-")
+                        if "Ads" in selected_page_cols:
+                            row["Ads"] = p.get("nombre_ads_active", 0)
+                        if "Thématique" in selected_page_cols:
+                            row["Thématique"] = (p.get("thematique") or "-")[:20]
+                        if "Pays" in selected_page_cols:
+                            row["Pays"] = (p.get("pays") or "-")[:15]
+                        if "Keyword" in selected_page_cols:
+                            row["Keyword"] = (p.get("keyword_matched") or "-")[:20]
+                        if "Ads (découverte)" in selected_page_cols:
+                            row["Ads (découverte)"] = p.get("ads_count_at_discovery", 0)
+
+                        if row:
+                            pages_df_data.append(row)
 
                     if pages_df_data:
                         df_pages = pd.DataFrame(pages_df_data)
                         st.dataframe(df_pages, hide_index=True, use_container_width=True)
 
-            # Tableau des winning ads
-            winning_from_search = get_winning_ads_by_search_log(db, log_id, limit=50)
+            # Tableau des winning ads (utilise les tables d'historique many-to-many)
+            winning_from_search = get_winning_ads_for_search(db, log_id, limit=100)
             if winning_from_search:
-                new_winning = sum(1 for a in winning_from_search if a.get("is_new"))
-                existing_winning = len(winning_from_search) - new_winning
+                new_winning = history_stats.get("new_winning_ads", 0)
+                existing_winning = history_stats.get("existing_winning_ads", 0)
 
                 with st.expander(f"🏆 **Winning Ads ({len(winning_from_search)})** — 🆕 {new_winning} nouvelles | 📝 {existing_winning} existantes", expanded=False):
+                    # Sélecteur de colonnes
+                    all_winning_columns = ["Status", "Page", "Âge", "Reach", "Critère", "Site", "Snapshot", "Reach (découverte)", "Âge (découverte)"]
+                    default_winning_cols = ["Status", "Page", "Âge", "Reach", "Critère", "Site"]
+
+                    selected_winning_cols = st.multiselect(
+                        "Colonnes à afficher",
+                        options=all_winning_columns,
+                        default=default_winning_cols,
+                        key=f"winning_cols_{log_id}"
+                    )
+
                     # Créer DataFrame
                     winning_df_data = []
                     for a in winning_from_search:
-                        reach = a.get("eu_total_reach")
-                        reach_str = f"{reach:,}".replace(",", " ") if reach else "-"
+                        row = {}
+                        if "Status" in selected_winning_cols:
+                            row["Status"] = "🆕 Nouveau" if a.get("was_new") else "📝 Existant"
+                        if "Page" in selected_winning_cols:
+                            row["Page"] = (a.get("page_name") or "")[:25]
+                        if "Âge" in selected_winning_cols:
+                            row["Âge"] = f"{a.get('ad_age_days', '-')}j" if a.get("ad_age_days") is not None else "-"
+                        if "Reach" in selected_winning_cols:
+                            reach = a.get("eu_total_reach")
+                            row["Reach"] = f"{reach:,}".replace(",", " ") if reach else "-"
+                        if "Critère" in selected_winning_cols:
+                            row["Critère"] = a.get("matched_criteria", "-")
+                        if "Site" in selected_winning_cols:
+                            row["Site"] = (a.get("lien_site") or "")[:25]
+                        if "Snapshot" in selected_winning_cols:
+                            snapshot_url = a.get("ad_snapshot_url", "")
+                            row["Snapshot"] = "🔗" if snapshot_url else "-"
+                        if "Reach (découverte)" in selected_winning_cols:
+                            reach_d = a.get("reach_at_discovery", 0)
+                            row["Reach (découverte)"] = f"{reach_d:,}".replace(",", " ") if reach_d else "-"
+                        if "Âge (découverte)" in selected_winning_cols:
+                            row["Âge (découverte)"] = f"{a.get('age_days_at_discovery', '-')}j"
 
-                        winning_df_data.append({
-                            "Status": "🆕 Nouveau" if a.get("is_new") else "📝 Existant",
-                            "Page": (a.get("page_name") or "")[:25],
-                            "Âge": f"{a.get('ad_age_days', '-')}j" if a.get("ad_age_days") is not None else "-",
-                            "Reach": reach_str,
-                            "Critère": a.get("matched_criteria", "-"),
-                            "Site": (a.get("lien_site") or "")[:25],
-                        })
+                        if row:
+                            winning_df_data.append(row)
 
                     if winning_df_data:
                         df_winning = pd.DataFrame(winning_df_data)
