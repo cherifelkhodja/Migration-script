@@ -5304,6 +5304,61 @@ def render_settings():
 
     st.markdown("---")
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # STATISTIQUES API
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.subheader("📡 Statistiques API")
+    st.markdown("Utilisation des APIs sur les 30 derniers jours")
+
+    if db:
+        from app.database import get_search_logs_stats
+
+        api_stats = get_search_logs_stats(db, days=30)
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("🔵 Meta API", f"{api_stats.get('total_meta_api_calls', 0):,}")
+        with col2:
+            st.metric("🟠 ScraperAPI", f"{api_stats.get('total_scraper_api_calls', 0):,}")
+        with col3:
+            st.metric("🌐 Web Direct", f"{api_stats.get('total_web_requests', 0):,}")
+        with col4:
+            st.metric("⚠️ Rate Limits", f"{api_stats.get('total_rate_limit_hits', 0):,}")
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("❌ Meta Erreurs", f"{api_stats.get('total_meta_api_errors', 0):,}")
+        with col2:
+            st.metric("❌ Scraper Erreurs", f"{api_stats.get('total_scraper_api_errors', 0):,}")
+        with col3:
+            st.metric("❌ Web Erreurs", f"{api_stats.get('total_web_errors', 0):,}")
+        with col4:
+            cost = api_stats.get('total_scraper_api_cost', 0) or 0
+            st.metric("💰 Coût ScraperAPI", f"${cost:.2f}")
+
+        # Calcul du taux d'erreur
+        total_calls = (api_stats.get('total_meta_api_calls', 0) or 0) + (api_stats.get('total_scraper_api_calls', 0) or 0)
+        total_errors = (api_stats.get('total_meta_api_errors', 0) or 0) + (api_stats.get('total_scraper_api_errors', 0) or 0)
+        error_rate = (total_errors / total_calls * 100) if total_calls > 0 else 0
+
+        st.progress(min(error_rate / 100, 1.0))
+        st.caption(f"Taux d'erreur: {error_rate:.1f}% ({total_errors}/{total_calls} appels)")
+
+        # Stats par token (si disponibles)
+        with st.expander("📊 Utilisation par token"):
+            tokens = get_all_meta_tokens(db)
+            if tokens:
+                for t in tokens:
+                    status = "🟢" if t["is_active"] and not t.get("is_rate_limited") else "🔴"
+                    st.markdown(f"""
+                    **{status} {t['name']}**
+                    - Appels: {t['total_calls']:,} | Erreurs: {t['total_errors']} | Rate limits: {t['rate_limit_hits']}
+                    """)
+            else:
+                st.caption("Aucun token configuré")
+
+    st.markdown("---")
+
     # Seuils de détection (configurables)
     st.subheader("📊 Seuils de détection")
     st.markdown("Ces seuils déterminent quelles pages sont sauvegardées dans les différentes tables de la base de données.")
