@@ -1535,12 +1535,9 @@ def render_sidebar():
             from app.background_worker import get_worker
             worker = get_worker()
             active = worker.get_active_searches()
-            if active:
-                btn_label = f"⏳ Recherches ({len(active)})"
-                btn_type = "primary" if st.session_state.current_page == "Background Searches" else "secondary"
-            else:
-                btn_label = "⏳ Recherches en cours"
-                btn_type = "primary" if st.session_state.current_page == "Background Searches" else "secondary"
+            count = len(active) if active else 0
+            btn_label = f"⏳ Recherches en cours ({count})"
+            btn_type = "primary" if st.session_state.current_page == "Background Searches" else "secondary"
 
             if st.button(btn_label, width="stretch", type=btn_type):
                 st.session_state.current_page = "Background Searches"
