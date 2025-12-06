@@ -629,6 +629,8 @@ IMPORTANT: Le champ "id" doit correspondre EXACTEMENT à l'ID fourni."""
         system_prompt = self._build_system_prompt(taxonomy_text)
         user_prompt = self._build_user_prompt(sites_data)
 
+        logger.info(f"📤 Gemini prompt: {len(system_prompt)} chars system, {len(user_prompt)} chars user")
+
         payload = {
             "contents": [
                 {
@@ -1170,6 +1172,8 @@ def classify_pages_batch(
             product_links=[]
         )
         scraped_contents.append(content)
+        # Log détaillé pour debug
+        logger.info(f"📝 Page {content.page_id}: title='{content.title[:50] if content.title else 'VIDE'}', has_content={content.has_content()}")
 
     # Filtrer les sites avec du contenu
     valid_contents = [c for c in scraped_contents if c.has_content()]
@@ -1204,10 +1208,14 @@ def classify_pages_batch(
             progress_callback(i, len(valid_contents), f"Gemini batch {batch_num}/{total_batches}")
 
         try:
+            logger.info(f"🚀 Envoi batch {batch_num} à Gemini ({len(batch)} sites)...")
             batch_results = classifier.classify_batch_sync(batch, taxonomy_text)
             all_results.extend(batch_results)
+            logger.info(f"✅ Batch {batch_num} reçu: {len(batch_results)} résultats")
+            for r in batch_results[:3]:  # Log 3 premiers résultats
+                logger.info(f"   → {r.page_id}: {r.category}/{r.subcategory} (conf={r.confidence_score:.2f})")
         except Exception as e:
-            logger.error(f"Erreur classification batch {batch_num}: {e}")
+            logger.error(f"❌ Erreur classification batch {batch_num}: {e}")
             # Classification par défaut en cas d'erreur
             for content in batch:
                 all_results.append(ClassificationResult(
