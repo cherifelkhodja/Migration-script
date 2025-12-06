@@ -126,6 +126,49 @@ from src.infrastructure.persistence.repositories.token_repository import (
     verify_all_tokens,
 )
 
+from src.infrastructure.persistence.repositories.page_repository import (
+    save_pages_recherche,
+    save_suivi_page,
+    save_ads_recherche,
+    get_all_pages,
+    get_page_history,
+    get_all_countries,
+    get_all_subcategories,
+    add_country_to_page,
+    get_pages_count,
+)
+
+from src.infrastructure.persistence.repositories.winning_ad_repository import (
+    is_winning_ad,
+    save_winning_ads,
+    cleanup_duplicate_winning_ads,
+    get_winning_ads,
+    get_winning_ads_filtered,
+    get_winning_ads_stats,
+    get_winning_ads_by_page,
+)
+
+from src.infrastructure.persistence.repositories.search_repository import (
+    create_search_log,
+    update_search_log,
+    complete_search_log,
+    get_search_logs,
+    delete_search_log,
+    save_api_calls,
+    create_search_queue,
+    get_search_queue,
+    update_search_queue_status,
+    update_search_queue_progress,
+    cancel_search_queue,
+    get_pending_searches,
+    get_queue_stats,
+    record_page_search_history,
+    record_pages_search_history_batch,
+    record_winning_ad_search_history,
+    record_winning_ads_search_history_batch,
+    get_search_history_stats,
+)
+
 __all__ = [
     # Database Manager
     "DatabaseManager",
@@ -229,4 +272,41 @@ __all__ = [
     "get_token_stats_detailed",
     "verify_meta_token",
     "verify_all_tokens",
+    # Pages
+    "save_pages_recherche",
+    "save_suivi_page",
+    "save_ads_recherche",
+    "get_all_pages",
+    "get_page_history",
+    "get_all_countries",
+    "get_all_subcategories",
+    "add_country_to_page",
+    "get_pages_count",
+    # Winning Ads
+    "is_winning_ad",
+    "save_winning_ads",
+    "cleanup_duplicate_winning_ads",
+    "get_winning_ads",
+    "get_winning_ads_filtered",
+    "get_winning_ads_stats",
+    "get_winning_ads_by_page",
+    # Search
+    "create_search_log",
+    "update_search_log",
+    "complete_search_log",
+    "get_search_logs",
+    "delete_search_log",
+    "save_api_calls",
+    "create_search_queue",
+    "get_search_queue",
+    "update_search_queue_status",
+    "update_search_queue_progress",
+    "cancel_search_queue",
+    "get_pending_searches",
+    "get_queue_stats",
+    "record_page_search_history",
+    "record_pages_search_history_batch",
+    "record_winning_ad_search_history",
+    "record_winning_ads_search_history_batch",
+    "get_search_history_stats",
 ]
