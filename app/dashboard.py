@@ -2046,8 +2046,8 @@ def render_keyword_search():
                 languages=",".join(languages) if languages else "fr"
             )
 
-            st.success(f"✅ Recherche #{search_id} ajoutée à la file d'attente!")
-            st.info("💡 Vous pouvez quitter cette page, la recherche continuera en arrière-plan. Consultez les résultats dans **Background Searches**.")
+            st.success(f"✅ Tâche #{search_id} ajoutée à la file d'attente!")
+            st.info("💡 Vous pouvez quitter cette page, la recherche continuera en arrière-plan. Consultez les résultats dans **Recherches en cours**.")
 
             # Proposer d'aller voir les recherches en arrière-plan
             if st.button("📋 Voir les recherches en arrière-plan", key="goto_bg"):
@@ -5515,6 +5515,83 @@ def render_settings():
                             except Exception as e:
                                 st.error(f"Erreur classification: {e}")
 
+        # ═══════════════════════════════════════════════════════════════════════════
+        # NETTOYAGE DES DOUBLONS
+        # ═══════════════════════════════════════════════════════════════════════════
+        st.markdown("---")
+        st.subheader("🧹 Nettoyage des doublons")
+        st.markdown("Supprimez les entrées en doublon dans la base de données (garde les plus récentes).")
+
+        from sqlalchemy import func
+
+        with db.get_session() as session:
+            # Compter les doublons dans liste_ads_recherche
+            ads_duplicates = session.query(
+                AdsRecherche.ad_id,
+                func.count(AdsRecherche.id).label('count')
+            ).group_by(AdsRecherche.ad_id).having(func.count(AdsRecherche.id) > 1).count()
+
+            # Compter les doublons dans winning_ads
+            winning_duplicates = session.query(
+                WinningAds.ad_id,
+                func.count(WinningAds.id).label('count')
+            ).group_by(WinningAds.ad_id).having(func.count(WinningAds.id) > 1).count()
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Doublons Ads Recherche", ads_duplicates)
+        with col2:
+            st.metric("Doublons Winning Ads", winning_duplicates)
+        with col3:
+            st.metric("Total doublons", ads_duplicates + winning_duplicates)
+
+        if ads_duplicates + winning_duplicates > 0:
+            st.warning(f"⚠️ {ads_duplicates + winning_duplicates} doublons détectés")
+
+            if st.button("🧹 Nettoyer les doublons", type="primary", key="cleanup_duplicates"):
+                with st.spinner("Nettoyage en cours..."):
+                    total_deleted = 0
+
+                    # Nettoyer liste_ads_recherche
+                    with db.get_session() as session:
+                        # Trouver les ad_id avec doublons
+                        duplicates_ads = session.query(
+                            AdsRecherche.ad_id
+                        ).group_by(AdsRecherche.ad_id).having(func.count(AdsRecherche.id) > 1).all()
+
+                        for (ad_id,) in duplicates_ads:
+                            entries = session.query(AdsRecherche).filter(
+                                AdsRecherche.ad_id == ad_id
+                            ).order_by(AdsRecherche.date_scan.desc()).all()
+
+                            for entry in entries[1:]:  # Garder le premier (plus récent)
+                                session.delete(entry)
+                                total_deleted += 1
+
+                        session.commit()
+
+                    # Nettoyer winning_ads
+                    with db.get_session() as session:
+                        duplicates_winning = session.query(
+                            WinningAds.ad_id
+                        ).group_by(WinningAds.ad_id).having(func.count(WinningAds.id) > 1).all()
+
+                        for (ad_id,) in duplicates_winning:
+                            entries = session.query(WinningAds).filter(
+                                WinningAds.ad_id == ad_id
+                            ).order_by(WinningAds.date_scan.desc()).all()
+
+                            for entry in entries[1:]:
+                                session.delete(entry)
+                                total_deleted += 1
+
+                        session.commit()
+
+                    st.success(f"✅ {total_deleted} doublons supprimés")
+                    st.rerun()
+        else:
+            st.success("✅ Aucun doublon détecté")
+
     else:
         st.warning("Base de données non connectée")
 
@@ -5988,6 +6065,7 @@ def render_background_searches():
 
     st.title("🔄 Recherches en cours")
     st.markdown("Suivi en temps réel des recherches en arrière-plan.")
+    st.caption("💡 Les numéros de tâche (Tâche #X) sont différents des numéros de recherche dans l'historique (Recherche #Y). Une fois terminée, la recherche apparaît dans **Search Logs**.")
 
     db = get_database()
     if not db:
@@ -6019,7 +6097,7 @@ def render_background_searches():
 
             col1, col2, col3 = st.columns([4, 1, 1])
             with col1:
-                st.write(f"**Recherche #{search.id}** - {search.created_at:%d/%m %H:%M} - Phase {search.current_phase}/9")
+                st.write(f"**Tâche #{search.id}** - {search.created_at:%d/%m %H:%M} - Phase {search.current_phase}/9")
                 st.caption(f"Mots-clés: {keywords_display}")
             with col2:
                 if st.button("🔄 Reprendre", key=f"resume_{search.id}"):
@@ -6070,7 +6148,7 @@ def render_background_searches():
                     # Titre avec phase et temps écoulé
                     header_col1, header_col2 = st.columns([3, 1])
                     with header_col1:
-                        st.markdown(f"### 🟢 Recherche #{search['id']} - En cours")
+                        st.markdown(f"### 🟢 Tâche #{search['id']} - En cours")
                     with header_col2:
                         if search.get("started_at"):
                             started = search["started_at"]
@@ -6123,7 +6201,7 @@ def render_background_searches():
 
                 else:
                     # Recherche en attente
-                    st.markdown(f"### 🟡 Recherche #{search['id']} - En attente")
+                    st.markdown(f"### 🟡 Tâche #{search['id']} - En attente")
                     st.write(f"**Mots-clés:** {keywords_display}")
 
                     if search.get("created_at"):
