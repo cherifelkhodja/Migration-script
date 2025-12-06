@@ -1178,6 +1178,85 @@ def generate_alerts(
                 "data": winning_stats.get("by_page", [])[:5]
             })
 
+        # Alerte: Changements d'état
+        from app.database import SuiviPage
+        from sqlalchemy import func, desc
+
+        state_changes = []
+        state_order = {"inactif": 0, "XS": 1, "S": 2, "M": 3, "L": 4, "XL": 5, "XXL": 6}
+
+        with db.get_session() as session:
+            # Récupérer les pages avec plusieurs scans récents
+            recent_scans = session.query(
+                SuiviPage.page_id,
+                SuiviPage.nom_site,
+                SuiviPage.nombre_ads_active,
+                SuiviPage.date_scan
+            ).filter(
+                SuiviPage.date_scan >= datetime.utcnow() - timedelta(days=7)
+            ).order_by(
+                SuiviPage.page_id,
+                desc(SuiviPage.date_scan)
+            ).all()
+
+            # Grouper par page et détecter les changements
+            from itertools import groupby
+            for page_id, scans in groupby(recent_scans, key=lambda x: x.page_id):
+                scans_list = list(scans)
+                if len(scans_list) >= 2:
+                    latest = scans_list[0]
+                    previous = scans_list[1]
+
+                    current_state = get_etat_from_ads_count(latest.nombre_ads_active)
+                    prev_state = get_etat_from_ads_count(previous.nombre_ads_active)
+
+                    if current_state != prev_state:
+                        current_rank = state_order.get(current_state, 0)
+                        prev_rank = state_order.get(prev_state, 0)
+
+                        if current_rank > prev_rank:
+                            # Promotion
+                            state_changes.append({
+                                "page_id": page_id,
+                                "page_name": latest.nom_site,
+                                "from_state": prev_state,
+                                "to_state": current_state,
+                                "direction": "up",
+                                "ads": latest.nombre_ads_active
+                            })
+                        else:
+                            # Dégradation
+                            state_changes.append({
+                                "page_id": page_id,
+                                "page_name": latest.nom_site,
+                                "from_state": prev_state,
+                                "to_state": current_state,
+                                "direction": "down",
+                                "ads": latest.nombre_ads_active
+                            })
+
+        # Ajouter les alertes de changement d'état
+        promotions = [s for s in state_changes if s["direction"] == "up"]
+        degradations = [s for s in state_changes if s["direction"] == "down"]
+
+        if promotions:
+            alerts.append({
+                "type": "success",
+                "icon": "⬆️",
+                "title": f"{len(promotions)} page(s) en progression",
+                "message": "Pages ayant changé d'état vers le haut",
+                "data": [{"page_name": p["page_name"], "pct_ads": 0, "change": f"{p['from_state']} → {p['to_state']}"} for p in promotions[:5]]
+            })
+
+        if degradations:
+            alerts.append({
+                "type": "warning",
+                "icon": "⬇️",
+                "title": f"{len(degradations)} page(s) en régression",
+                "message": "Pages ayant changé d'état vers le bas",
+                "data": [{"page_name": p["page_name"], "pct_ads": 0, "change": f"{p['from_state']} → {p['to_state']}"} for p in degradations[:5]]
+            })
+
     except Exception as e:
         pass
 
@@ -3959,7 +4038,11 @@ def render_alerts():
                             for item in alert["data"][:5]:
                                 if isinstance(item, dict):
                                     name = item.get("page_name") or item.get("nom_site", "N/A")
-                                    st.write(f"  • {name}")
+                                    change = item.get("change", "")
+                                    if change:
+                                        st.write(f"  • {name} ({change})")
+                                    else:
+                                        st.write(f"  • {name}")
 
                 elif alert["type"] == "warning":
                     with st.expander(f"⚠️ {alert['icon']} {alert['title']}", expanded=True):
@@ -3969,7 +4052,11 @@ def render_alerts():
                                 if isinstance(item, dict):
                                     name = item.get("page_name") or item.get("nom_site", "N/A")
                                     delta = item.get("pct_ads", 0)
-                                    st.write(f"  • {name} ({delta:+.0f}%)")
+                                    change = item.get("change", "")
+                                    if change:
+                                        st.write(f"  • {name} ({change})")
+                                    else:
+                                        st.write(f"  • {name} ({delta:+.0f}%)")
 
                 else:
                     with st.expander(f"ℹ️ {alert['icon']} {alert['title']}", expanded=True):
