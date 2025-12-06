@@ -4164,6 +4164,88 @@ def render_monitoring():
         except Exception as e:
             st.error(f"Erreur: {e}")
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # COMPARAISON DE PAGES
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.markdown("---")
+    st.subheader("⚖️ Comparer des pages")
+    st.caption("Comparez jusqu'à 3 pages côte à côte")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        page1_id = st.text_input("Page 1", placeholder="Page ID", key="compare_page1")
+    with col2:
+        page2_id = st.text_input("Page 2", placeholder="Page ID", key="compare_page2")
+    with col3:
+        page3_id = st.text_input("Page 3 (optionnel)", placeholder="Page ID", key="compare_page3")
+
+    if st.button("🔄 Comparer", type="primary", key="compare_btn"):
+        pages_to_compare = [p for p in [page1_id, page2_id, page3_id] if p]
+
+        if len(pages_to_compare) >= 2:
+            comparison_data = []
+
+            for pid in pages_to_compare:
+                page_results = search_pages(db, search_term=pid, limit=1)
+                if page_results:
+                    page = page_results[0]
+                    # Récupérer l'historique
+                    history = get_page_evolution_history(db, page_id=pid, limit=10)
+                    avg_ads = sum(h["nombre_ads_active"] for h in history) / len(history) if history else 0
+                    trend = "📈" if history and len(history) > 1 and history[0]["delta_ads"] > 0 else "📉" if history and len(history) > 1 and history[0]["delta_ads"] < 0 else "➡️"
+
+                    # Winning ads count
+                    winning = get_winning_ads(db, page_id=pid, limit=100)
+                    winning_count = len(winning) if winning else 0
+
+                    comparison_data.append({
+                        "Page ID": pid,
+                        "Nom": page.get("page_name", "N/A")[:25],
+                        "CMS": page.get("cms", "N/A"),
+                        "État": page.get("etat", "N/A"),
+                        "Ads actives": page.get("nombre_ads_active", 0),
+                        "Produits": page.get("nombre_produits", 0),
+                        "Winning Ads": winning_count,
+                        "Moy. Ads": f"{avg_ads:.0f}",
+                        "Tendance": trend
+                    })
+                else:
+                    comparison_data.append({
+                        "Page ID": pid,
+                        "Nom": "Non trouvée",
+                        "CMS": "-",
+                        "État": "-",
+                        "Ads actives": 0,
+                        "Produits": 0,
+                        "Winning Ads": 0,
+                        "Moy. Ads": "-",
+                        "Tendance": "-"
+                    })
+
+            # Afficher la comparaison
+            st.markdown("##### 📊 Résultat de la comparaison")
+            df_compare = pd.DataFrame(comparison_data)
+            st.dataframe(df_compare, use_container_width=True, hide_index=True)
+
+            # Graphique de comparaison
+            if any(d["Ads actives"] > 0 for d in comparison_data):
+                fig = go.Figure(data=[
+                    go.Bar(name='Ads actives', x=[d["Nom"] for d in comparison_data], y=[d["Ads actives"] for d in comparison_data], marker_color=CHART_COLORS["primary"]),
+                    go.Bar(name='Winning Ads', x=[d["Nom"] for d in comparison_data], y=[d["Winning Ads"] for d in comparison_data], marker_color=CHART_COLORS["success"])
+                ])
+                fig.update_layout(
+                    barmode='group',
+                    height=300,
+                    margin=dict(l=20, r=20, t=20, b=20),
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                )
+                st.plotly_chart(fig, use_container_width=True, key="compare_chart")
+        else:
+            st.warning("Entrez au moins 2 Page IDs pour comparer")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE: ANALYTICS
