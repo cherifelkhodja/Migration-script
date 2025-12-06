@@ -2339,24 +2339,24 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
 
     db = get_database()
 
-    # Charger les tokens depuis la base de données
-    tokens = []
+    # Charger les tokens depuis la base de données (avec IDs pour le logging)
+    tokens_with_proxies = []
     if db:
         try:
-            from app.database import get_active_meta_tokens, ensure_tables_exist
+            from app.database import get_active_meta_tokens_with_proxies, ensure_tables_exist
             ensure_tables_exist(db)
-            tokens = get_active_meta_tokens(db)
+            tokens_with_proxies = get_active_meta_tokens_with_proxies(db)
         except Exception as e:
             st.warning(f"⚠️ Impossible de charger les tokens depuis la DB: {e}")
 
     # Fallback sur variable d'environnement si pas de tokens en DB
-    if not tokens:
+    if not tokens_with_proxies:
         env_token = os.getenv("META_ACCESS_TOKEN", "")
         if env_token:
-            tokens = [env_token]
+            tokens_with_proxies = [{"id": None, "token": env_token, "proxy": None, "name": "Env Token"}]
             st.info("📝 Utilisation du token depuis META_ACCESS_TOKEN")
 
-    if not tokens:
+    if not tokens_with_proxies:
         st.error("❌ Aucun token Meta API disponible. Configurez vos tokens dans **Settings > Tokens Meta API**.")
         return
 
@@ -2369,10 +2369,10 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
         'cms': selected_cms
     })
 
-    st.info(f"🔄 {len(tokens)} token(s) actif(s)")
+    st.info(f"🔄 {len(tokens_with_proxies)} token(s) actif(s)")
 
     # Initialiser le TokenRotator avec le db pour enregistrer les stats
-    rotator = init_token_rotator(tokens, db=db)
+    rotator = init_token_rotator(tokens_with_proxies=tokens_with_proxies, db=db)
 
     if rotator.token_count > 1:
         st.success(f"🔄 Rotation automatique activée ({rotator.token_count} tokens)")
@@ -3001,23 +3001,23 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
 
     db = get_database()
 
-    # Charger les tokens depuis la base de données
-    tokens = []
+    # Charger les tokens depuis la base de données (avec IDs pour le logging)
+    tokens_with_proxies = []
     if db:
         try:
-            from app.database import get_active_meta_tokens, ensure_tables_exist
+            from app.database import get_active_meta_tokens_with_proxies, ensure_tables_exist
             ensure_tables_exist(db)
-            tokens = get_active_meta_tokens(db)
+            tokens_with_proxies = get_active_meta_tokens_with_proxies(db)
         except Exception as e:
             st.warning(f"⚠️ Impossible de charger les tokens: {e}")
 
     # Fallback sur variable d'environnement
-    if not tokens:
+    if not tokens_with_proxies:
         env_token = os.getenv("META_ACCESS_TOKEN", "")
         if env_token:
-            tokens = [env_token]
+            tokens_with_proxies = [{"id": None, "token": env_token, "proxy": None, "name": "Env Token"}]
 
-    if not tokens:
+    if not tokens_with_proxies:
         st.error("❌ Aucun token Meta API disponible. Configurez vos tokens dans **Settings > Tokens Meta API**.")
         return
 
@@ -3030,7 +3030,7 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
     })
 
     # Initialiser le TokenRotator
-    rotator = init_token_rotator(tokens, db=db)
+    rotator = init_token_rotator(tokens_with_proxies=tokens_with_proxies, db=db)
     if rotator.token_count > 1:
         st.success(f"🔄 Rotation automatique activée ({rotator.token_count} tokens)")
 
@@ -5230,7 +5230,7 @@ def render_settings():
                         st.warning(f"⏱️ Rate-limited jusqu'à: {t['rate_limited_until'].strftime('%H:%M:%S')}")
 
                     # Actions
-                    action_cols = st.columns(4)
+                    action_cols = st.columns(5)
 
                     with action_cols[0]:
                         new_active = not t["is_active"]
@@ -5239,17 +5239,27 @@ def render_settings():
                             st.rerun()
 
                     with action_cols[1]:
+                        if st.button("✅ Vérifier", key=f"verify_{t['id']}"):
+                            from app.database import verify_meta_token
+                            with st.spinner("Vérification..."):
+                                result = verify_meta_token(db, t["id"])
+                            if result["valid"]:
+                                st.success(f"✅ Token valide ({result['response_time_ms']}ms)")
+                            else:
+                                st.error(f"❌ {result.get('error', 'Erreur inconnue')}")
+
+                    with action_cols[2]:
                         if t.get("is_rate_limited"):
                             if st.button("🔓 Débloquer", key=f"unblock_{t['id']}"):
                                 clear_rate_limit(db, t["id"])
                                 st.rerun()
 
-                    with action_cols[2]:
+                    with action_cols[3]:
                         if st.button("📊 Reset stats", key=f"reset_{t['id']}"):
                             reset_token_stats(db, t["id"])
                             st.rerun()
 
-                    with action_cols[3]:
+                    with action_cols[4]:
                         if st.button("🗑️ Supprimer", key=f"delete_{t['id']}"):
                             delete_meta_token(db, t["id"])
                             st.success("Token supprimé")
@@ -5280,6 +5290,214 @@ def render_settings():
             st.success("✓ Token configuré")
         else:
             st.warning("⚠️ Token non configuré")
+
+    st.markdown("---")
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # LOGS D'UTILISATION DES TOKENS
+    # ═══════════════════════════════════════════════════════════════════════════
+    st.subheader("📋 Logs d'utilisation des Tokens")
+    st.markdown("Historique détaillé de l'utilisation de chaque token Meta API")
+
+    if db:
+        from app.database import get_token_usage_logs, get_token_stats_detailed, verify_all_tokens
+
+        # Filtres
+        log_filter_cols = st.columns([2, 2, 2, 2])
+
+        with log_filter_cols[0]:
+            tokens = get_all_meta_tokens(db)
+            token_options = {"all": "Tous les tokens"}
+            for t in tokens:
+                token_options[str(t["id"])] = f"{t['name']}"
+            selected_token_filter = st.selectbox(
+                "Token",
+                options=list(token_options.keys()),
+                format_func=lambda x: token_options[x],
+                key="log_token_filter"
+            )
+
+        with log_filter_cols[1]:
+            action_types = {
+                "all": "Toutes les actions",
+                "search": "🔍 Recherches",
+                "page_fetch": "📄 Fetch pages",
+                "verification": "✅ Vérifications",
+                "rate_limit": "⏱️ Rate limits"
+            }
+            selected_action = st.selectbox(
+                "Type d'action",
+                options=list(action_types.keys()),
+                format_func=lambda x: action_types[x],
+                key="log_action_filter"
+            )
+
+        with log_filter_cols[2]:
+            log_days = st.selectbox(
+                "Période",
+                options=[1, 7, 14, 30],
+                format_func=lambda x: f"{x} jour{'s' if x > 1 else ''}",
+                index=1,
+                key="log_days_filter"
+            )
+
+        with log_filter_cols[3]:
+            log_limit = st.selectbox(
+                "Limite",
+                options=[50, 100, 200, 500],
+                index=1,
+                key="log_limit_filter"
+            )
+
+        # Vérification de tous les tokens
+        if st.button("🔄 Vérifier tous les tokens", key="verify_all_tokens"):
+            with st.spinner("Vérification en cours..."):
+                results = verify_all_tokens(db)
+            for r in results:
+                if r["valid"]:
+                    st.success(f"✅ {r['name']}: Valide ({r['response_time_ms']}ms)")
+                else:
+                    st.error(f"❌ {r['name']}: {r.get('error', 'Erreur inconnue')}")
+
+        # Récupération des logs
+        token_id_filter = None if selected_token_filter == "all" else int(selected_token_filter)
+        action_filter = None if selected_action == "all" else selected_action
+
+        logs = get_token_usage_logs(
+            db,
+            token_id=token_id_filter,
+            days=log_days,
+            limit=log_limit,
+            action_type=action_filter
+        )
+
+        # Statistiques résumées
+        if logs:
+            st.markdown("#### 📊 Résumé")
+
+            # Calculs
+            total_logs = len(logs)
+            success_logs = sum(1 for l in logs if l.get("success", False))
+            error_logs = total_logs - success_logs
+            total_ads = sum(l.get("ads_count", 0) or 0 for l in logs)
+            avg_response = sum(l.get("response_time_ms", 0) or 0 for l in logs) / total_logs if total_logs > 0 else 0
+
+            # Comptage par type
+            action_counts = {}
+            for l in logs:
+                act = l.get("action_type", "unknown")
+                action_counts[act] = action_counts.get(act, 0) + 1
+
+            sum_cols = st.columns(5)
+            with sum_cols[0]:
+                st.metric("Total appels", total_logs)
+            with sum_cols[1]:
+                st.metric("✅ Succès", success_logs)
+            with sum_cols[2]:
+                st.metric("❌ Erreurs", error_logs)
+            with sum_cols[3]:
+                st.metric("📢 Ads trouvées", f"{total_ads:,}")
+            with sum_cols[4]:
+                st.metric("⏱️ Temps moyen", f"{avg_response:.0f}ms")
+
+            # Stats par token (si tous sélectionnés)
+            if selected_token_filter == "all" and len(tokens) > 0:
+                with st.expander("📊 Répartition par token", expanded=True):
+                    token_stats = {}
+                    for l in logs:
+                        tid = l.get("token_id")
+                        tname = l.get("token_name", f"Token #{tid}")
+                        if tid not in token_stats:
+                            token_stats[tid] = {"name": tname, "calls": 0, "success": 0, "ads": 0}
+                        token_stats[tid]["calls"] += 1
+                        if l.get("success"):
+                            token_stats[tid]["success"] += 1
+                        token_stats[tid]["ads"] += l.get("ads_count", 0) or 0
+
+                    for tid, stats in token_stats.items():
+                        success_rate = (stats["success"] / stats["calls"] * 100) if stats["calls"] > 0 else 0
+                        col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
+                        with col1:
+                            st.markdown(f"**{stats['name']}**")
+                        with col2:
+                            st.markdown(f"📞 {stats['calls']} appels")
+                        with col3:
+                            st.markdown(f"✅ {success_rate:.0f}%")
+                        with col4:
+                            st.markdown(f"📢 {stats['ads']:,} ads")
+
+            # Tableau des logs
+            st.markdown("#### 📝 Historique des appels")
+
+            log_data = []
+            for l in logs:
+                action_icon = {
+                    "search": "🔍",
+                    "page_fetch": "📄",
+                    "verification": "✅",
+                    "rate_limit": "⏱️"
+                }.get(l.get("action_type", ""), "❓")
+
+                status_icon = "✅" if l.get("success") else "❌"
+
+                log_data.append({
+                    "Date": l.get("created_at").strftime("%d/%m %H:%M") if l.get("created_at") else "-",
+                    "Token": l.get("token_name", "-")[:15],
+                    "Action": f"{action_icon} {l.get('action_type', '-')}",
+                    "Mot-clé": (l.get("keyword") or "-")[:20],
+                    "Pays": l.get("countries") or "-",
+                    "Ads": l.get("ads_count") or 0,
+                    "Temps": f"{l.get('response_time_ms') or 0}ms",
+                    "Status": status_icon,
+                    "Erreur": (l.get("error_message") or "")[:30]
+                })
+
+            if log_data:
+                st.dataframe(
+                    log_data,
+                    use_container_width=True,
+                    hide_index=True
+                )
+        else:
+            st.info("Aucun log trouvé pour les critères sélectionnés.")
+            st.caption("💡 Les logs sont enregistrés automatiquement lors des recherches avec la fonction de logging activée.")
+
+        # Stats détaillées par token (expandeur)
+        with st.expander("🔬 Statistiques détaillées par token"):
+            for t in tokens:
+                st.markdown(f"##### {t['name']}")
+                stats = get_token_stats_detailed(db, t["id"], days=30)
+
+                if stats:
+                    cols = st.columns(4)
+                    with cols[0]:
+                        st.metric("Total appels", stats.get("total_calls", 0))
+                    with cols[1]:
+                        st.metric("Taux succès", f"{stats.get('success_rate', 0):.1f}%")
+                    with cols[2]:
+                        st.metric("Temps moyen", f"{stats.get('avg_response_time', 0):.0f}ms")
+                    with cols[3]:
+                        st.metric("Total ads", f"{stats.get('total_ads', 0):,}")
+
+                    # Top mots-clés
+                    if stats.get("top_keywords"):
+                        st.markdown("**Top mots-clés recherchés:**")
+                        for kw in stats["top_keywords"][:5]:
+                            st.caption(f"• {kw['keyword']}: {kw['count']} recherche(s)")
+
+                    # Distribution par type
+                    if stats.get("by_action_type"):
+                        st.markdown("**Répartition par type:**")
+                        for act in stats["by_action_type"]:
+                            act_icon = {"search": "🔍", "page_fetch": "📄", "verification": "✅", "rate_limit": "⏱️"}.get(act["type"], "❓")
+                            st.caption(f"• {act_icon} {act['type']}: {act['count']} appel(s)")
+                else:
+                    st.caption("Aucune statistique disponible")
+
+                st.markdown("---")
+
+    else:
+        st.warning("Base de données non connectée.")
 
     st.markdown("---")
 

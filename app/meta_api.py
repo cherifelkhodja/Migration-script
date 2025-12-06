@@ -50,17 +50,18 @@ class TokenRotator:
     def __init__(self, tokens_with_proxies: List[Dict] = None, tokens: List[str] = None, db=None):
         """
         Args:
-            tokens_with_proxies: Liste de dicts [{"token": "...", "proxy": "http://...", "name": "..."}]
+            tokens_with_proxies: Liste de dicts [{"id": 1, "token": "...", "proxy": "http://...", "name": "..."}]
             tokens: Liste de tokens (fallback si tokens_with_proxies non fourni)
             db: DatabaseManager pour enregistrer les stats (optionnel)
         """
         self._lock = Lock()
         self._db = db
 
-        # Initialiser les tokens avec proxies
+        # Initialiser les tokens avec proxies et IDs
         if tokens_with_proxies:
             self._token_data = [
                 {
+                    "id": t.get("id"),  # ID depuis la base de données
                     "token": t["token"].strip(),
                     "proxy": t.get("proxy") or None,
                     "name": t.get("name", f"Token #{i+1}")
@@ -69,9 +70,9 @@ class TokenRotator:
                 if t.get("token") and t["token"].strip()
             ]
         elif tokens:
-            # Fallback: tokens sans proxies
+            # Fallback: tokens sans proxies ni IDs
             self._token_data = [
-                {"token": t.strip(), "proxy": None, "name": f"Token #{i+1}"}
+                {"id": None, "token": t.strip(), "proxy": None, "name": f"Token #{i+1}"}
                 for i, t in enumerate(tokens)
                 if t and t.strip()
             ]
@@ -105,6 +106,27 @@ class TokenRotator:
             if not self._token_data:
                 return None
             return self._token_data[self._current_index].get("proxy")
+
+    def get_current_token_id(self) -> Optional[int]:
+        """Retourne l'ID du token courant (depuis la base de données)"""
+        with self._lock:
+            if not self._token_data:
+                return None
+            return self._token_data[self._current_index].get("id")
+
+    def get_current_token_name(self) -> str:
+        """Retourne le nom du token courant"""
+        with self._lock:
+            if not self._token_data:
+                return "Unknown"
+            return self._token_data[self._current_index].get("name", "Unknown")
+
+    def get_current_token_full_info(self) -> Dict:
+        """Retourne toutes les infos du token courant (id, token, proxy, name)"""
+        with self._lock:
+            if not self._token_data:
+                return {"id": None, "token": "", "proxy": None, "name": "Unknown"}
+            return self._token_data[self._current_index].copy()
 
     def get_current_token_and_proxy(self) -> Tuple[str, Optional[str]]:
         """Retourne le token et son proxy"""
@@ -463,6 +485,14 @@ class MetaAdsClient:
         # Set current keyword for API tracking
         self._current_keyword = keyword
 
+        # Capture du token utilisé pour le logging
+        rotator = get_token_rotator()
+        token_id = rotator.get_current_token_id() if rotator else None
+        token_name = rotator.get_current_token_name() if rotator else "Default"
+        start_time = time.time()
+        error_msg = None
+        success = True
+
         url = ADS_ARCHIVE
         params = {
             "search_terms": keyword,
@@ -483,6 +513,8 @@ class MetaAdsClient:
                 data = self._get_api(url, params)
             except RuntimeError as e:
                 err_msg = str(e)
+                error_msg = err_msg
+                success = False
                 # Log l'erreur pour diagnostic
                 print(f"❌ Erreur API Meta pour '{keyword}': {err_msg}")
 
@@ -515,6 +547,26 @@ class MetaAdsClient:
             url = next_url
             params = {}
 
+        # Log de l'utilisation du token
+        response_time_ms = int((time.time() - start_time) * 1000)
+        if token_id and _token_db:
+            try:
+                from app.database import log_token_usage
+                log_token_usage(
+                    _token_db,
+                    token_id=token_id,
+                    token_name=token_name,
+                    action_type="search",
+                    keyword=keyword,
+                    countries=",".join(countries) if countries else None,
+                    success=success,
+                    ads_count=len(all_ads),
+                    error_message=error_msg,
+                    response_time_ms=response_time_ms
+                )
+            except Exception as log_err:
+                print(f"⚠️ Erreur logging token: {log_err}")
+
         return all_ads
 
     def fetch_all_ads_for_page(
@@ -534,6 +586,14 @@ class MetaAdsClient:
         Returns:
             Tuple (liste des annonces, nombre total)
         """
+        # Capture du token utilisé pour le logging
+        rotator = get_token_rotator()
+        token_id = rotator.get_current_token_id() if rotator else None
+        token_name = rotator.get_current_token_name() if rotator else "Default"
+        start_time = time.time()
+        error_msg = None
+        success = True
+
         params = {
             "search_page_ids": json.dumps([str(page_id)]),
             "ad_active_status": "ACTIVE",
@@ -550,7 +610,28 @@ class MetaAdsClient:
         while True:
             try:
                 data = self._get_api(url, params)
-            except:
+            except Exception as e:
+                error_msg = str(e)
+                success = False
+                # Log de l'utilisation du token (erreur)
+                response_time_ms = int((time.time() - start_time) * 1000)
+                if token_id and _token_db:
+                    try:
+                        from app.database import log_token_usage
+                        log_token_usage(
+                            _token_db,
+                            token_id=token_id,
+                            token_name=token_name,
+                            action_type="page_fetch",
+                            page_id=str(page_id),
+                            countries=",".join(countries) if countries else None,
+                            success=False,
+                            ads_count=len(all_ads),
+                            error_message=error_msg,
+                            response_time_ms=response_time_ms
+                        )
+                    except Exception as log_err:
+                        print(f"⚠️ Erreur logging token: {log_err}")
                 return all_ads, -1
 
             batch = data.get("data", [])
@@ -565,6 +646,25 @@ class MetaAdsClient:
 
             url = next_url
             params = {}
+
+        # Log de l'utilisation du token (succès)
+        response_time_ms = int((time.time() - start_time) * 1000)
+        if token_id and _token_db:
+            try:
+                from app.database import log_token_usage
+                log_token_usage(
+                    _token_db,
+                    token_id=token_id,
+                    token_name=token_name,
+                    action_type="page_fetch",
+                    page_id=str(page_id),
+                    countries=",".join(countries) if countries else None,
+                    success=True,
+                    ads_count=len(all_ads),
+                    response_time_ms=response_time_ms
+                )
+            except Exception as log_err:
+                print(f"⚠️ Erreur logging token: {log_err}")
 
         return all_ads, len(all_ads)
 

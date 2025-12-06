@@ -315,6 +315,37 @@ class MetaToken(Base):
     )
 
 
+class TokenUsageLog(Base):
+    """Logs detailles d'utilisation des tokens Meta API"""
+    __tablename__ = "token_usage_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    token_id = Column(Integer, nullable=False, index=True)
+    token_name = Column(String(100))
+
+    # Type d'action
+    action_type = Column(String(50))  # "search", "page_fetch", "verification", "rate_limit"
+
+    # Details de la recherche
+    keyword = Column(String(255))
+    countries = Column(String(100))
+    page_id = Column(String(50))
+
+    # Resultats
+    success = Column(Boolean, default=True)
+    ads_count = Column(Integer, default=0)
+    error_message = Column(Text)
+    response_time_ms = Column(Integer)  # Temps de reponse en ms
+
+    # Metadonnees
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('idx_token_log_date', 'created_at'),
+        Index('idx_token_log_token', 'token_id', 'created_at'),
+    )
+
+
 class SearchLog(Base):
     """Table search_logs - Historique complet des recherches"""
     __tablename__ = "search_logs"
@@ -3365,7 +3396,7 @@ def get_active_meta_tokens_with_proxies(db: DatabaseManager) -> List[Dict]:
     Récupère les tokens actifs avec leurs proxies associés.
 
     Returns:
-        Liste de dicts: [{"token": "...", "proxy": "http://..."}]
+        Liste de dicts: [{"id": 1, "token": "...", "proxy": "http://...", "name": "..."}]
     """
     with db.get_session() as session:
         now = datetime.utcnow()
@@ -3373,11 +3404,12 @@ def get_active_meta_tokens_with_proxies(db: DatabaseManager) -> List[Dict]:
             MetaToken.is_active == True
         ).order_by(MetaToken.id).all()
 
-        # Filtrer les tokens rate-limited et retourner token + proxy
+        # Filtrer les tokens rate-limited et retourner id + token + proxy
         result = []
         for t in tokens:
             if not t.rate_limited_until or t.rate_limited_until <= now:
                 result.append({
+                    "id": t.id,
                     "token": t.token,
                     "proxy": t.proxy_url,
                     "name": t.name or f"Token #{t.id}"
@@ -3482,6 +3514,330 @@ def reset_token_stats(db: DatabaseManager, token_id: int) -> bool:
         token.last_error_message = None
         token.rate_limited_until = None
         return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# LOGS DETAILLES DES TOKENS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def log_token_usage(
+    db: DatabaseManager,
+    token_id: int,
+    token_name: str,
+    action_type: str,
+    keyword: str = None,
+    countries: str = None,
+    page_id: str = None,
+    success: bool = True,
+    ads_count: int = 0,
+    error_message: str = None,
+    response_time_ms: int = None
+) -> int:
+    """
+    Enregistre une utilisation de token dans les logs.
+
+    Args:
+        token_id: ID du token
+        token_name: Nom du token
+        action_type: Type d'action (search, page_fetch, verification, rate_limit)
+        keyword: Mot-cle recherche (optionnel)
+        countries: Pays (optionnel)
+        page_id: ID de page (optionnel)
+        success: Succes ou echec
+        ads_count: Nombre d'ads trouvees
+        error_message: Message d'erreur (optionnel)
+        response_time_ms: Temps de reponse en ms
+
+    Returns:
+        ID du log cree
+    """
+    with db.get_session() as session:
+        log_entry = TokenUsageLog(
+            token_id=token_id,
+            token_name=token_name,
+            action_type=action_type,
+            keyword=keyword[:255] if keyword else None,
+            countries=countries[:100] if countries else None,
+            page_id=page_id,
+            success=success,
+            ads_count=ads_count,
+            error_message=error_message,
+            response_time_ms=response_time_ms
+        )
+        session.add(log_entry)
+        session.flush()
+        return log_entry.id
+
+
+def get_token_usage_logs(
+    db: DatabaseManager,
+    token_id: int = None,
+    days: int = 7,
+    limit: int = 100,
+    action_type: str = None
+) -> List[Dict]:
+    """
+    Recupere les logs d'utilisation des tokens.
+
+    Args:
+        token_id: Filtrer par token (optionnel)
+        days: Nombre de jours a recuperer
+        limit: Nombre max de logs
+        action_type: Filtrer par type d'action
+
+    Returns:
+        Liste des logs
+    """
+    from sqlalchemy import desc
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    with db.get_session() as session:
+        query = session.query(TokenUsageLog).filter(
+            TokenUsageLog.created_at >= cutoff
+        )
+
+        if token_id:
+            query = query.filter(TokenUsageLog.token_id == token_id)
+
+        if action_type:
+            query = query.filter(TokenUsageLog.action_type == action_type)
+
+        logs = query.order_by(desc(TokenUsageLog.created_at)).limit(limit).all()
+
+        return [
+            {
+                "id": log.id,
+                "token_id": log.token_id,
+                "token_name": log.token_name,
+                "action_type": log.action_type,
+                "keyword": log.keyword,
+                "countries": log.countries,
+                "page_id": log.page_id,
+                "success": log.success,
+                "ads_count": log.ads_count,
+                "error_message": log.error_message,
+                "response_time_ms": log.response_time_ms,
+                "created_at": log.created_at
+            }
+            for log in logs
+        ]
+
+
+def get_token_stats_detailed(db: DatabaseManager, token_id: int, days: int = 30) -> Dict:
+    """
+    Recupere les statistiques detaillees d'un token.
+
+    Args:
+        token_id: ID du token
+        days: Periode en jours
+
+    Returns:
+        Dict avec stats detaillees
+    """
+    from sqlalchemy import func
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    with db.get_session() as session:
+        # Stats globales
+        total_calls = session.query(func.count(TokenUsageLog.id)).filter(
+            TokenUsageLog.token_id == token_id,
+            TokenUsageLog.created_at >= cutoff
+        ).scalar() or 0
+
+        successful = session.query(func.count(TokenUsageLog.id)).filter(
+            TokenUsageLog.token_id == token_id,
+            TokenUsageLog.created_at >= cutoff,
+            TokenUsageLog.success == True
+        ).scalar() or 0
+
+        total_ads = session.query(func.sum(TokenUsageLog.ads_count)).filter(
+            TokenUsageLog.token_id == token_id,
+            TokenUsageLog.created_at >= cutoff
+        ).scalar() or 0
+
+        avg_response = session.query(func.avg(TokenUsageLog.response_time_ms)).filter(
+            TokenUsageLog.token_id == token_id,
+            TokenUsageLog.created_at >= cutoff,
+            TokenUsageLog.response_time_ms != None
+        ).scalar() or 0
+
+        # Stats par type d'action
+        by_action = session.query(
+            TokenUsageLog.action_type,
+            func.count(TokenUsageLog.id),
+            func.sum(TokenUsageLog.ads_count)
+        ).filter(
+            TokenUsageLog.token_id == token_id,
+            TokenUsageLog.created_at >= cutoff
+        ).group_by(TokenUsageLog.action_type).all()
+
+        # Derniers mots-cles recherches
+        recent_keywords = session.query(
+            TokenUsageLog.keyword,
+            TokenUsageLog.created_at,
+            TokenUsageLog.ads_count,
+            TokenUsageLog.success
+        ).filter(
+            TokenUsageLog.token_id == token_id,
+            TokenUsageLog.keyword != None,
+            TokenUsageLog.created_at >= cutoff
+        ).order_by(TokenUsageLog.created_at.desc()).limit(20).all()
+
+        # Rate limits
+        rate_limits = session.query(func.count(TokenUsageLog.id)).filter(
+            TokenUsageLog.token_id == token_id,
+            TokenUsageLog.action_type == "rate_limit",
+            TokenUsageLog.created_at >= cutoff
+        ).scalar() or 0
+
+        return {
+            "total_calls": total_calls,
+            "successful": successful,
+            "failed": total_calls - successful,
+            "success_rate": (successful / total_calls * 100) if total_calls > 0 else 0,
+            "total_ads_found": total_ads,
+            "avg_response_ms": round(avg_response, 0),
+            "rate_limits": rate_limits,
+            "by_action": [
+                {"action": a[0], "count": a[1], "ads": a[2] or 0}
+                for a in by_action
+            ],
+            "recent_keywords": [
+                {
+                    "keyword": k[0],
+                    "date": k[1],
+                    "ads": k[2],
+                    "success": k[3]
+                }
+                for k in recent_keywords
+            ]
+        }
+
+
+def verify_meta_token(db: DatabaseManager, token_id: int) -> Dict:
+    """
+    Verifie si un token Meta est toujours valide en faisant un appel test.
+
+    Args:
+        token_id: ID du token a verifier
+
+    Returns:
+        Dict avec resultat de la verification
+    """
+    import requests
+    import time
+
+    with db.get_session() as session:
+        token = session.query(MetaToken).filter(MetaToken.id == token_id).first()
+        if not token:
+            return {"valid": False, "error": "Token non trouve"}
+
+        token_value = token.token
+        token_name = token.name
+        proxy_url = token.proxy_url
+
+    # Preparer le proxy si present
+    proxies = None
+    if proxy_url:
+        proxies = {"http": proxy_url, "https": proxy_url}
+
+    # Appel test simple - compter les ads pour une recherche vide
+    test_url = "https://graph.facebook.com/v21.0/ads_archive"
+    params = {
+        "access_token": token_value,
+        "search_terms": "test",
+        "ad_reached_countries": '["FR"]',
+        "ad_active_status": "ACTIVE",
+        "limit": 1,
+        "fields": "id"
+    }
+
+    start_time = time.time()
+    result = {
+        "valid": False,
+        "token_id": token_id,
+        "token_name": token_name,
+        "response_time_ms": 0,
+        "error": None
+    }
+
+    try:
+        response = requests.get(
+            test_url,
+            params=params,
+            proxies=proxies,
+            timeout=30,
+            verify=False
+        )
+        response_time = int((time.time() - start_time) * 1000)
+        result["response_time_ms"] = response_time
+
+        if response.status_code == 200:
+            data = response.json()
+            if "data" in data:
+                result["valid"] = True
+                result["message"] = "Token valide et fonctionnel"
+
+                # Logger la verification reussie
+                log_token_usage(
+                    db, token_id, token_name, "verification",
+                    success=True, response_time_ms=response_time
+                )
+            else:
+                result["error"] = data.get("error", {}).get("message", "Reponse invalide")
+
+                log_token_usage(
+                    db, token_id, token_name, "verification",
+                    success=False, error_message=result["error"], response_time_ms=response_time
+                )
+        else:
+            error_data = response.json() if response.text else {}
+            error_msg = error_data.get("error", {}).get("message", f"HTTP {response.status_code}")
+            result["error"] = error_msg
+
+            # Detecter les erreurs specifiques
+            if "OAuth" in error_msg or "token" in error_msg.lower():
+                result["error_type"] = "token_expired"
+            elif "rate" in error_msg.lower() or "limit" in error_msg.lower():
+                result["error_type"] = "rate_limited"
+            else:
+                result["error_type"] = "unknown"
+
+            log_token_usage(
+                db, token_id, token_name, "verification",
+                success=False, error_message=error_msg, response_time_ms=response_time
+            )
+
+    except requests.exceptions.Timeout:
+        result["error"] = "Timeout - pas de reponse"
+        result["error_type"] = "timeout"
+    except requests.exceptions.ProxyError:
+        result["error"] = "Erreur proxy - verifiez la configuration"
+        result["error_type"] = "proxy_error"
+    except Exception as e:
+        result["error"] = str(e)
+        result["error_type"] = "exception"
+
+    return result
+
+
+def verify_all_tokens(db: DatabaseManager) -> List[Dict]:
+    """
+    Verifie tous les tokens actifs.
+
+    Returns:
+        Liste des resultats de verification
+    """
+    tokens = get_all_meta_tokens(db, active_only=True)
+    results = []
+
+    for token in tokens:
+        result = verify_meta_token(db, token["id"])
+        results.append(result)
+
+    return results
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
