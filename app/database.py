@@ -470,6 +470,72 @@ class APICallLog(Base):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# TABLES D'ARCHIVE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SuiviPageArchive(Base):
+    """Archive de suivi_page - Données historiques >90 jours"""
+    __tablename__ = "suivi_page_archive"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    original_id = Column(Integer)  # ID original de la table source
+    cle_suivi = Column(String(100))
+    page_id = Column(String(50), nullable=False, index=True)
+    nom_site = Column(String(255))
+    nombre_ads_active = Column(Integer, default=0)
+    nombre_produits = Column(Integer, default=0)
+    date_scan = Column(DateTime)
+    archived_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AdsRechercheArchive(Base):
+    """Archive de liste_ads_recherche - Données historiques >90 jours"""
+    __tablename__ = "liste_ads_recherche_archive"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    original_id = Column(Integer)
+    ad_id = Column(String(50), nullable=False, index=True)
+    page_id = Column(String(50), nullable=False, index=True)
+    page_name = Column(String(255))
+    ad_creation_time = Column(DateTime)
+    ad_creative_bodies = Column(Text)
+    ad_creative_link_captions = Column(Text)
+    ad_creative_link_titles = Column(Text)
+    ad_snapshot_url = Column(String(500))
+    eu_total_reach = Column(String(100))
+    languages = Column(String(100))
+    country = Column(String(50))
+    publisher_platforms = Column(String(200))
+    target_ages = Column(String(100))
+    target_gender = Column(String(50))
+    beneficiary_payers = Column(Text)
+    date_scan = Column(DateTime)
+    archived_at = Column(DateTime, default=datetime.utcnow)
+
+
+class WinningAdsArchive(Base):
+    """Archive de winning_ads - Données historiques >90 jours"""
+    __tablename__ = "winning_ads_archive"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    original_id = Column(Integer)
+    ad_id = Column(String(50), nullable=False, index=True)
+    page_id = Column(String(50), nullable=False, index=True)
+    page_name = Column(String(255))
+    ad_creation_time = Column(DateTime)
+    ad_age_days = Column(Integer)
+    eu_total_reach = Column(Integer)
+    matched_criteria = Column(String(100))
+    ad_creative_bodies = Column(Text)
+    ad_creative_link_captions = Column(Text)
+    ad_creative_link_titles = Column(Text)
+    ad_snapshot_url = Column(String(500))
+    lien_site = Column(String(500))
+    date_scan = Column(DateTime)
+    archived_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # GESTION DE LA CONNEXION
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -4454,3 +4520,161 @@ def get_pages_count(db: DatabaseManager) -> Dict:
             "with_fr": with_fr,
             "without_fr": total - with_fr
         }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FONCTIONS D'ARCHIVAGE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def get_archive_stats(db: DatabaseManager) -> Dict:
+    """
+    Recupere les statistiques des tables principales et archives.
+
+    Returns:
+        Dict avec comptages pour chaque table
+    """
+    from sqlalchemy import func
+
+    stats = {}
+
+    with db.get_session() as session:
+        # Tables principales
+        stats["suivi_page"] = session.query(func.count(SuiviPage.id)).scalar() or 0
+        stats["liste_ads_recherche"] = session.query(func.count(AdsRecherche.id)).scalar() or 0
+        stats["winning_ads"] = session.query(func.count(WinningAds.id)).scalar() or 0
+
+        # Tables d'archive
+        stats["suivi_page_archive"] = session.query(func.count(SuiviPageArchive.id)).scalar() or 0
+        stats["liste_ads_recherche_archive"] = session.query(func.count(AdsRechercheArchive.id)).scalar() or 0
+        stats["winning_ads_archive"] = session.query(func.count(WinningAdsArchive.id)).scalar() or 0
+
+        # Donnees archivables (>90 jours par defaut)
+        threshold = datetime.utcnow() - timedelta(days=90)
+        stats["suivi_page_archivable"] = session.query(func.count(SuiviPage.id)).filter(
+            SuiviPage.date_scan < threshold
+        ).scalar() or 0
+        stats["liste_ads_recherche_archivable"] = session.query(func.count(AdsRecherche.id)).filter(
+            AdsRecherche.date_scan < threshold
+        ).scalar() or 0
+        stats["winning_ads_archivable"] = session.query(func.count(WinningAds.id)).filter(
+            WinningAds.date_scan < threshold
+        ).scalar() or 0
+
+    return stats
+
+
+def archive_old_data(
+    db: DatabaseManager,
+    days_threshold: int = 90,
+    batch_size: int = 1000
+) -> Dict:
+    """
+    Archive les donnees plus vieilles que le seuil specifie.
+
+    Args:
+        db: DatabaseManager
+        days_threshold: Nombre de jours (defaut: 90)
+        batch_size: Taille des batches pour eviter les timeouts
+
+    Returns:
+        Dict avec comptages des entrees archivees
+    """
+    threshold = datetime.utcnow() - timedelta(days=days_threshold)
+    archived = {"suivi_page": 0, "liste_ads_recherche": 0, "winning_ads": 0}
+
+    # Archive suivi_page
+    with db.get_session() as session:
+        while True:
+            old_entries = session.query(SuiviPage).filter(
+                SuiviPage.date_scan < threshold
+            ).limit(batch_size).all()
+
+            if not old_entries:
+                break
+
+            for entry in old_entries:
+                archive_entry = SuiviPageArchive(
+                    original_id=entry.id,
+                    cle_suivi=entry.cle_suivi,
+                    page_id=entry.page_id,
+                    nom_site=entry.nom_site,
+                    nombre_ads_active=entry.nombre_ads_active,
+                    nombre_produits=entry.nombre_produits,
+                    date_scan=entry.date_scan
+                )
+                session.add(archive_entry)
+                session.delete(entry)
+                archived["suivi_page"] += 1
+
+            session.commit()
+
+    # Archive liste_ads_recherche
+    with db.get_session() as session:
+        while True:
+            old_entries = session.query(AdsRecherche).filter(
+                AdsRecherche.date_scan < threshold
+            ).limit(batch_size).all()
+
+            if not old_entries:
+                break
+
+            for entry in old_entries:
+                archive_entry = AdsRechercheArchive(
+                    original_id=entry.id,
+                    ad_id=entry.ad_id,
+                    page_id=entry.page_id,
+                    page_name=entry.page_name,
+                    ad_creation_time=entry.ad_creation_time,
+                    ad_creative_bodies=entry.ad_creative_bodies,
+                    ad_creative_link_captions=entry.ad_creative_link_captions,
+                    ad_creative_link_titles=entry.ad_creative_link_titles,
+                    ad_snapshot_url=entry.ad_snapshot_url,
+                    eu_total_reach=entry.eu_total_reach,
+                    languages=entry.languages,
+                    country=entry.country,
+                    publisher_platforms=entry.publisher_platforms,
+                    target_ages=entry.target_ages,
+                    target_gender=entry.target_gender,
+                    beneficiary_payers=entry.beneficiary_payers,
+                    date_scan=entry.date_scan
+                )
+                session.add(archive_entry)
+                session.delete(entry)
+                archived["liste_ads_recherche"] += 1
+
+            session.commit()
+
+    # Archive winning_ads
+    with db.get_session() as session:
+        while True:
+            old_entries = session.query(WinningAds).filter(
+                WinningAds.date_scan < threshold
+            ).limit(batch_size).all()
+
+            if not old_entries:
+                break
+
+            for entry in old_entries:
+                archive_entry = WinningAdsArchive(
+                    original_id=entry.id,
+                    ad_id=entry.ad_id,
+                    page_id=entry.page_id,
+                    page_name=entry.page_name,
+                    ad_creation_time=entry.ad_creation_time,
+                    ad_age_days=entry.ad_age_days,
+                    eu_total_reach=entry.eu_total_reach,
+                    matched_criteria=entry.matched_criteria,
+                    ad_creative_bodies=entry.ad_creative_bodies,
+                    ad_creative_link_captions=entry.ad_creative_link_captions,
+                    ad_creative_link_titles=entry.ad_creative_link_titles,
+                    ad_snapshot_url=entry.ad_snapshot_url,
+                    lien_site=entry.lien_site,
+                    date_scan=entry.date_scan
+                )
+                session.add(archive_entry)
+                session.delete(entry)
+                archived["winning_ads"] += 1
+
+            session.commit()
+
+    return archived

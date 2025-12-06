@@ -6020,6 +6020,63 @@ def render_settings():
         else:
             st.success("✅ Aucun doublon détecté")
 
+        # ═══════════════════════════════════════════════════════════════════════════
+        # ARCHIVAGE DES DONNEES ANCIENNES
+        # ═══════════════════════════════════════════════════════════════════════════
+        st.markdown("---")
+        st.subheader("📦 Archivage des anciennes donnees")
+        st.markdown("Deplacez les donnees de plus de 90 jours vers les tables d'archive pour optimiser les performances.")
+
+        from app.database import get_archive_stats, archive_old_data
+
+        try:
+            archive_stats = get_archive_stats(db)
+
+            # Stats actuelles
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown("**Tables principales**")
+                st.metric("Suivi Page", archive_stats.get("suivi_page", 0))
+                st.metric("Ads Recherche", archive_stats.get("liste_ads_recherche", 0))
+                st.metric("Winning Ads", archive_stats.get("winning_ads", 0))
+            with col2:
+                st.markdown("**Archivables (>90j)**")
+                st.metric("Suivi Page", archive_stats.get("suivi_page_archivable", 0))
+                st.metric("Ads Recherche", archive_stats.get("liste_ads_recherche_archivable", 0))
+                st.metric("Winning Ads", archive_stats.get("winning_ads_archivable", 0))
+            with col3:
+                st.markdown("**Deja archives**")
+                st.metric("Suivi Page", archive_stats.get("suivi_page_archive", 0))
+                st.metric("Ads Recherche", archive_stats.get("liste_ads_recherche_archive", 0))
+                st.metric("Winning Ads", archive_stats.get("winning_ads_archive", 0))
+
+            # Total archivable
+            total_archivable = (
+                archive_stats.get("suivi_page_archivable", 0) +
+                archive_stats.get("liste_ads_recherche_archivable", 0) +
+                archive_stats.get("winning_ads_archivable", 0)
+            )
+
+            if total_archivable > 0:
+                st.warning(f"⚠️ {total_archivable:,} entrees peuvent etre archivees")
+
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    days_threshold = st.number_input("Seuil (jours)", min_value=30, max_value=365, value=90, key="archive_days")
+
+                if st.button("📦 Lancer l'archivage", type="primary", key="archive_btn"):
+                    with st.spinner("Archivage en cours..."):
+                        result = archive_old_data(db, days_threshold=days_threshold)
+                        total_archived = sum(result.values())
+                        st.success(f"✅ {total_archived:,} entrees archivees")
+                        st.json(result)
+                        st.rerun()
+            else:
+                st.success("✅ Aucune donnee a archiver")
+
+        except Exception as e:
+            st.error(f"Erreur: {e}")
+
     else:
         st.warning("Base de données non connectée")
 
