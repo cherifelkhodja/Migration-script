@@ -5451,537 +5451,277 @@ def render_blacklist():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def render_settings():
-    """Page Settings - Paramètres"""
+    """Page Settings - Paramètres avec navigation par onglets"""
     st.title("⚙️ Settings")
-    st.markdown("Configuration de l'application")
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # GESTION DES TOKENS META API
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.subheader("🔑 Tokens Meta API")
-    st.markdown("Gérez vos tokens Meta API pour la rotation automatique anti-ban.")
 
     db = get_database()
 
+    # ═══ STATUS INDICATORS ═══
     if db:
-        from app.database import (
-            get_all_meta_tokens, add_meta_token, delete_meta_token,
-            update_meta_token, reset_token_stats, clear_rate_limit, ensure_tables_exist
-        )
-
-        # S'assurer que les tables existent
+        from app.database import get_all_meta_tokens, get_app_setting, ensure_tables_exist
         ensure_tables_exist(db)
-
-        # Récupérer tous les tokens
         tokens = get_all_meta_tokens(db)
-
-        # Stats globales
+        active_tokens = len([t for t in tokens if t["is_active"] and not t.get("is_rate_limited")])
         total_tokens = len(tokens)
-        active_tokens = len([t for t in tokens if t["is_active"]])
-        rate_limited = len([t for t in tokens if t.get("is_rate_limited")])
+        gemini_ok = bool(os.getenv("GEMINI_API_KEY", ""))
+        blacklist = get_blacklist(db) if db else []
+
+        # Status bar
+        status_cols = st.columns(5)
+        with status_cols[0]:
+            token_status = "✅" if active_tokens > 0 else "❌"
+            st.caption(f"🔑 Tokens: {active_tokens}/{total_tokens} {token_status}")
+        with status_cols[1]:
+            st.caption(f"🗄️ BDD: ✅ Connectée")
+        with status_cols[2]:
+            gemini_status = "✅" if gemini_ok else "❌"
+            st.caption(f"🤖 Gemini: {gemini_status}")
+        with status_cols[3]:
+            st.caption(f"🚫 Blacklist: {len(blacklist)}")
+        with status_cols[4]:
+            st.caption(f"📊 Config: ✅")
+    else:
+        st.warning("🗄️ Base de données non connectée")
+
+    st.markdown("---")
+
+    # ═══ NAVIGATION PAR ONGLETS ═══
+    tab_api, tab_config, tab_classification, tab_blacklist, tab_maintenance = st.tabs([
+        "🔑 API & Connexions",
+        "📊 Configuration",
+        "🤖 Classification",
+        "🚫 Blacklist",
+        "🛠️ Maintenance"
+    ])
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TAB 1: API & CONNEXIONS
+    # ═══════════════════════════════════════════════════════════════════════════
+    with tab_api:
+        render_settings_api_tab(db)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TAB 2: CONFIGURATION
+    # ═══════════════════════════════════════════════════════════════════════════
+    with tab_config:
+        render_settings_config_tab(db)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TAB 3: CLASSIFICATION
+    # ═══════════════════════════════════════════════════════════════════════════
+    with tab_classification:
+        render_settings_classification_tab(db)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TAB 4: BLACKLIST
+    # ═══════════════════════════════════════════════════════════════════════════
+    with tab_blacklist:
+        render_settings_blacklist_tab(db)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # TAB 5: MAINTENANCE
+    # ═══════════════════════════════════════════════════════════════════════════
+    with tab_maintenance:
+        render_settings_maintenance_tab(db)
+
+
+def render_settings_api_tab(db):
+    """Onglet API & Connexions"""
+    if not db:
+        st.warning("Base de données non connectée")
+        return
+
+    from app.database import (
+        get_all_meta_tokens, add_meta_token, delete_meta_token,
+        update_meta_token, reset_token_stats, clear_rate_limit,
+        get_token_usage_logs, get_token_stats_detailed, verify_all_tokens,
+        get_search_logs_stats, get_cache_stats, clear_expired_cache, clear_all_cache
+    )
+
+    # ═══ SECTION: TOKENS META API ═══
+    st.subheader("🔑 Tokens Meta API")
+    st.caption("Gérez vos tokens pour la rotation automatique anti-ban")
+
+    tokens = get_all_meta_tokens(db)
+
+    # Stats globales
+    total_tokens = len(tokens)
+    active_tokens = len([t for t in tokens if t["is_active"]])
+    rate_limited = len([t for t in tokens if t.get("is_rate_limited")])
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total tokens", total_tokens)
+    col2.metric("Tokens actifs", active_tokens)
+    col3.metric("Rate-limited", rate_limited, delta=None if rate_limited == 0 else f"-{rate_limited}", delta_color="inverse")
+
+    # Ajouter un nouveau token
+    with st.expander("➕ Ajouter un nouveau token", expanded=len(tokens) == 0):
+        new_token_name = st.text_input("Nom du token (optionnel)", placeholder="Token Principal", key="new_token_name")
+        new_token_value = st.text_input("Token Meta API", type="password", key="new_token_value",
+                                        help="Collez votre token Meta Ads API ici")
+        new_proxy_url = st.text_input("Proxy URL (optionnel)", placeholder="http://user:pass@ip:port", key="new_proxy_url",
+                                      help="Proxy associé à ce token pour éviter les bans IP")
+
+        if st.button("Ajouter le token", type="primary", key="btn_add_token"):
+            if new_token_value and new_token_value.strip():
+                token_id = add_meta_token(
+                    db,
+                    new_token_value.strip(),
+                    new_token_name.strip() or None,
+                    new_proxy_url.strip() or None
+                )
+                if token_id:
+                    st.success(f"✅ Token ajouté avec succès (ID: {token_id})")
+                    st.rerun()
+            else:
+                st.error("Veuillez entrer un token valide")
+
+    # Liste des tokens existants
+    if tokens:
+        st.markdown("##### Tokens configurés")
+
+        for t in tokens:
+            status_icon = "🟢" if t["is_active"] and not t.get("is_rate_limited") else "🔴" if t.get("is_rate_limited") else "⚫"
+            rate_info = " ⏱️ Rate-limited" if t.get("is_rate_limited") else ""
+            proxy_info = " 🌐" if t.get("proxy_url") else ""
+
+            with st.expander(f"{status_icon} **{t['name']}** - {t['token_masked']}{proxy_info}{rate_info}"):
+                # Stats
+                stat_cols = st.columns(4)
+                stat_cols[0].metric("Appels", t["total_calls"])
+                stat_cols[1].metric("Erreurs", t["total_errors"])
+                stat_cols[2].metric("Rate limits", t["rate_limit_hits"])
+                stat_cols[3].metric("Statut", "Actif" if t["is_active"] else "Inactif")
+
+                # Proxy info
+                current_proxy = t.get("proxy_url") or ""
+                if current_proxy:
+                    try:
+                        from urllib.parse import urlparse
+                        parsed = urlparse(current_proxy)
+                        if parsed.password:
+                            masked = current_proxy.replace(parsed.password, "****")
+                        else:
+                            masked = current_proxy
+                    except:
+                        masked = current_proxy[:30] + "..."
+                    st.caption(f"🌐 Proxy: {masked}")
+                else:
+                    st.caption("🌐 Proxy: Non configuré")
+
+                # Actions rapides
+                action_cols = st.columns(5)
+                with action_cols[0]:
+                    new_active = not t["is_active"]
+                    if st.button("🔄 Activer" if not t["is_active"] else "⏸️ Désactiver", key=f"toggle_{t['id']}"):
+                        update_meta_token(db, t["id"], is_active=new_active)
+                        st.rerun()
+                with action_cols[1]:
+                    if st.button("✅ Vérifier", key=f"verify_{t['id']}"):
+                        from app.database import verify_meta_token
+                        with st.spinner("Vérification..."):
+                            result = verify_meta_token(db, t["id"])
+                        if result["valid"]:
+                            st.success(f"✅ Token valide ({result['response_time_ms']}ms)")
+                        else:
+                            st.error(f"❌ {result.get('error', 'Erreur inconnue')}")
+                with action_cols[2]:
+                    if t.get("is_rate_limited"):
+                        if st.button("🔓 Débloquer", key=f"unblock_{t['id']}"):
+                            clear_rate_limit(db, t["id"])
+                            st.rerun()
+                with action_cols[3]:
+                    if st.button("📊 Reset", key=f"reset_{t['id']}"):
+                        reset_token_stats(db, t["id"])
+                        st.rerun()
+                with action_cols[4]:
+                    if st.button("🗑️", key=f"delete_{t['id']}", help="Supprimer"):
+                        delete_meta_token(db, t["id"])
+                        st.rerun()
+
+                # Infos supplémentaires
+                if t["last_used_at"]:
+                    st.caption(f"📅 Dernière utilisation: {t['last_used_at'].strftime('%d/%m/%Y %H:%M')}")
+                if t["last_error_message"]:
+                    st.caption(f"❌ Dernière erreur: {t['last_error_message'][:100]}")
+    else:
+        st.info("Aucun token configuré. Ajoutez votre premier token Meta API ci-dessus.")
+        env_token = os.getenv("META_ACCESS_TOKEN", "")
+        if env_token:
+            if st.button("📥 Importer depuis META_ACCESS_TOKEN", key="import_env_token"):
+                add_meta_token(db, env_token, "Token Principal (importé)")
+                st.success("Token importé avec succès!")
+                st.rerun()
+
+    st.markdown("---")
+
+    # ═══ SECTION: BASE DE DONNÉES ═══
+    st.subheader("🗄️ Base de données")
+    st.success("✓ Connecté à PostgreSQL")
+
+    try:
+        stats = get_suivi_stats(db)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Pages en base", stats.get("total_pages", 0))
+        col2.metric("États différents", len(stats.get("etats", {})))
+        col3.metric("CMS différents", len(stats.get("cms", {})))
+    except:
+        pass
+
+    st.markdown("---")
+
+    # ═══ SECTION: STATISTIQUES API ═══
+    st.subheader("📡 Statistiques API")
+    st.caption("Utilisation des APIs sur les 30 derniers jours")
+
+    api_stats = get_search_logs_stats(db, days=30)
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("🔵 Meta API", f"{api_stats.get('total_meta_api_calls', 0):,}")
+    col2.metric("🟠 ScraperAPI", f"{api_stats.get('total_scraper_api_calls', 0):,}")
+    col3.metric("🌐 Web Direct", f"{api_stats.get('total_web_requests', 0):,}")
+    col4.metric("⚠️ Rate Limits", f"{api_stats.get('total_rate_limit_hits', 0):,}")
+
+    st.markdown("---")
+
+    # ═══ SECTION: CACHE API ═══
+    st.subheader("💾 Cache API")
+
+    try:
+        cache_stats = get_cache_stats(db)
 
         col1, col2, col3 = st.columns(3)
-        col1.metric("Total tokens", total_tokens)
-        col2.metric("Tokens actifs", active_tokens)
-        col3.metric("Rate-limited", rate_limited, delta=None if rate_limited == 0 else f"-{rate_limited}", delta_color="inverse")
+        col1.metric("Entrées valides", cache_stats.get("valid_entries", 0))
+        col2.metric("Entrées expirées", cache_stats.get("expired_entries", 0))
+        col3.metric("Total hits", f"{cache_stats.get('total_hits', 0):,}")
 
-        # Ajouter un nouveau token
-        with st.expander("➕ Ajouter un nouveau token", expanded=len(tokens) == 0):
-            new_token_name = st.text_input("Nom du token (optionnel)", placeholder="Token Principal", key="new_token_name")
-            new_token_value = st.text_input("Token Meta API", type="password", key="new_token_value",
-                                            help="Collez votre token Meta Ads API ici")
-            new_proxy_url = st.text_input("Proxy URL (optionnel)", placeholder="http://user:pass@ip:port", key="new_proxy_url",
-                                          help="Proxy associé à ce token pour éviter les bans IP")
-
-            if st.button("Ajouter le token", type="primary", key="btn_add_token"):
-                if new_token_value and new_token_value.strip():
-                    token_id = add_meta_token(
-                        db,
-                        new_token_value.strip(),
-                        new_token_name.strip() or None,
-                        new_proxy_url.strip() or None
-                    )
-                    if token_id:
-                        st.success(f"✅ Token ajouté avec succès (ID: {token_id})")
-                        st.rerun()
-                else:
-                    st.error("Veuillez entrer un token valide")
-
-        # Liste des tokens existants
-        if tokens:
-            st.markdown("##### Tokens configurés")
-
-            for t in tokens:
-                status_icon = "🟢" if t["is_active"] and not t.get("is_rate_limited") else "🔴" if t.get("is_rate_limited") else "⚫"
-                rate_info = " ⏱️ Rate-limited" if t.get("is_rate_limited") else ""
-                proxy_info = " 🌐" if t.get("proxy_url") else ""
-
-                with st.expander(f"{status_icon} **{t['name']}** - {t['token_masked']}{proxy_info}{rate_info}"):
-                    # Stats
-                    stat_cols = st.columns(4)
-                    stat_cols[0].metric("Appels", t["total_calls"])
-                    stat_cols[1].metric("Erreurs", t["total_errors"])
-                    stat_cols[2].metric("Rate limits", t["rate_limit_hits"])
-                    stat_cols[3].metric("Statut", "Actif" if t["is_active"] else "Inactif")
-
-                    # Proxy info
-                    current_proxy = t.get("proxy_url") or ""
-                    if current_proxy:
-                        # Masquer le mot de passe dans l'affichage
-                        try:
-                            from urllib.parse import urlparse
-                            parsed = urlparse(current_proxy)
-                            if parsed.password:
-                                masked = current_proxy.replace(parsed.password, "****")
-                            else:
-                                masked = current_proxy
-                        except:
-                            masked = current_proxy[:30] + "..."
-                        st.caption(f"🌐 Proxy: {masked}")
-                    else:
-                        st.caption("🌐 Proxy: Non configuré")
-
-                    # Modifier le token
-                    new_token_value = st.text_input(
-                        "Modifier le token",
-                        value="",
-                        placeholder="Nouveau token Meta API (laissez vide pour ne pas modifier)",
-                        key=f"token_value_{t['id']}",
-                        type="password",
-                        help="Entrez le nouveau token pour le remplacer"
-                    )
-                    if st.button("💾 Sauvegarder token", key=f"save_token_{t['id']}"):
-                        if new_token_value.strip():
-                            update_meta_token(db, t["id"], token_value=new_token_value)
-                            st.success("Token mis à jour!")
-                            st.rerun()
-                        else:
-                            st.warning("Veuillez entrer un token valide")
-
-                    # Modifier le proxy
-                    new_proxy = st.text_input(
-                        "Modifier le proxy",
-                        value=current_proxy,
-                        placeholder="http://user:pass@ip:port",
-                        key=f"proxy_{t['id']}",
-                        help="Laissez vide pour supprimer le proxy"
-                    )
-                    if st.button("💾 Sauvegarder proxy", key=f"save_proxy_{t['id']}"):
-                        update_meta_token(db, t["id"], proxy_url=new_proxy)
-                        st.success("Proxy mis à jour!")
-                        st.rerun()
-
-                    st.markdown("---")
-
-                    # Dernière utilisation
-                    if t["last_used_at"]:
-                        st.caption(f"📅 Dernière utilisation: {t['last_used_at'].strftime('%d/%m/%Y %H:%M')}")
-                    if t["last_error_message"]:
-                        st.caption(f"❌ Dernière erreur: {t['last_error_message'][:100]}")
-                    if t.get("is_rate_limited") and t["rate_limited_until"]:
-                        st.warning(f"⏱️ Rate-limited jusqu'à: {t['rate_limited_until'].strftime('%H:%M:%S')}")
-
-                    # Actions
-                    action_cols = st.columns(5)
-
-                    with action_cols[0]:
-                        new_active = not t["is_active"]
-                        if st.button("🔄 Activer" if not t["is_active"] else "⏸️ Désactiver", key=f"toggle_{t['id']}"):
-                            update_meta_token(db, t["id"], is_active=new_active)
-                            st.rerun()
-
-                    with action_cols[1]:
-                        if st.button("✅ Vérifier", key=f"verify_{t['id']}"):
-                            from app.database import verify_meta_token
-                            with st.spinner("Vérification..."):
-                                result = verify_meta_token(db, t["id"])
-                            if result["valid"]:
-                                st.success(f"✅ Token valide ({result['response_time_ms']}ms)")
-                            else:
-                                st.error(f"❌ {result.get('error', 'Erreur inconnue')}")
-
-                    with action_cols[2]:
-                        if t.get("is_rate_limited"):
-                            if st.button("🔓 Débloquer", key=f"unblock_{t['id']}"):
-                                clear_rate_limit(db, t["id"])
-                                st.rerun()
-
-                    with action_cols[3]:
-                        if st.button("📊 Reset stats", key=f"reset_{t['id']}"):
-                            reset_token_stats(db, t["id"])
-                            st.rerun()
-
-                    with action_cols[4]:
-                        if st.button("🗑️ Supprimer", key=f"delete_{t['id']}"):
-                            delete_meta_token(db, t["id"])
-                            st.success("Token supprimé")
-                            st.rerun()
-        else:
-            st.info("Aucun token configuré. Ajoutez votre premier token Meta API ci-dessus.")
-
-            # Migration depuis variable d'environnement
-            env_token = os.getenv("META_ACCESS_TOKEN", "")
-            if env_token:
-                st.markdown("---")
-                st.markdown("**💡 Token trouvé dans les variables d'environnement**")
-                if st.button("Importer depuis META_ACCESS_TOKEN", key="import_env_token"):
-                    add_meta_token(db, env_token, "Token Principal (importé)")
-                    st.success("Token importé avec succès!")
-                    st.rerun()
-
-    else:
-        st.warning("Base de données non connectée. Configurez la connexion pour gérer les tokens.")
-        # Fallback sur l'ancien système
-        token = st.text_input(
-            "Meta API Token (fallback)",
-            type="password",
-            value=os.getenv("META_ACCESS_TOKEN", ""),
-            help="Token d'accès Meta Ads API"
-        )
-        if token:
-            st.success("✓ Token configuré")
-        else:
-            st.warning("⚠️ Token non configuré")
-
-    st.markdown("---")
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LOGS D'UTILISATION DES TOKENS
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.subheader("📋 Logs d'utilisation des Tokens")
-    st.markdown("Historique détaillé de l'utilisation de chaque token Meta API")
-
-    if db:
-        from app.database import get_token_usage_logs, get_token_stats_detailed, verify_all_tokens
-
-        # Filtres
-        log_filter_cols = st.columns([2, 2, 2, 2])
-
-        with log_filter_cols[0]:
-            tokens = get_all_meta_tokens(db)
-            token_options = {"all": "Tous les tokens"}
-            for t in tokens:
-                token_options[str(t["id"])] = f"{t['name']}"
-            selected_token_filter = st.selectbox(
-                "Token",
-                options=list(token_options.keys()),
-                format_func=lambda x: token_options[x],
-                key="log_token_filter"
-            )
-
-        with log_filter_cols[1]:
-            action_types = {
-                "all": "Toutes les actions",
-                "search": "🔍 Recherches",
-                "page_fetch": "📄 Fetch pages",
-                "verification": "✅ Vérifications",
-                "rate_limit": "⏱️ Rate limits"
-            }
-            selected_action = st.selectbox(
-                "Type d'action",
-                options=list(action_types.keys()),
-                format_func=lambda x: action_types[x],
-                key="log_action_filter"
-            )
-
-        with log_filter_cols[2]:
-            log_days = st.selectbox(
-                "Période",
-                options=[1, 7, 14, 30],
-                format_func=lambda x: f"{x} jour{'s' if x > 1 else ''}",
-                index=1,
-                key="log_days_filter"
-            )
-
-        with log_filter_cols[3]:
-            log_limit = st.selectbox(
-                "Limite",
-                options=[50, 100, 200, 500],
-                index=1,
-                key="log_limit_filter"
-            )
-
-        # Vérification de tous les tokens
-        if st.button("🔄 Vérifier tous les tokens", key="verify_all_tokens"):
-            with st.spinner("Vérification en cours..."):
-                results = verify_all_tokens(db)
-            for r in results:
-                if r["valid"]:
-                    st.success(f"✅ {r['name']}: Valide ({r['response_time_ms']}ms)")
-                else:
-                    st.error(f"❌ {r['name']}: {r.get('error', 'Erreur inconnue')}")
-
-        # Récupération des logs
-        token_id_filter = None if selected_token_filter == "all" else int(selected_token_filter)
-        action_filter = None if selected_action == "all" else selected_action
-
-        logs = get_token_usage_logs(
-            db,
-            token_id=token_id_filter,
-            days=log_days,
-            limit=log_limit,
-            action_type=action_filter
-        )
-
-        # Statistiques résumées
-        if logs:
-            st.markdown("#### 📊 Résumé")
-
-            # Calculs
-            total_logs = len(logs)
-            success_logs = sum(1 for l in logs if l.get("success", False))
-            error_logs = total_logs - success_logs
-            total_ads = sum(l.get("ads_count", 0) or 0 for l in logs)
-            avg_response = sum(l.get("response_time_ms", 0) or 0 for l in logs) / total_logs if total_logs > 0 else 0
-
-            # Comptage par type
-            action_counts = {}
-            for l in logs:
-                act = l.get("action_type", "unknown")
-                action_counts[act] = action_counts.get(act, 0) + 1
-
-            sum_cols = st.columns(5)
-            with sum_cols[0]:
-                st.metric("Total appels", total_logs)
-            with sum_cols[1]:
-                st.metric("✅ Succès", success_logs)
-            with sum_cols[2]:
-                st.metric("❌ Erreurs", error_logs)
-            with sum_cols[3]:
-                st.metric("📢 Ads trouvées", f"{total_ads:,}")
-            with sum_cols[4]:
-                st.metric("⏱️ Temps moyen", f"{avg_response:.0f}ms")
-
-            # Stats par token (si tous sélectionnés)
-            if selected_token_filter == "all" and len(tokens) > 0:
-                with st.expander("📊 Répartition par token", expanded=True):
-                    token_stats = {}
-                    for l in logs:
-                        tid = l.get("token_id")
-                        tname = l.get("token_name", f"Token #{tid}")
-                        if tid not in token_stats:
-                            token_stats[tid] = {"name": tname, "calls": 0, "success": 0, "ads": 0}
-                        token_stats[tid]["calls"] += 1
-                        if l.get("success"):
-                            token_stats[tid]["success"] += 1
-                        token_stats[tid]["ads"] += l.get("ads_count", 0) or 0
-
-                    for tid, stats in token_stats.items():
-                        success_rate = (stats["success"] / stats["calls"] * 100) if stats["calls"] > 0 else 0
-                        col1, col2, col3, col4 = st.columns([3, 2, 2, 2])
-                        with col1:
-                            st.markdown(f"**{stats['name']}**")
-                        with col2:
-                            st.markdown(f"📞 {stats['calls']} appels")
-                        with col3:
-                            st.markdown(f"✅ {success_rate:.0f}%")
-                        with col4:
-                            st.markdown(f"📢 {stats['ads']:,} ads")
-
-            # Tableau des logs
-            st.markdown("#### 📝 Historique des appels")
-
-            log_data = []
-            for l in logs:
-                action_icon = {
-                    "search": "🔍",
-                    "page_fetch": "📄",
-                    "verification": "✅",
-                    "rate_limit": "⏱️"
-                }.get(l.get("action_type", ""), "❓")
-
-                status_icon = "✅" if l.get("success") else "❌"
-
-                log_data.append({
-                    "Date": l.get("created_at").strftime("%d/%m %H:%M") if l.get("created_at") else "-",
-                    "Token": l.get("token_name", "-")[:15],
-                    "Action": f"{action_icon} {l.get('action_type', '-')}",
-                    "Mot-clé": (l.get("keyword") or "-")[:20],
-                    "Pays": l.get("countries") or "-",
-                    "Ads": l.get("ads_count") or 0,
-                    "Temps": f"{l.get('response_time_ms') or 0}ms",
-                    "Status": status_icon,
-                    "Erreur": (l.get("error_message") or "")[:30]
-                })
-
-            if log_data:
-                st.dataframe(
-                    log_data,
-                    use_container_width=True,
-                    hide_index=True
-                )
-        else:
-            st.info("Aucun log trouvé pour les critères sélectionnés.")
-            st.caption("💡 Les logs sont enregistrés automatiquement lors des recherches avec la fonction de logging activée.")
-
-        # Stats détaillées par token (expandeur)
-        with st.expander("🔬 Statistiques détaillées par token"):
-            for t in tokens:
-                st.markdown(f"##### {t['name']}")
-                stats = get_token_stats_detailed(db, t["id"], days=30)
-
-                if stats:
-                    cols = st.columns(4)
-                    with cols[0]:
-                        st.metric("Total appels", stats.get("total_calls", 0))
-                    with cols[1]:
-                        st.metric("Taux succès", f"{stats.get('success_rate', 0):.1f}%")
-                    with cols[2]:
-                        st.metric("Temps moyen", f"{stats.get('avg_response_time', 0):.0f}ms")
-                    with cols[3]:
-                        st.metric("Total ads", f"{stats.get('total_ads', 0):,}")
-
-                    # Top mots-clés
-                    if stats.get("top_keywords"):
-                        st.markdown("**Top mots-clés recherchés:**")
-                        for kw in stats["top_keywords"][:5]:
-                            st.caption(f"• {kw['keyword']}: {kw['count']} recherche(s)")
-
-                    # Distribution par type
-                    if stats.get("by_action_type"):
-                        st.markdown("**Répartition par type:**")
-                        for act in stats["by_action_type"]:
-                            act_icon = {"search": "🔍", "page_fetch": "📄", "verification": "✅", "rate_limit": "⏱️"}.get(act["type"], "❓")
-                            st.caption(f"• {act_icon} {act['type']}: {act['count']} appel(s)")
-                else:
-                    st.caption("Aucune statistique disponible")
-
-                st.markdown("---")
-
-    else:
-        st.warning("Base de données non connectée.")
-
-    st.markdown("---")
-
-    # Database info
-    st.subheader("🗄️ Base de données")
-
-    db = get_database()
-    if db:
-        st.success("✓ Connecté à PostgreSQL")
-        st.code(DATABASE_URL.replace(DATABASE_URL.split("@")[0].split(":")[-1], "****"))
-
-        try:
-            stats = get_suivi_stats(db)
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Pages en base", stats.get("total_pages", 0))
-            col2.metric("États différents", len(stats.get("etats", {})))
-            col3.metric("CMS différents", len(stats.get("cms", {})))
-        except:
-            pass
-    else:
-        st.error("✗ Non connecté")
-
-    st.markdown("---")
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STATISTIQUES API
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.subheader("📡 Statistiques API")
-    st.markdown("Utilisation des APIs sur les 30 derniers jours")
-
-    if db:
-        from app.database import get_search_logs_stats
-
-        api_stats = get_search_logs_stats(db, days=30)
-
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, _ = st.columns(3)
         with col1:
-            st.metric("🔵 Meta API", f"{api_stats.get('total_meta_api_calls', 0):,}")
+            if st.button("🧹 Nettoyer expiré", key="clear_expired_cache"):
+                deleted = clear_expired_cache(db)
+                st.success(f"✅ {deleted} entrées supprimées")
+                st.rerun()
         with col2:
-            st.metric("🟠 ScraperAPI", f"{api_stats.get('total_scraper_api_calls', 0):,}")
-        with col3:
-            st.metric("🌐 Web Direct", f"{api_stats.get('total_web_requests', 0):,}")
-        with col4:
-            st.metric("⚠️ Rate Limits", f"{api_stats.get('total_rate_limit_hits', 0):,}")
+            if st.button("🗑️ Vider tout", key="clear_all_cache"):
+                deleted = clear_all_cache(db)
+                st.success(f"✅ {deleted} entrées supprimées")
+                st.rerun()
+    except Exception as e:
+        st.error(f"Erreur cache: {e}")
 
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("❌ Meta Erreurs", f"{api_stats.get('total_meta_api_errors', 0):,}")
-        with col2:
-            st.metric("❌ Scraper Erreurs", f"{api_stats.get('total_scraper_api_errors', 0):,}")
-        with col3:
-            st.metric("❌ Web Erreurs", f"{api_stats.get('total_web_errors', 0):,}")
-        with col4:
-            cost = api_stats.get('total_scraper_api_cost', 0) or 0
-            st.metric("💰 Coût ScraperAPI", f"${cost:.2f}")
 
-        # Calcul du taux d'erreur
-        total_calls = (api_stats.get('total_meta_api_calls', 0) or 0) + (api_stats.get('total_scraper_api_calls', 0) or 0)
-        total_errors = (api_stats.get('total_meta_api_errors', 0) or 0) + (api_stats.get('total_scraper_api_errors', 0) or 0)
-        error_rate = (total_errors / total_calls * 100) if total_calls > 0 else 0
+def render_settings_config_tab(db):
+    """Onglet Configuration - Seuils et États"""
+    if not db:
+        st.warning("Base de données non connectée")
+        return
 
-        st.progress(min(error_rate / 100, 1.0))
-        st.caption(f"Taux d'erreur: {error_rate:.1f}% ({total_errors}/{total_calls} appels)")
+    from app.database import get_app_setting, set_app_setting
 
-        # Stats par token (si disponibles)
-        with st.expander("📊 Utilisation par token"):
-            tokens = get_all_meta_tokens(db)
-            if tokens:
-                for t in tokens:
-                    status = "🟢" if t["is_active"] and not t.get("is_rate_limited") else "🔴"
-                    st.markdown(f"""
-                    **{status} {t['name']}**
-                    - Appels: {t['total_calls']:,} | Erreurs: {t['total_errors']} | Rate limits: {t['rate_limit_hits']}
-                    """)
-            else:
-                st.caption("Aucun token configuré")
-
-        # ═══ GESTION DU CACHE API ═══
-        st.markdown("---")
-        st.subheader("💾 Cache API Meta")
-        st.markdown("Le cache stocke les resultats des appels API pour eviter les requetes redondantes.")
-
-        from app.database import get_cache_stats, clear_expired_cache, clear_all_cache
-
-        try:
-            cache_stats = get_cache_stats(db)
-
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Entrees valides", cache_stats.get("valid_entries", 0))
-            with col2:
-                st.metric("Entrees expirees", cache_stats.get("expired_entries", 0))
-            with col3:
-                st.metric("Total hits", f"{cache_stats.get('total_hits', 0):,}")
-            with col4:
-                hit_rate = 0
-                if cache_stats.get("total_hits", 0) > 0:
-                    # Estimation du hit rate
-                    hit_rate = min(100, cache_stats.get("total_hits", 0) / max(1, cache_stats.get("valid_entries", 1)) * 10)
-                st.metric("Efficacite", f"{hit_rate:.0f}%")
-
-            # Stats par type
-            if cache_stats.get("by_type"):
-                with st.expander("📊 Details par type"):
-                    for t in cache_stats["by_type"]:
-                        st.write(f"**{t['type']}**: {t['count']} entrees, {t['hits']} hits")
-
-            # Actions
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if st.button("🧹 Nettoyer expire", key="clear_expired_cache"):
-                    deleted = clear_expired_cache(db)
-                    st.success(f"✅ {deleted} entrees expirees supprimees")
-                    st.rerun()
-            with col2:
-                if st.button("🗑️ Vider tout le cache", key="clear_all_cache"):
-                    deleted = clear_all_cache(db)
-                    st.success(f"✅ {deleted} entrees supprimees")
-                    st.rerun()
-            with col3:
-                st.caption("TTL: 6h (recherches), 3h (pages)")
-
-        except Exception as e:
-            st.error(f"Erreur cache: {e}")
-
-    st.markdown("---")
-
-    # Seuils de détection (configurables)
+    # ═══ SECTION: SEUILS DE DÉTECTION ═══
     st.subheader("📊 Seuils de détection")
-    st.markdown("Ces seuils déterminent quelles pages sont sauvegardées dans les différentes tables de la base de données.")
+    st.caption("Ces seuils déterminent quelles pages sont sauvegardées dans les différentes tables.")
 
-    # Récupérer les seuils actuels
     detection = st.session_state.detection_thresholds
 
     col1, col2 = st.columns(2)
@@ -5992,9 +5732,10 @@ def render_settings():
             min_value=1,
             max_value=100,
             value=detection.get("min_ads_suivi", MIN_ADS_SUIVI),
-            help="Nombre minimum d'ads actives pour qu'une page soit ajoutée à la table de suivi. Cette table permet de suivre l'évolution des pages au fil du temps."
+            help="Nombre minimum d'ads pour qu'une page soit ajoutée à la table de suivi.",
+            key="config_min_suivi"
         )
-        st.caption("📈 **Table suivi_page** : Historique d'évolution des pages (ads, produits) pour le monitoring")
+        st.caption("📈 **Table suivi_page** : Historique d'évolution des pages")
 
     with col2:
         new_min_liste = st.number_input(
@@ -6002,19 +5743,21 @@ def render_settings():
             min_value=1,
             max_value=100,
             value=detection.get("min_ads_liste", MIN_ADS_LISTE),
-            help="Nombre minimum d'ads actives pour qu'une page ait ses annonces détaillées sauvegardées. Seules les pages dépassant ce seuil auront leurs annonces individuelles enregistrées."
+            help="Nombre minimum d'ads pour qu'une page ait ses annonces détaillées sauvegardées.",
+            key="config_min_liste"
         )
-        st.caption("📋 **Table liste_ads_recherche** : Détail de chaque annonce (créatifs, textes, liens...)")
+        st.caption("📋 **Table liste_ads_recherche** : Détail de chaque annonce")
 
-    # Bouton sauvegarder seuils détection
-    if st.button("💾 Sauvegarder les seuils de détection", key="save_detection"):
+    if st.button("💾 Sauvegarder les seuils de détection", key="save_detection_config"):
         st.session_state.detection_thresholds = {
             "min_ads_suivi": new_min_suivi,
             "min_ads_liste": new_min_liste,
         }
+        # Persister en BDD
+        set_app_setting(db, "min_ads_suivi", str(new_min_suivi), "Seuil minimum pour suivi_page")
+        set_app_setting(db, "min_ads_liste", str(new_min_liste), "Seuil minimum pour liste_ads_recherche")
         st.success("✓ Seuils de détection sauvegardés !")
 
-    # Explication visuelle
     with st.expander("ℹ️ Comment fonctionnent ces seuils ?"):
         st.markdown("""
         **Lors d'une recherche, les pages sont filtrées par ces seuils :**
@@ -6024,102 +5767,49 @@ def render_settings():
         | `liste_page_recherche` | Toutes | Toutes les pages trouvées avec infos de base |
         | `suivi_page` | Min. Suivi | Pages pour le monitoring (évolution historique) |
         | `liste_ads_recherche` | Min. Liste Ads | Détail des annonces individuelles |
-
-        **Exemple avec seuils actuels :**
-        - Une page avec **5 ads** → Sauvée uniquement dans `liste_page_recherche`
-        - Une page avec **15 ads** → Sauvée dans `liste_page_recherche` + `suivi_page`
-        - Une page avec **25 ads** → Sauvée dans les 3 tables
         """)
 
     st.markdown("---")
 
-    # Configuration des états
+    # ═══ SECTION: CONFIGURATION DES ÉTATS ═══
     st.subheader("🏷️ Configuration des états")
-    st.markdown("Définissez les seuils minimums d'ads actives pour chaque état:")
+    st.caption("Définissez les seuils minimums d'ads actives pour chaque état:")
 
-    # Récupérer les seuils actuels
     thresholds = st.session_state.state_thresholds
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        new_xs = st.number_input(
-            "XS (min)",
-            min_value=1,
-            max_value=1000,
-            value=thresholds.get("XS", 1),
-            help="Seuil minimum pour l'état XS"
-        )
-        new_m = st.number_input(
-            "M (min)",
-            min_value=1,
-            max_value=1000,
-            value=thresholds.get("M", 20),
-            help="Seuil minimum pour l'état M"
-        )
+        new_xs = st.number_input("XS (min)", min_value=1, max_value=1000, value=thresholds.get("XS", 1), key="state_xs")
+        new_m = st.number_input("M (min)", min_value=1, max_value=1000, value=thresholds.get("M", 20), key="state_m")
 
     with col2:
-        new_s = st.number_input(
-            "S (min)",
-            min_value=1,
-            max_value=1000,
-            value=thresholds.get("S", 10),
-            help="Seuil minimum pour l'état S"
-        )
-        new_l = st.number_input(
-            "L (min)",
-            min_value=1,
-            max_value=1000,
-            value=thresholds.get("L", 35),
-            help="Seuil minimum pour l'état L"
-        )
+        new_s = st.number_input("S (min)", min_value=1, max_value=1000, value=thresholds.get("S", 10), key="state_s")
+        new_l = st.number_input("L (min)", min_value=1, max_value=1000, value=thresholds.get("L", 35), key="state_l")
 
     with col3:
-        new_xl = st.number_input(
-            "XL (min)",
-            min_value=1,
-            max_value=1000,
-            value=thresholds.get("XL", 80),
-            help="Seuil minimum pour l'état XL"
-        )
-        new_xxl = st.number_input(
-            "XXL (min)",
-            min_value=1,
-            max_value=1000,
-            value=thresholds.get("XXL", 150),
-            help="Seuil minimum pour l'état XXL"
-        )
+        new_xl = st.number_input("XL (min)", min_value=1, max_value=1000, value=thresholds.get("XL", 80), key="state_xl")
+        new_xxl = st.number_input("XXL (min)", min_value=1, max_value=1000, value=thresholds.get("XXL", 150), key="state_xxl")
 
-    # Bouton pour sauvegarder
     col1, col2 = st.columns([1, 3])
     with col1:
-        if st.button("💾 Sauvegarder", type="primary"):
-            # Vérifier la cohérence des seuils
-            new_thresholds = {
-                "XS": new_xs,
-                "S": new_s,
-                "M": new_m,
-                "L": new_l,
-                "XL": new_xl,
-                "XXL": new_xxl
-            }
-
-            # Vérifier que les seuils sont croissants
+        if st.button("💾 Sauvegarder", type="primary", key="save_states_config"):
+            new_thresholds = {"XS": new_xs, "S": new_s, "M": new_m, "L": new_l, "XL": new_xl, "XXL": new_xxl}
             if new_xs < new_s < new_m < new_l < new_xl < new_xxl:
                 st.session_state.state_thresholds = new_thresholds
+                set_app_setting(db, "state_thresholds", str(new_thresholds), "Seuils des états")
                 st.success("✓ Seuils sauvegardés !")
             else:
                 st.error("Les seuils doivent être strictement croissants (XS < S < M < L < XL < XXL)")
 
     with col2:
-        if st.button("🔄 Réinitialiser"):
+        if st.button("🔄 Réinitialiser", key="reset_states_config"):
             st.session_state.state_thresholds = DEFAULT_STATE_THRESHOLDS.copy()
             st.rerun()
 
-    # Afficher un aperçu des états
+    # Aperçu des états
     st.markdown("---")
     st.markdown("**Aperçu des états actuels:**")
-
     current = st.session_state.state_thresholds
     preview_data = [
         {"État": "Inactif", "Plage": "0 ads"},
@@ -6130,24 +5820,212 @@ def render_settings():
         {"État": "XL", "Plage": f"{current['XL']}-{current['XXL']-1} ads"},
         {"État": "XXL", "Plage": f"≥{current['XXL']} ads"},
     ]
-    st.dataframe(pd.DataFrame(preview_data), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(preview_data), use_container_width=True, hide_index=True)
 
-    # ─────────────────────────────────────────────────────────────────────────────
-    # Gestion de la blacklist
+
+def render_settings_classification_tab(db):
+    """Onglet Classification - Gemini et Taxonomie"""
+    if not db:
+        st.warning("Base de données non connectée")
+        return
+
+    from app.database import (
+        get_app_setting, set_app_setting, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT,
+        get_all_taxonomy, add_taxonomy_entry, update_taxonomy_entry,
+        delete_taxonomy_entry, init_default_taxonomy, get_taxonomy_categories,
+        get_classification_stats
+    )
+
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+
+    # ═══ SECTION: GEMINI API ═══
+    st.subheader("🤖 API Gemini")
+
+    if gemini_key:
+        st.success("✅ Clé API Gemini configurée")
+    else:
+        st.warning("⚠️ Clé API Gemini non configurée. Ajoutez GEMINI_API_KEY dans les variables d'environnement.")
+
+    st.markdown("##### Modèle Gemini")
+    st.caption("Les modèles Gemini évoluent régulièrement. Modifiez si le modèle actuel devient obsolète.")
+
+    current_model = get_app_setting(db, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT)
+
+    model_options = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro", "gemini-2.0-flash-exp", "gemini-exp-1206"]
+    if current_model and current_model not in model_options:
+        model_options.insert(0, current_model)
+
+    col_model, col_btn = st.columns([3, 1])
+    with col_model:
+        new_model = st.text_input("Nom du modèle", value=current_model, key="gemini_model_class")
+
+    with col_btn:
+        st.write("")
+        if st.button("💾 Sauvegarder", key="save_gemini_model_class"):
+            if new_model and new_model.strip():
+                set_app_setting(db, SETTING_GEMINI_MODEL, new_model.strip(), "Modèle Gemini pour la classification")
+                st.success(f"✅ Modèle mis à jour: {new_model}")
+                st.rerun()
+
+    st.caption(f"**Modèles suggérés:** {', '.join(model_options[:4])}")
+
+    # Test API
+    st.markdown("##### Tester l'API Gemini")
+    if st.button("🧪 Tester API", key="test_gemini_class", type="primary"):
+        if not gemini_key:
+            st.error("❌ Clé API Gemini non configurée")
+        else:
+            with st.spinner("Test en cours..."):
+                try:
+                    import google.generativeai as genai
+                    genai.configure(api_key=gemini_key)
+                    test_model_name = get_app_setting(db, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT)
+                    model = genai.GenerativeModel(test_model_name)
+                    test_prompt = "Réponds juste 'OK' pour confirmer que tu fonctionnes."
+                    response = model.generate_content(test_prompt)
+                    if response and response.text:
+                        st.success(f"✅ API Gemini fonctionne! Modèle: {test_model_name}")
+                    else:
+                        st.warning("⚠️ API accessible mais réponse vide")
+                except ImportError:
+                    st.error("❌ Librairie `google-generativeai` non installée")
+                except Exception as e:
+                    st.error(f"❌ Erreur: {str(e)[:200]}")
+
     st.markdown("---")
-    st.subheader("🚫 Gestion de la Blacklist")
 
-    # Ajouter manuellement une page à la blacklist
-    with st.expander("➕ Ajouter une page à la blacklist"):
+    # ═══ SECTION: TAXONOMIE ═══
+    st.subheader("📚 Taxonomie de classification")
+
+    if st.button("🔄 Initialiser taxonomie par défaut", key="init_taxonomy_class"):
+        added = init_default_taxonomy(db)
+        if added > 0:
+            st.success(f"✅ {added} catégories ajoutées")
+            st.rerun()
+        else:
+            st.info("La taxonomie est déjà initialisée")
+
+    # Stats de classification
+    try:
+        class_stats = get_classification_stats(db)
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Classifiées", class_stats["classified"])
+        col2.metric("Non classifiées", class_stats["unclassified"])
+        col3.metric("Taux", f"{class_stats['classification_rate']}%")
+        col4.metric("Total pages", class_stats["total"])
+    except Exception:
+        pass
+
+    # Afficher la taxonomie
+    taxonomy = get_all_taxonomy(db, active_only=False)
+
+    if taxonomy:
+        categories = {}
+        for entry in taxonomy:
+            if entry.category not in categories:
+                categories[entry.category] = []
+            categories[entry.category].append(entry)
+
+        st.markdown(f"**{len(taxonomy)} entrées dans {len(categories)} catégories**")
+
+        for cat_name, entries in categories.items():
+            with st.expander(f"📁 **{cat_name}** ({len(entries)} sous-catégories)"):
+                for entry in entries:
+                    col1, col2, col3, col4 = st.columns([3, 3, 1, 1])
+
+                    with col1:
+                        new_subcat = st.text_input("Sous-catégorie", value=entry.subcategory, key=f"subcat_{entry.id}", label_visibility="collapsed")
+
+                    with col2:
+                        new_desc = st.text_input("Description", value=entry.description or "", key=f"desc_{entry.id}", label_visibility="collapsed")
+
+                    with col3:
+                        is_active = st.checkbox("Actif", value=entry.is_active, key=f"active_{entry.id}")
+
+                    with col4:
+                        if st.button("🗑️", key=f"del_tax_{entry.id}"):
+                            delete_taxonomy_entry(db, entry.id)
+                            st.rerun()
+
+                    if new_subcat != entry.subcategory or new_desc != (entry.description or "") or is_active != entry.is_active:
+                        update_taxonomy_entry(db, entry.id, subcategory=new_subcat, description=new_desc if new_desc else None, is_active=is_active)
+
+    # Ajouter une nouvelle entrée
+    st.markdown("---")
+    st.markdown("**➕ Ajouter une catégorie/sous-catégorie**")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        existing_cats = get_taxonomy_categories(db)
+        cat_options = existing_cats + ["➕ Nouvelle catégorie..."]
+        selected_cat = st.selectbox("Catégorie", options=cat_options, key="new_tax_cat_class")
+
+        if selected_cat == "➕ Nouvelle catégorie...":
+            new_cat_name = st.text_input("Nouvelle catégorie", key="new_cat_name_class")
+        else:
+            new_cat_name = selected_cat
+
+    with col2:
+        new_subcat_name = st.text_input("Sous-catégorie", key="new_subcat_name_class")
+
+    with col3:
+        new_tax_desc = st.text_input("Description", key="new_tax_desc_class")
+
+    if st.button("➕ Ajouter", key="add_taxonomy_class"):
+        if new_cat_name and new_subcat_name:
+            entry_id = add_taxonomy_entry(db, new_cat_name, new_subcat_name, new_tax_desc or None)
+            st.success(f"✅ Entrée ajoutée (ID: {entry_id})")
+            st.rerun()
+        else:
+            st.error("Catégorie et sous-catégorie requises")
+
+    # Lancer la classification
+    st.markdown("---")
+    st.markdown("**🚀 Classifier les pages non classifiées**")
+
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        batch_size = st.number_input("Nombre de pages", min_value=10, max_value=500, value=50, step=10, key="batch_size_class")
+
+    with col2:
+        if st.button("🚀 Lancer la classification", key="run_classification_class", type="primary"):
+            if not gemini_key:
+                st.error("Configurez GEMINI_API_KEY d'abord")
+            else:
+                with st.spinner(f"Classification de {batch_size} pages en cours..."):
+                    try:
+                        from app.gemini_classifier import classify_and_save
+                        result = classify_and_save(db, limit=batch_size)
+                        if "error" in result:
+                            st.error(result["error"])
+                        else:
+                            st.success(f"✅ {result['classified']} pages classifiées ({result.get('errors', 0)} erreurs)")
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Erreur: {e}")
+
+
+def render_settings_blacklist_tab(db):
+    """Onglet Blacklist - Gestion de la blacklist"""
+    if not db:
+        st.warning("Base de données non connectée")
+        return
+
+    st.subheader("🚫 Gestion de la Blacklist")
+    st.caption("Les pages en blacklist seront ignorées lors des recherches.")
+
+    # Ajouter manuellement une page
+    with st.expander("➕ Ajouter une page à la blacklist", expanded=False):
         col1, col2 = st.columns(2)
         with col1:
-            new_bl_page_id = st.text_input("Page ID", key="new_bl_page_id")
+            new_bl_page_id = st.text_input("Page ID", key="new_bl_page_id_bl")
         with col2:
-            new_bl_page_name = st.text_input("Nom de la page (optionnel)", key="new_bl_page_name")
+            new_bl_page_name = st.text_input("Nom de la page (optionnel)", key="new_bl_page_name_bl")
 
-        new_bl_raison = st.text_input("Raison (optionnel)", key="new_bl_raison")
+        new_bl_raison = st.text_input("Raison (optionnel)", key="new_bl_raison_bl")
 
-        if st.button("➕ Ajouter à la blacklist"):
+        if st.button("➕ Ajouter à la blacklist", key="add_bl_btn"):
             if new_bl_page_id:
                 if add_to_blacklist(db, new_bl_page_id, new_bl_page_name, new_bl_raison):
                     st.success(f"✓ Page {new_bl_page_id} ajoutée à la blacklist")
@@ -6179,7 +6057,7 @@ def render_settings():
                         st.caption(f"Ajouté: {entry['added_at'].strftime('%Y-%m-%d %H:%M')}")
 
                 with col3:
-                    if st.button("🗑️ Retirer", key=f"rm_bl_{entry['page_id']}"):
+                    if st.button("🗑️ Retirer", key=f"rm_bl_{entry['page_id']}_bl"):
                         if remove_from_blacklist(db, entry['page_id']):
                             st.success("✓ Retiré")
                             st.rerun()
@@ -6189,626 +6067,179 @@ def render_settings():
     except Exception as e:
         st.error(f"Erreur: {e}")
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # GESTION DE LA TAXONOMIE DE CLASSIFICATION
-    # ═══════════════════════════════════════════════════════════════════════════
-    st.markdown("---")
-    st.subheader("Classification automatique (Gemini)")
-    st.markdown("Gérez les catégories et sous-catégories pour la classification automatique des sites.")
 
-    # Vérifier la clé API Gemini
+def render_settings_maintenance_tab(db):
+    """Onglet Maintenance - Migration, Doublons, Archivage"""
+    if not db:
+        st.warning("Base de données non connectée")
+        return
+
+    from app.database import (
+        get_pages_count, migration_add_country_to_all_pages,
+        get_all_pages_for_classification, update_pages_classification_batch,
+        build_taxonomy_prompt, init_default_taxonomy, get_archive_stats, archive_old_data
+    )
+    from sqlalchemy import func
+    from app.database import AdsRecherche, WinningAds
+
     gemini_key = os.getenv("GEMINI_API_KEY", "")
-    if gemini_key:
-        st.success("✅ Clé API Gemini configurée")
-    else:
-        st.warning("⚠️ Clé API Gemini non configurée. Ajoutez GEMINI_API_KEY dans les variables d'environnement.")
 
-    # Configuration du modèle Gemini
-    if db:
-        from app.database import get_app_setting, set_app_setting, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT
+    # ═══ SECTION: MIGRATION ═══
+    st.subheader("🔄 Migration des données existantes")
+    st.caption("Appliquer la classification et le pays France aux pages déjà enregistrées.")
 
-        st.markdown("---")
-        st.markdown("##### Modèle Gemini")
-        st.caption("Les modèles Gemini évoluent régulièrement. Modifiez si le modèle actuel devient obsolète.")
+    try:
+        migration_stats = get_pages_count(db)
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total pages", migration_stats["total"])
+        col2.metric("Classifiées", migration_stats["classified"])
+        col3.metric("Avec pays FR", migration_stats["with_fr"])
+        col4.metric("Sans pays FR", migration_stats["without_fr"])
+    except Exception:
+        migration_stats = {"total": 0, "classified": 0, "with_fr": 0, "without_fr": 0, "unclassified": 0}
 
-        current_model = get_app_setting(db, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT)
+    col1, col2 = st.columns(2)
 
-        col_model, col_btn = st.columns([3, 1])
-        with col_model:
-            # Liste des modèles disponibles (peut être mise à jour)
-            model_options = [
-                "gemini-1.5-flash",
-                "gemini-1.5-flash-8b",
-                "gemini-1.5-pro",
-                "gemini-2.0-flash-exp",
-                "gemini-exp-1206",
-            ]
-            # Ajouter le modèle actuel s'il n'est pas dans la liste
-            if current_model and current_model not in model_options:
-                model_options.insert(0, current_model)
-
-            # Champ texte pour entrer un modèle personnalisé
-            new_model = st.text_input(
-                "Nom du modèle",
-                value=current_model,
-                help="Entrez le nom exact du modèle Gemini (ex: gemini-1.5-flash, gemini-2.0-flash-exp)",
-                key="gemini_model_input"
-            )
-
-        with col_btn:
-            st.write("")  # Espacement
-            if st.button("💾 Sauvegarder", key="save_gemini_model"):
-                if new_model and new_model.strip():
-                    set_app_setting(db, SETTING_GEMINI_MODEL, new_model.strip(), "Modèle Gemini pour la classification")
-                    st.success(f"✅ Modèle mis à jour: {new_model}")
-                    st.rerun()
-                else:
-                    st.error("Veuillez entrer un nom de modèle valide")
-
-        # Afficher les modèles suggérés
-        st.caption(f"**Modèles suggérés:** {', '.join(model_options[:4])}")
-
-        # ═══ TEST API GEMINI ═══
-        st.markdown("##### Tester l'API Gemini")
-        st.caption("Vérifiez que la clé API et le modèle fonctionnent correctement.")
-
-        test_col1, test_col2 = st.columns([1, 2])
-        with test_col1:
-            if st.button("🧪 Tester API", key="test_gemini_api", type="primary"):
-                if not gemini_key:
-                    st.error("❌ Clé API Gemini non configurée")
-                else:
-                    with st.spinner("Test en cours..."):
-                        try:
-                            import google.generativeai as genai
-                        except ImportError:
-                            st.error("❌ Librairie `google-generativeai` non installée")
-                            st.code("pip install -U google-generativeai", language="bash")
-                            st.caption("Installez cette librairie puis redémarrez l'application.")
-                            genai = None
-
-                        if genai:
-                            try:
-                                # Configurer l'API
-                                genai.configure(api_key=gemini_key)
-
-                                # Récupérer le modèle configuré
-                                test_model_name = get_app_setting(db, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT)
-
-                                # Créer le modèle
-                                model = genai.GenerativeModel(test_model_name)
-
-                                # Test simple avec une classification exemple
-                                test_prompt = """Tu es un expert en classification de sites e-commerce.
-Classifie ce site fictif de test dans une catégorie.
-
-Site: "SuperShoes.com" - Vente de chaussures de sport et baskets pour hommes et femmes.
-
-Réponds uniquement avec:
-- Catégorie: [catégorie principale]
-- Confiance: [haute/moyenne/basse]
-- Raison: [1 phrase]"""
-
-                                response = model.generate_content(test_prompt)
-
-                                if response and response.text:
-                                    st.success(f"✅ API Gemini fonctionne!")
-                                    st.markdown(f"**Modèle testé:** `{test_model_name}`")
-                                    st.markdown("**Réponse de test:**")
-                                    st.code(response.text[:500])
-                                else:
-                                    st.warning("⚠️ API accessible mais réponse vide")
-
-                            except Exception as e:
-                                error_msg = str(e)
-                                if "API_KEY" in error_msg or "401" in error_msg:
-                                    st.error("❌ Clé API invalide ou expirée")
-                                elif "model" in error_msg.lower() or "404" in error_msg:
-                                    st.error(f"❌ Modèle '{test_model_name}' non trouvé. Vérifiez le nom du modèle.")
-                                elif "quota" in error_msg.lower() or "429" in error_msg:
-                                    st.error("❌ Quota API dépassé")
-                                else:
-                                    st.error(f"❌ Erreur: {error_msg[:200]}")
-
-        with test_col2:
-            st.info("Le test envoie une requête simple pour vérifier que la clé API et le modèle sont valides.")
-
-        st.markdown("---")
-
-    if db:
-        from app.database import (
-            get_all_taxonomy, add_taxonomy_entry, update_taxonomy_entry,
-            delete_taxonomy_entry, init_default_taxonomy, get_taxonomy_categories,
-            get_classification_stats, ClassificationTaxonomy
-        )
-
-        # Initialiser la taxonomie par défaut si vide
-        if st.button("🔄 Initialiser taxonomie par défaut", key="init_taxonomy"):
-            added = init_default_taxonomy(db)
-            if added > 0:
-                st.success(f"✅ {added} catégories ajoutées")
-                st.rerun()
+    with col1:
+        st.markdown("**🇫🇷 Ajouter France**")
+        st.caption(f"{migration_stats.get('without_fr', 0)} pages sans FR")
+        if st.button("Ajouter FR à toutes les pages", key="migration_add_fr_maint"):
+            if migration_stats.get('without_fr', 0) == 0:
+                st.info("✓ Toutes les pages ont déjà FR")
             else:
-                st.info("La taxonomie est déjà initialisée")
-
-        # Stats de classification
-        try:
-            class_stats = get_classification_stats(db)
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Pages classifiées", class_stats["classified"])
-            col2.metric("Non classifiées", class_stats["unclassified"])
-            col3.metric("Taux", f"{class_stats['classification_rate']}%")
-            col4.metric("Total pages", class_stats["total"])
-        except Exception:
-            pass
-
-        # Afficher la taxonomie existante
-        taxonomy = get_all_taxonomy(db, active_only=False)
-
-        if taxonomy:
-            # Grouper par catégorie
-            categories = {}
-            for entry in taxonomy:
-                if entry.category not in categories:
-                    categories[entry.category] = []
-                categories[entry.category].append(entry)
-
-            st.markdown(f"**{len(taxonomy)} entrées dans {len(categories)} catégories**")
-
-            for cat_name, entries in categories.items():
-                with st.expander(f"📁 **{cat_name}** ({len(entries)} sous-catégories)"):
-                    for entry in entries:
-                        col1, col2, col3, col4 = st.columns([3, 3, 1, 1])
-
-                        with col1:
-                            new_subcat = st.text_input(
-                                "Sous-catégorie",
-                                value=entry.subcategory,
-                                key=f"subcat_{entry.id}",
-                                label_visibility="collapsed"
-                            )
-
-                        with col2:
-                            new_desc = st.text_input(
-                                "Description",
-                                value=entry.description or "",
-                                key=f"desc_{entry.id}",
-                                label_visibility="collapsed",
-                                placeholder="Description/exemples"
-                            )
-
-                        with col3:
-                            is_active = st.checkbox(
-                                "Actif",
-                                value=entry.is_active,
-                                key=f"active_{entry.id}"
-                            )
-
-                        with col4:
-                            if st.button("🗑️", key=f"del_tax_{entry.id}"):
-                                delete_taxonomy_entry(db, entry.id)
-                                st.rerun()
-
-                        # Sauvegarder si modifié
-                        if (new_subcat != entry.subcategory or
-                            new_desc != (entry.description or "") or
-                            is_active != entry.is_active):
-                            update_taxonomy_entry(
-                                db, entry.id,
-                                subcategory=new_subcat,
-                                description=new_desc if new_desc else None,
-                                is_active=is_active
-                            )
-
-        # Ajouter une nouvelle entrée
-        st.markdown("---")
-        st.markdown("**➕ Ajouter une catégorie/sous-catégorie**")
-
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            # Liste des catégories existantes + option nouvelle
-            existing_cats = get_taxonomy_categories(db)
-            cat_options = existing_cats + ["➕ Nouvelle catégorie..."]
-            selected_cat = st.selectbox("Catégorie", options=cat_options, key="new_tax_cat")
-
-            if selected_cat == "➕ Nouvelle catégorie...":
-                new_cat_name = st.text_input("Nouvelle catégorie", key="new_cat_name")
-            else:
-                new_cat_name = selected_cat
-
-        with col2:
-            new_subcat_name = st.text_input("Sous-catégorie", key="new_subcat_name")
-
-        with col3:
-            new_tax_desc = st.text_input("Description", key="new_tax_desc", placeholder="Exemples de produits...")
-
-        if st.button("➕ Ajouter", key="add_taxonomy"):
-            if new_cat_name and new_subcat_name:
-                entry_id = add_taxonomy_entry(db, new_cat_name, new_subcat_name, new_tax_desc or None)
-                st.success(f"✅ Entrée ajoutée (ID: {entry_id})")
-                st.rerun()
-            else:
-                st.error("Catégorie et sous-catégorie requises")
-
-        # Lancer la classification manuelle
-        st.markdown("---")
-        st.markdown("**🚀 Classifier les pages non classifiées**")
-
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            batch_size = st.number_input("Nombre de pages", min_value=10, max_value=500, value=50, step=10)
-
-        with col2:
-            if st.button("🚀 Lancer la classification", key="run_classification", type="primary"):
-                if not gemini_key:
-                    st.error("Configurez GEMINI_API_KEY d'abord")
-                else:
-                    with st.spinner(f"Classification de {batch_size} pages en cours..."):
-                        try:
-                            from app.gemini_classifier import classify_and_save
-
-                            result = classify_and_save(db, limit=batch_size)
-
-                            if "error" in result:
-                                st.error(result["error"])
-                            else:
-                                st.success(f"✅ {result['classified']} pages classifiées ({result.get('errors', 0)} erreurs)")
-                                st.rerun()
-                        except Exception as e:
-                            st.error(f"Erreur: {e}")
-
-        # ═══════════════════════════════════════════════════════════════════════════
-        # MIGRATION: Appliquer aux pages existantes
-        # ═══════════════════════════════════════════════════════════════════════════
-        st.markdown("---")
-        st.subheader("🔄 Migration des données existantes")
-        st.markdown("Appliquer la classification et le pays France aux pages déjà enregistrées.")
-
-        # Importer les fonctions de migration
-        from app.database import (
-            get_pages_count, migration_add_country_to_all_pages,
-            get_all_pages_for_classification, update_pages_classification_batch,
-            build_taxonomy_prompt, init_default_taxonomy
-        )
-
-        # Stats actuelles
-        try:
-            migration_stats = get_pages_count(db)
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total pages", migration_stats["total"])
-            col2.metric("Classifiées", migration_stats["classified"])
-            col3.metric("Avec pays FR", migration_stats["with_fr"])
-            col4.metric("Sans pays FR", migration_stats["without_fr"])
-        except Exception:
-            migration_stats = {"total": 0, "classified": 0, "with_fr": 0, "without_fr": 0, "unclassified": 0}
-
-        # Actions de migration
-        st.markdown("**Actions de migration:**")
-
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            st.markdown("**🇫🇷 Ajouter France**")
-            st.caption(f"{migration_stats.get('without_fr', 0)} pages sans FR")
-            if st.button("Ajouter FR à toutes les pages", key="migration_add_fr", type="secondary"):
-                if migration_stats.get('without_fr', 0) == 0:
-                    st.info("✓ Toutes les pages ont déjà FR")
-                else:
-                    with st.spinner("Ajout de FR en cours..."):
-                        try:
-                            updated = migration_add_country_to_all_pages(db, "FR")
-                            st.success(f"✅ {updated} pages mises à jour avec FR")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Erreur: {e}")
-
-        with col2:
-            st.markdown("**Classification Gemini**")
-            unclassified = migration_stats.get('unclassified', 0)
-            st.caption(f"{unclassified} pages non classifiées")
-            reclassify_all = st.checkbox("Re-classifier TOUTES les pages", key="migration_reclassify_all")
-
-            pages_to_classify = migration_stats.get('total', 0) if reclassify_all else unclassified
-
-            if st.button("Lancer la classification", key="migration_classify", type="secondary"):
-                if not gemini_key:
-                    st.error("Configurez GEMINI_API_KEY d'abord")
-                elif pages_to_classify == 0:
-                    st.info("✓ Aucune page à classifier")
-                else:
-                    # Estimation du temps
-                    from app.gemini_classifier import BATCH_SIZE, RATE_LIMIT_DELAY
-                    gemini_batches = (pages_to_classify + BATCH_SIZE - 1) // BATCH_SIZE
-                    estimated_time = gemini_batches * RATE_LIMIT_DELAY / 60
-
-                    st.info(f"⏱️ Temps estimé: ~{estimated_time:.1f} minutes ({gemini_batches} batches)")
-
-                    # Progress bar et status
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-
+                with st.spinner("Ajout de FR en cours..."):
                     try:
-                        # Initialiser taxonomie
-                        init_default_taxonomy(db)
-                        taxonomy_text = build_taxonomy_prompt(db)
-
-                        if not taxonomy_text:
-                            st.error("Aucune taxonomie configurée")
-                        else:
-                            # Récupérer les pages
-                            pages = get_all_pages_for_classification(db, include_classified=reclassify_all)
-                            total_pages = len(pages)
-
-                            if total_pages == 0:
-                                st.info("✓ Aucune page à classifier")
-                            else:
-                                from app.gemini_classifier import classify_pages_sync
-
-                                # Traiter par lots
-                                batch_size_migration = 100
-                                total_classified = 0
-                                total_errors = 0
-
-                                for i in range(0, total_pages, batch_size_migration):
-                                    batch = pages[i:i + batch_size_migration]
-                                    batch_num = i // batch_size_migration + 1
-                                    total_batches = (total_pages + batch_size_migration - 1) // batch_size_migration
-
-                                    progress = (i + len(batch)) / total_pages
-                                    progress_bar.progress(progress)
-                                    status_text.text(f"Batch {batch_num}/{total_batches} - {len(batch)} pages...")
-
-                                    try:
-                                        results = classify_pages_sync(batch, taxonomy_text)
-
-                                        classifications = [
-                                            {
-                                                "page_id": r.page_id,
-                                                "category": r.category,
-                                                "subcategory": r.subcategory,
-                                                "confidence": r.confidence_score
-                                            }
-                                            for r in results
-                                        ]
-
-                                        updated = update_pages_classification_batch(db, classifications)
-                                        errors = sum(1 for r in results if r.error)
-                                        total_classified += updated
-                                        total_errors += errors
-
-                                    except Exception as e:
-                                        st.warning(f"Erreur batch {batch_num}: {e}")
-                                        total_errors += len(batch)
-
-                                progress_bar.progress(1.0)
-                                status_text.text("Terminé!")
-                                st.success(f"✅ {total_classified} pages classifiées ({total_errors} erreurs)")
-                                st.rerun()
-
+                        updated = migration_add_country_to_all_pages(db, "FR")
+                        st.success(f"✅ {updated} pages mises à jour avec FR")
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Erreur: {e}")
 
-        with col3:
-            st.markdown("**🚀 Migration complète**")
-            st.caption("FR + Classification de toutes les pages")
-            if st.button("Lancer migration complète", key="migration_full", type="primary"):
-                if not gemini_key:
-                    st.error("Configurez GEMINI_API_KEY d'abord")
-                else:
-                    # Étape 1: Ajouter FR
-                    with st.spinner("Étape 1/2: Ajout de FR..."):
-                        try:
-                            updated_fr = migration_add_country_to_all_pages(db, "FR")
-                            st.success(f"✅ Étape 1: {updated_fr} pages avec FR")
-                        except Exception as e:
-                            st.error(f"Erreur FR: {e}")
-                            updated_fr = 0
-
-                    # Étape 2: Classification
-                    from app.gemini_classifier import BATCH_SIZE, RATE_LIMIT_DELAY
-
-                    init_default_taxonomy(db)
-                    taxonomy_text = build_taxonomy_prompt(db)
-
-                    if not taxonomy_text:
-                        st.error("Aucune taxonomie configurée")
+    with col2:
+        st.markdown("**🤖 Classification Gemini**")
+        unclassified = migration_stats.get('unclassified', 0)
+        st.caption(f"{unclassified} pages non classifiées")
+        if st.button("Lancer la classification", key="migration_classify_maint"):
+            if not gemini_key:
+                st.error("Configurez GEMINI_API_KEY d'abord")
+            elif unclassified == 0:
+                st.info("✓ Aucune page à classifier")
+            else:
+                st.info(f"⏱️ Classification de {unclassified} pages en cours...")
+                try:
+                    from app.gemini_classifier import classify_and_save
+                    result = classify_and_save(db, limit=unclassified)
+                    if "error" in result:
+                        st.error(result["error"])
                     else:
-                        pages = get_all_pages_for_classification(db, include_classified=True)
-                        total_pages = len(pages)
+                        st.success(f"✅ {result['classified']} pages classifiées")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Erreur: {e}")
 
-                        if total_pages == 0:
-                            st.info("✓ Aucune page à classifier")
-                        else:
-                            gemini_batches = (total_pages + BATCH_SIZE - 1) // BATCH_SIZE
-                            estimated_time = gemini_batches * RATE_LIMIT_DELAY / 60
-                            st.info(f"⏱️ Étape 2: Classification de {total_pages} pages (~{estimated_time:.1f} min)")
+    st.markdown("---")
 
-                            progress_bar = st.progress(0)
-                            status_text = st.empty()
+    # ═══ SECTION: NETTOYAGE DES DOUBLONS ═══
+    st.subheader("🧹 Nettoyage des doublons")
+    st.caption("Supprimez les entrées en doublon (garde les plus récentes).")
 
-                            try:
-                                from app.gemini_classifier import classify_pages_sync
+    with db.get_session() as session:
+        ads_duplicates = session.query(
+            AdsRecherche.ad_id,
+            func.count(AdsRecherche.id).label('count')
+        ).group_by(AdsRecherche.ad_id).having(func.count(AdsRecherche.id) > 1).count()
 
-                                batch_size_migration = 100
-                                total_classified = 0
-                                total_errors = 0
+        winning_duplicates = session.query(
+            WinningAds.ad_id,
+            func.count(WinningAds.id).label('count')
+        ).group_by(WinningAds.ad_id).having(func.count(WinningAds.id) > 1).count()
 
-                                for i in range(0, total_pages, batch_size_migration):
-                                    batch = pages[i:i + batch_size_migration]
-                                    batch_num = i // batch_size_migration + 1
-                                    total_batches = (total_pages + batch_size_migration - 1) // batch_size_migration
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Doublons Ads Recherche", ads_duplicates)
+    col2.metric("Doublons Winning Ads", winning_duplicates)
+    col3.metric("Total doublons", ads_duplicates + winning_duplicates)
 
-                                    progress = (i + len(batch)) / total_pages
-                                    progress_bar.progress(progress)
-                                    status_text.text(f"Batch {batch_num}/{total_batches}...")
+    if ads_duplicates + winning_duplicates > 0:
+        st.warning(f"⚠️ {ads_duplicates + winning_duplicates} doublons détectés")
 
-                                    try:
-                                        results = classify_pages_sync(batch, taxonomy_text)
+        if st.button("🧹 Nettoyer les doublons", type="primary", key="cleanup_duplicates_maint"):
+            with st.spinner("Nettoyage en cours..."):
+                total_deleted = 0
 
-                                        classifications = [
-                                            {
-                                                "page_id": r.page_id,
-                                                "category": r.category,
-                                                "subcategory": r.subcategory,
-                                                "confidence": r.confidence_score
-                                            }
-                                            for r in results
-                                        ]
+                with db.get_session() as session:
+                    duplicates_ads = session.query(AdsRecherche.ad_id).group_by(AdsRecherche.ad_id).having(func.count(AdsRecherche.id) > 1).all()
+                    for (ad_id,) in duplicates_ads:
+                        entries = session.query(AdsRecherche).filter(AdsRecherche.ad_id == ad_id).order_by(AdsRecherche.date_scan.desc()).all()
+                        for entry in entries[1:]:
+                            session.delete(entry)
+                            total_deleted += 1
+                    session.commit()
 
-                                        updated = update_pages_classification_batch(db, classifications)
-                                        errors = sum(1 for r in results if r.error)
-                                        total_classified += updated
-                                        total_errors += errors
+                with db.get_session() as session:
+                    duplicates_winning = session.query(WinningAds.ad_id).group_by(WinningAds.ad_id).having(func.count(WinningAds.id) > 1).all()
+                    for (ad_id,) in duplicates_winning:
+                        entries = session.query(WinningAds).filter(WinningAds.ad_id == ad_id).order_by(WinningAds.date_scan.desc()).all()
+                        for entry in entries[1:]:
+                            session.delete(entry)
+                            total_deleted += 1
+                    session.commit()
 
-                                    except Exception as e:
-                                        total_errors += len(batch)
+                st.success(f"✅ {total_deleted} doublons supprimés")
+                st.rerun()
+    else:
+        st.success("✅ Aucun doublon détecté")
 
-                                progress_bar.progress(1.0)
-                                status_text.text("Migration terminée!")
-                                st.success(f"✅ Migration complète: {updated_fr} pages FR, {total_classified} classifiées")
-                                st.rerun()
+    st.markdown("---")
 
-                            except Exception as e:
-                                st.error(f"Erreur classification: {e}")
+    # ═══ SECTION: ARCHIVAGE ═══
+    st.subheader("📦 Archivage des anciennes données")
+    st.caption("Déplacez les données de plus de 90 jours vers les tables d'archive.")
 
-        # ═══════════════════════════════════════════════════════════════════════════
-        # NETTOYAGE DES DOUBLONS
-        # ═══════════════════════════════════════════════════════════════════════════
-        st.markdown("---")
-        st.subheader("🧹 Nettoyage des doublons")
-        st.markdown("Supprimez les entrées en doublon dans la base de données (garde les plus récentes).")
-
-        from sqlalchemy import func
-        from app.database import AdsRecherche, WinningAds
-
-        with db.get_session() as session:
-            # Compter les doublons dans liste_ads_recherche
-            ads_duplicates = session.query(
-                AdsRecherche.ad_id,
-                func.count(AdsRecherche.id).label('count')
-            ).group_by(AdsRecherche.ad_id).having(func.count(AdsRecherche.id) > 1).count()
-
-            # Compter les doublons dans winning_ads
-            winning_duplicates = session.query(
-                WinningAds.ad_id,
-                func.count(WinningAds.id).label('count')
-            ).group_by(WinningAds.ad_id).having(func.count(WinningAds.id) > 1).count()
+    try:
+        archive_stats = get_archive_stats(db)
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Doublons Ads Recherche", ads_duplicates)
+            st.markdown("**Tables principales**")
+            st.metric("Suivi Page", archive_stats.get("suivi_page", 0))
+            st.metric("Ads Recherche", archive_stats.get("liste_ads_recherche", 0))
+            st.metric("Winning Ads", archive_stats.get("winning_ads", 0))
         with col2:
-            st.metric("Doublons Winning Ads", winning_duplicates)
+            st.markdown("**Archivables (>90j)**")
+            st.metric("Suivi Page", archive_stats.get("suivi_page_archivable", 0))
+            st.metric("Ads Recherche", archive_stats.get("liste_ads_recherche_archivable", 0))
+            st.metric("Winning Ads", archive_stats.get("winning_ads_archivable", 0))
         with col3:
-            st.metric("Total doublons", ads_duplicates + winning_duplicates)
+            st.markdown("**Déjà archivés**")
+            st.metric("Suivi Page", archive_stats.get("suivi_page_archive", 0))
+            st.metric("Ads Recherche", archive_stats.get("liste_ads_recherche_archive", 0))
+            st.metric("Winning Ads", archive_stats.get("winning_ads_archive", 0))
 
-        if ads_duplicates + winning_duplicates > 0:
-            st.warning(f"⚠️ {ads_duplicates + winning_duplicates} doublons détectés")
+        total_archivable = (
+            archive_stats.get("suivi_page_archivable", 0) +
+            archive_stats.get("liste_ads_recherche_archivable", 0) +
+            archive_stats.get("winning_ads_archivable", 0)
+        )
 
-            if st.button("🧹 Nettoyer les doublons", type="primary", key="cleanup_duplicates"):
-                with st.spinner("Nettoyage en cours..."):
-                    total_deleted = 0
+        if total_archivable > 0:
+            st.warning(f"⚠️ {total_archivable:,} entrées peuvent être archivées")
 
-                    # Nettoyer liste_ads_recherche
-                    with db.get_session() as session:
-                        # Trouver les ad_id avec doublons
-                        duplicates_ads = session.query(
-                            AdsRecherche.ad_id
-                        ).group_by(AdsRecherche.ad_id).having(func.count(AdsRecherche.id) > 1).all()
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                days_threshold = st.number_input("Seuil (jours)", min_value=30, max_value=365, value=90, key="archive_days_maint")
 
-                        for (ad_id,) in duplicates_ads:
-                            entries = session.query(AdsRecherche).filter(
-                                AdsRecherche.ad_id == ad_id
-                            ).order_by(AdsRecherche.date_scan.desc()).all()
-
-                            for entry in entries[1:]:  # Garder le premier (plus récent)
-                                session.delete(entry)
-                                total_deleted += 1
-
-                        session.commit()
-
-                    # Nettoyer winning_ads
-                    with db.get_session() as session:
-                        duplicates_winning = session.query(
-                            WinningAds.ad_id
-                        ).group_by(WinningAds.ad_id).having(func.count(WinningAds.id) > 1).all()
-
-                        for (ad_id,) in duplicates_winning:
-                            entries = session.query(WinningAds).filter(
-                                WinningAds.ad_id == ad_id
-                            ).order_by(WinningAds.date_scan.desc()).all()
-
-                            for entry in entries[1:]:
-                                session.delete(entry)
-                                total_deleted += 1
-
-                        session.commit()
-
-                    st.success(f"✅ {total_deleted} doublons supprimés")
+            if st.button("📦 Lancer l'archivage", type="primary", key="archive_btn_maint"):
+                with st.spinner("Archivage en cours..."):
+                    result = archive_old_data(db, days_threshold=days_threshold)
+                    total_archived = sum(result.values())
+                    st.success(f"✅ {total_archived:,} entrées archivées")
+                    st.json(result)
                     st.rerun()
         else:
-            st.success("✅ Aucun doublon détecté")
+            st.success("✅ Aucune donnée à archiver")
 
-        # ═══════════════════════════════════════════════════════════════════════════
-        # ARCHIVAGE DES DONNEES ANCIENNES
-        # ═══════════════════════════════════════════════════════════════════════════
-        st.markdown("---")
-        st.subheader("📦 Archivage des anciennes donnees")
-        st.markdown("Deplacez les donnees de plus de 90 jours vers les tables d'archive pour optimiser les performances.")
-
-        from app.database import get_archive_stats, archive_old_data
-
-        try:
-            archive_stats = get_archive_stats(db)
-
-            # Stats actuelles
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.markdown("**Tables principales**")
-                st.metric("Suivi Page", archive_stats.get("suivi_page", 0))
-                st.metric("Ads Recherche", archive_stats.get("liste_ads_recherche", 0))
-                st.metric("Winning Ads", archive_stats.get("winning_ads", 0))
-            with col2:
-                st.markdown("**Archivables (>90j)**")
-                st.metric("Suivi Page", archive_stats.get("suivi_page_archivable", 0))
-                st.metric("Ads Recherche", archive_stats.get("liste_ads_recherche_archivable", 0))
-                st.metric("Winning Ads", archive_stats.get("winning_ads_archivable", 0))
-            with col3:
-                st.markdown("**Deja archives**")
-                st.metric("Suivi Page", archive_stats.get("suivi_page_archive", 0))
-                st.metric("Ads Recherche", archive_stats.get("liste_ads_recherche_archive", 0))
-                st.metric("Winning Ads", archive_stats.get("winning_ads_archive", 0))
-
-            # Total archivable
-            total_archivable = (
-                archive_stats.get("suivi_page_archivable", 0) +
-                archive_stats.get("liste_ads_recherche_archivable", 0) +
-                archive_stats.get("winning_ads_archivable", 0)
-            )
-
-            if total_archivable > 0:
-                st.warning(f"⚠️ {total_archivable:,} entrees peuvent etre archivees")
-
-                col1, col2 = st.columns([1, 2])
-                with col1:
-                    days_threshold = st.number_input("Seuil (jours)", min_value=30, max_value=365, value=90, key="archive_days")
-
-                if st.button("📦 Lancer l'archivage", type="primary", key="archive_btn"):
-                    with st.spinner("Archivage en cours..."):
-                        result = archive_old_data(db, days_threshold=days_threshold)
-                        total_archived = sum(result.values())
-                        st.success(f"✅ {total_archived:,} entrees archivees")
-                        st.json(result)
-                        st.rerun()
-            else:
-                st.success("✅ Aucune donnee a archiver")
-
-        except Exception as e:
-            st.error(f"Erreur: {e}")
-
-    else:
-        st.warning("Base de données non connectée")
+    except Exception as e:
+        st.error(f"Erreur: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
