@@ -1,12 +1,11 @@
 """
-Presentation layer - Streamlit Dashboard.
+Composants réutilisables pour le dashboard Streamlit.
 
-Ce module contient l'application Streamlit principale
-pour l'interface utilisateur.
+Ce module expose les composants UI comme les graphiques,
+badges, filtres et autres éléments d'interface.
 """
 
-from src.presentation.streamlit.components import (
-    # Charts
+from src.presentation.streamlit.components.charts import (
     CHART_COLORS,
     CHART_LAYOUT,
     info_card,
@@ -17,7 +16,9 @@ from src.presentation.streamlit.components import (
     create_gauge_chart,
     create_metric_card,
     create_comparison_bars,
-    # Badges
+)
+
+from src.presentation.streamlit.components.badges import (
     STATE_COLORS,
     CMS_COLORS,
     get_state_badge,

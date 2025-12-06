@@ -1,6 +1,9 @@
 """
 Dashboard Streamlit pour Meta Ads Analyzer
 Design moderne avec navigation latérale
+
+Note: Les composants UI (charts, badges) sont maintenant dans
+src/presentation/streamlit/components/ pour une meilleure organisation.
 """
 import warnings
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
@@ -24,6 +27,20 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+
+# Import des composants UI depuis l'architecture hexagonale
+# (Ces imports sont disponibles mais le dashboard utilise encore ses propres définitions
+# pour assurer la rétro-compatibilité. Migration progressive en cours.)
+# from src.presentation.streamlit.components import (
+#     CHART_COLORS, CHART_LAYOUT,
+#     STATE_COLORS, CMS_COLORS,
+#     get_state_badge, get_cms_badge, format_state_for_df,
+#     apply_custom_css,
+#     info_card, chart_header,
+#     create_horizontal_bar_chart, create_donut_chart,
+#     create_trend_chart, create_gauge_chart,
+#     create_metric_card, create_comparison_bars,
+# )
 
 from app.config import (
     AVAILABLE_COUNTRIES, AVAILABLE_LANGUAGES,
