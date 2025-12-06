@@ -808,3 +808,142 @@ def extract_currency_from_ads(ads_list: List[dict]) -> str:
 
     counter = Counter(currencies)
     return counter.most_common(1)[0][0]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CACHE API META
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def cached_search_ads(
+    client: MetaAdsClient,
+    keyword: str,
+    countries: List[str],
+    languages: List[str],
+    db=None,
+    use_cache: bool = True,
+    cache_ttl_hours: int = 6,
+    progress_callback: Optional[Callable[[int, int], None]] = None
+) -> Tuple[List[dict], bool]:
+    """
+    Recherche des annonces avec cache optionnel.
+
+    Args:
+        client: MetaAdsClient instance
+        keyword: Mot-cle a rechercher
+        countries: Liste des codes pays
+        languages: Liste des codes langues
+        db: DatabaseManager pour le cache (optionnel)
+        use_cache: Utiliser le cache (defaut: True)
+        cache_ttl_hours: Duree de vie du cache en heures
+        progress_callback: Fonction callback pour la progression
+
+    Returns:
+        Tuple (liste des ads, from_cache: bool)
+    """
+    # Si pas de db ou cache desactive, appel direct
+    if not db or not use_cache:
+        ads = client.search_ads(keyword, countries, languages, progress_callback)
+        return (ads, False)
+
+    try:
+        from app.database import generate_cache_key, get_cached_response, set_cached_response
+
+        # Generer la cle de cache
+        cache_key = generate_cache_key(
+            "search_ads",
+            keyword=keyword.lower().strip(),
+            countries=sorted(countries),
+            languages=sorted(languages)
+        )
+
+        # Verifier le cache
+        cached_data = get_cached_response(db, cache_key)
+        if cached_data is not None:
+            if progress_callback:
+                progress_callback(len(cached_data), len(cached_data))
+            return (cached_data, True)
+
+        # Cache miss - faire l'appel API
+        ads = client.search_ads(keyword, countries, languages, progress_callback)
+
+        # Sauvegarder dans le cache si on a des resultats
+        if ads:
+            set_cached_response(
+                db,
+                cache_key,
+                "search_ads",
+                ads,
+                ttl_hours=cache_ttl_hours
+            )
+
+        return (ads, False)
+
+    except Exception as e:
+        # En cas d'erreur de cache, fallback sur l'appel direct
+        print(f"⚠️ Erreur cache: {e}")
+        ads = client.search_ads(keyword, countries, languages, progress_callback)
+        return (ads, False)
+
+
+def cached_fetch_ads_for_page(
+    client: MetaAdsClient,
+    page_id: str,
+    countries: List[str],
+    db=None,
+    use_cache: bool = True,
+    cache_ttl_hours: int = 3
+) -> Tuple[List[dict], bool]:
+    """
+    Recupere les ads d'une page avec cache optionnel.
+
+    Args:
+        client: MetaAdsClient instance
+        page_id: ID de la page Facebook
+        countries: Liste des codes pays
+        db: DatabaseManager pour le cache (optionnel)
+        use_cache: Utiliser le cache (defaut: True)
+        cache_ttl_hours: Duree de vie du cache en heures
+
+    Returns:
+        Tuple (liste des ads, from_cache: bool)
+    """
+    # Si pas de db ou cache desactive, appel direct
+    if not db or not use_cache:
+        ads = client.fetch_all_ads_for_page(page_id, countries)
+        return (ads, False)
+
+    try:
+        from app.database import generate_cache_key, get_cached_response, set_cached_response
+
+        # Generer la cle de cache
+        cache_key = generate_cache_key(
+            "page_ads",
+            page_id=page_id,
+            countries=sorted(countries)
+        )
+
+        # Verifier le cache
+        cached_data = get_cached_response(db, cache_key)
+        if cached_data is not None:
+            return (cached_data, True)
+
+        # Cache miss - faire l'appel API
+        ads = client.fetch_all_ads_for_page(page_id, countries)
+
+        # Sauvegarder dans le cache si on a des resultats
+        if ads:
+            set_cached_response(
+                db,
+                cache_key,
+                "page_ads",
+                ads,
+                ttl_hours=cache_ttl_hours
+            )
+
+        return (ads, False)
+
+    except Exception as e:
+        # En cas d'erreur de cache, fallback sur l'appel direct
+        print(f"⚠️ Erreur cache: {e}")
+        ads = client.fetch_all_ads_for_page(page_id, countries)
+        return (ads, False)

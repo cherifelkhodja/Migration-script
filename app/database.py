@@ -536,6 +536,28 @@ class WinningAdsArchive(Base):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# CACHE API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class APICache(Base):
+    """Cache pour les appels API Meta"""
+    __tablename__ = "api_cache"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cache_key = Column(String(255), unique=True, nullable=False, index=True)
+    cache_type = Column(String(50))  # "search_ads", "page_info", etc.
+    response_data = Column(Text)  # JSON serialized
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime, nullable=False)
+    hit_count = Column(Integer, default=0)
+
+    __table_args__ = (
+        Index('idx_cache_expires', 'expires_at'),
+        Index('idx_cache_type', 'cache_type'),
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # GESTION DE LA CONNEXION
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -4678,3 +4700,181 @@ def archive_old_data(
             session.commit()
 
     return archived
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FONCTIONS DE CACHE API
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def generate_cache_key(cache_type: str, **params) -> str:
+    """
+    Genere une cle de cache unique basee sur les parametres.
+
+    Args:
+        cache_type: Type de cache (search_ads, page_info, etc.)
+        **params: Parametres de la requete
+
+    Returns:
+        Cle de cache unique
+    """
+    import hashlib
+    import json
+
+    # Trier les params pour avoir une cle consistante
+    sorted_params = sorted(params.items())
+    param_str = json.dumps(sorted_params, sort_keys=True)
+    hash_str = hashlib.md5(param_str.encode()).hexdigest()[:16]
+
+    return f"{cache_type}:{hash_str}"
+
+
+def get_cached_response(
+    db: DatabaseManager,
+    cache_key: str
+) -> Optional[Dict]:
+    """
+    Recupere une reponse du cache si elle existe et n'est pas expiree.
+
+    Args:
+        db: DatabaseManager
+        cache_key: Cle de cache
+
+    Returns:
+        Donnees cachees ou None si cache miss
+    """
+    import json
+
+    with db.get_session() as session:
+        cache_entry = session.query(APICache).filter(
+            APICache.cache_key == cache_key,
+            APICache.expires_at > datetime.utcnow()
+        ).first()
+
+        if cache_entry:
+            # Incrementer le hit count
+            cache_entry.hit_count = (cache_entry.hit_count or 0) + 1
+            session.commit()
+
+            try:
+                return json.loads(cache_entry.response_data)
+            except:
+                return None
+
+    return None
+
+
+def set_cached_response(
+    db: DatabaseManager,
+    cache_key: str,
+    cache_type: str,
+    response_data: Dict,
+    ttl_hours: int = 6
+) -> bool:
+    """
+    Stocke une reponse dans le cache.
+
+    Args:
+        db: DatabaseManager
+        cache_key: Cle de cache
+        cache_type: Type de cache
+        response_data: Donnees a cacher
+        ttl_hours: Duree de vie en heures (defaut: 6h)
+
+    Returns:
+        True si succes
+    """
+    import json
+
+    expires_at = datetime.utcnow() + timedelta(hours=ttl_hours)
+
+    with db.get_session() as session:
+        # Verifier si existe deja
+        existing = session.query(APICache).filter(
+            APICache.cache_key == cache_key
+        ).first()
+
+        if existing:
+            existing.response_data = json.dumps(response_data)
+            existing.expires_at = expires_at
+            existing.created_at = datetime.utcnow()
+        else:
+            cache_entry = APICache(
+                cache_key=cache_key,
+                cache_type=cache_type,
+                response_data=json.dumps(response_data),
+                expires_at=expires_at
+            )
+            session.add(cache_entry)
+
+        session.commit()
+
+    return True
+
+
+def get_cache_stats(db: DatabaseManager) -> Dict:
+    """
+    Recupere les statistiques du cache.
+
+    Returns:
+        Dict avec stats du cache
+    """
+    from sqlalchemy import func
+
+    with db.get_session() as session:
+        total_entries = session.query(func.count(APICache.id)).scalar() or 0
+
+        valid_entries = session.query(func.count(APICache.id)).filter(
+            APICache.expires_at > datetime.utcnow()
+        ).scalar() or 0
+
+        expired_entries = total_entries - valid_entries
+
+        total_hits = session.query(func.sum(APICache.hit_count)).scalar() or 0
+
+        # Stats par type
+        by_type = session.query(
+            APICache.cache_type,
+            func.count(APICache.id),
+            func.sum(APICache.hit_count)
+        ).group_by(APICache.cache_type).all()
+
+        return {
+            "total_entries": total_entries,
+            "valid_entries": valid_entries,
+            "expired_entries": expired_entries,
+            "total_hits": total_hits,
+            "by_type": [
+                {"type": t[0], "count": t[1], "hits": t[2] or 0}
+                for t in by_type
+            ]
+        }
+
+
+def clear_expired_cache(db: DatabaseManager) -> int:
+    """
+    Supprime les entrees de cache expirees.
+
+    Returns:
+        Nombre d'entrees supprimees
+    """
+    with db.get_session() as session:
+        deleted = session.query(APICache).filter(
+            APICache.expires_at < datetime.utcnow()
+        ).delete()
+        session.commit()
+
+    return deleted
+
+
+def clear_all_cache(db: DatabaseManager) -> int:
+    """
+    Supprime tout le cache.
+
+    Returns:
+        Nombre d'entrees supprimees
+    """
+    with db.get_session() as session:
+        deleted = session.query(APICache).delete()
+        session.commit()
+
+    return deleted

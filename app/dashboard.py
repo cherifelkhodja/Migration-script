@@ -5357,6 +5357,54 @@ def render_settings():
             else:
                 st.caption("Aucun token configuré")
 
+        # ═══ GESTION DU CACHE API ═══
+        st.markdown("---")
+        st.subheader("💾 Cache API Meta")
+        st.markdown("Le cache stocke les resultats des appels API pour eviter les requetes redondantes.")
+
+        from app.database import get_cache_stats, clear_expired_cache, clear_all_cache
+
+        try:
+            cache_stats = get_cache_stats(db)
+
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Entrees valides", cache_stats.get("valid_entries", 0))
+            with col2:
+                st.metric("Entrees expirees", cache_stats.get("expired_entries", 0))
+            with col3:
+                st.metric("Total hits", f"{cache_stats.get('total_hits', 0):,}")
+            with col4:
+                hit_rate = 0
+                if cache_stats.get("total_hits", 0) > 0:
+                    # Estimation du hit rate
+                    hit_rate = min(100, cache_stats.get("total_hits", 0) / max(1, cache_stats.get("valid_entries", 1)) * 10)
+                st.metric("Efficacite", f"{hit_rate:.0f}%")
+
+            # Stats par type
+            if cache_stats.get("by_type"):
+                with st.expander("📊 Details par type"):
+                    for t in cache_stats["by_type"]:
+                        st.write(f"**{t['type']}**: {t['count']} entrees, {t['hits']} hits")
+
+            # Actions
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if st.button("🧹 Nettoyer expire", key="clear_expired_cache"):
+                    deleted = clear_expired_cache(db)
+                    st.success(f"✅ {deleted} entrees expirees supprimees")
+                    st.rerun()
+            with col2:
+                if st.button("🗑️ Vider tout le cache", key="clear_all_cache"):
+                    deleted = clear_all_cache(db)
+                    st.success(f"✅ {deleted} entrees supprimees")
+                    st.rerun()
+            with col3:
+                st.caption("TTL: 6h (recherches), 3h (pages)")
+
+        except Exception as e:
+            st.error(f"Erreur cache: {e}")
+
     st.markdown("---")
 
     # Seuils de détection (configurables)
