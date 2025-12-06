@@ -2789,6 +2789,21 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
             pages_need_analysis.append((pid, data))
 
     cached_analysis = len(web_results)
+
+    # Log détaillé du cache
+    cache_with_thematique = sum(1 for w in web_results.values() if w.get("_skip_classification"))
+    cache_without_thematique = sum(1 for w in web_results.values() if not w.get("_skip_classification"))
+    cache_with_content = sum(1 for w in web_results.values()
+                            if not w.get("_skip_classification") and
+                            (w.get("site_title") or w.get("site_description") or w.get("site_h1")))
+
+    print(f"[UI Search] Cache: {cached_analysis} pages ({cache_with_thematique} avec thématique, {cache_without_thematique} sans, {cache_with_content} avec contenu)")
+    print(f"[UI Search] À analyser: {len(pages_need_analysis)} pages")
+
+    # Log les URLs à analyser
+    for pid, data in pages_need_analysis[:5]:  # Max 5 pour pas spammer
+        print(f"[UI Search] → Analyse requise: {pid} | url={data.get('website', 'VIDE')[:60]}")
+
     st.info(f"🔬 {len(pages_need_analysis)} sites à analyser ({cached_analysis} en cache)")
 
     # Fonction worker pour analyse parallèle
@@ -2818,8 +2833,19 @@ def run_search_process(keywords, countries, languages, min_ads, selected_cms, pr
 
                 # Log détaillé pour debug classification
                 has_content = bool(result.get("site_title") or result.get("site_description") or result.get("site_h1"))
-                url_short = result.get("_analyzed_url", "")[:50]
-                print(f"[UI Search] Analysé {pid}: url={url_short}, cms={result.get('cms', 'N/A')}, content={has_content}, title='{result.get('site_title', '')[:30]}'")
+                url_short = result.get("_analyzed_url", "")[:60]
+                cms = result.get("cms", "N/A")
+                title = result.get("site_title", "")[:40]
+                desc = result.get("site_description", "")[:40]
+                h1 = result.get("site_h1", "")[:40]
+                error = result.get("error", "")
+
+                if error:
+                    print(f"[UI Search] ❌ Analysé {pid}: url={url_short} | ERREUR: {error}")
+                elif has_content:
+                    print(f"[UI Search] ✅ Analysé {pid}: cms={cms} | title='{title}' | desc='{desc[:20]}...'")
+                else:
+                    print(f"[UI Search] ⚠️ Analysé {pid}: url={url_short} | cms={cms} | AUCUN CONTENU (title/desc/h1 vides)")
 
                 if completed % 5 == 0:
                     tracker.update_step("Analyse web", completed, len(pages_need_analysis))
