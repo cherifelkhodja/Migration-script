@@ -1,5 +1,41 @@
 """
-Page Monitoring - Watchlists, Alerts et Monitoring.
+Page Monitoring - Surveillance et alertes des pages publicitaires.
+
+Ce module fournit les outils de monitoring pour suivre l'evolution des
+annonceurs dans le temps et detecter les opportunites/risques.
+
+Fonctionnalites principales:
+----------------------------
+1. Watchlists (render_watchlists):
+   - Top performers: Pages XXL/XL avec le plus d'ads actives
+   - Top winning ads: Ads avec le meilleur ratio reach/age
+   - Pages avec winning: Classement par nombre de winning ads
+
+2. Alertes (render_alerts + generate_alerts):
+   - Nouvelles pages XXL detectees
+   - Pages en forte croissance (+50% en 7 jours)
+   - Pages en declin (-30% ou plus)
+   - Winning ads du jour
+   - Changements d'etat (promotions/regressions)
+
+3. Monitoring (render_monitoring):
+   - Evolution temporelle des pages
+   - Comparaison multi-pages
+   - Graphiques de tendance
+
+4. Detection de tendances (detect_trends):
+   - Identification des pages en croissance rapide
+   - Detection des pages en chute
+
+Seuils de detection:
+--------------------
+- Croissance forte: +50% d'ads en 7 jours
+- Declin: -30% d'ads ou plus en 7 jours
+- Page XXL: >= 150 ads actives
+- Page XL: >= 80 ads actives
+
+Ces seuils sont calibres pour detecter les changements significatifs
+sans generer trop de faux positifs.
 """
 from datetime import datetime, timedelta
 from collections import Counter

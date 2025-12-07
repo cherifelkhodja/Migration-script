@@ -2,7 +2,30 @@
 Configuration et constantes pour l'application Meta Ads Analyzer.
 
 Ce module centralise toutes les configurations de l'application
-dans l'architecture hexagonale.
+dans l'architecture hexagonale. Il definit les parametres metier,
+les seuils de detection, et les constantes techniques.
+
+Organisation:
+-------------
+1. Base de donnees: URLs et seuils de persistence
+2. API Meta: Endpoints, limites, throttling
+3. Winning Ads: Criteres de qualification reach/age
+4. Detection CMS: Patterns et timeouts
+5. Pays/Langues: Listes disponibles
+
+Personnalisation:
+-----------------
+La plupart des valeurs peuvent etre surchargees via:
+- Variables d'environnement (DATABASE_URL, SCRAPER_API_KEY, etc.)
+- Interface Settings du dashboard
+- Parametres de recherche
+
+Seuils critiques documentes:
+----------------------------
+- MIN_ADS_INITIAL (1): Seuil tres bas pour ne pas rater de pages
+- MIN_ADS_SUIVI (10): Pages significatives pour le suivi temporel
+- DEFAULT_STATE_THRESHOLDS: Classification XS -> XXL
+- WINNING_AD_CRITERIA: Matrice reach/age pour qualification
 """
 import os
 import re
@@ -47,17 +70,29 @@ DEFAULT_STATE_THRESHOLDS = {
 
 # ---------------------------------------------------------------------------
 # Criteres Winning Ads
+# ---------------------------------------------------------------------------
+# Une "Winning Ad" est une publicite performante identifiee par sa capacite
+# a atteindre rapidement une large audience. La logique: plus une ad est
+# jeune, moins elle a besoin de reach pour etre consideree performante.
+#
 # Format: liste de tuples (max_age_days, min_reach)
-# Une ad est "winning" si elle valide au moins un de ces criteres
+# Interpretation: "Si l'ad a <= X jours ET >= Y reach, elle est winning"
+#
+# Exemple: Une ad de 5 jours avec 25,000 reach est winning car:
+#          - Elle a <= 5 jours (condition 1)
+#          - Elle a >= 20,000 reach (condition 2)
+#
+# Ces seuils sont calibres sur le marche publicitaire europeen (eu_total_reach).
+# Ils peuvent etre ajustes selon le secteur (luxe = seuils plus hauts).
 WINNING_AD_CRITERIA = [
-    (4, 15000),    # <=4 jours et >15k reach
-    (5, 20000),    # <=5 jours et >20k reach
-    (6, 30000),    # <=6 jours et >30k reach
-    (7, 40000),    # <=7 jours et >40k reach
-    (8, 50000),    # <=8 jours et >50k reach
-    (15, 100000),  # <=15 jours et >100k reach
-    (22, 200000),  # <=22 jours et >200k reach
-    (29, 400000),  # <=29 jours et >400k reach
+    (4, 15_000),    # Ads tres recentes: forte traction des le depart
+    (5, 20_000),    # 5 jours: debut de scaling
+    (6, 30_000),    # 6 jours: croissance confirmee
+    (7, 40_000),    # 1 semaine: ad qui performe
+    (8, 50_000),    # 8 jours: scaling en cours
+    (15, 100_000),  # 2 semaines: ad etablie et performante
+    (22, 200_000),  # 3 semaines: ad a fort budget
+    (29, 400_000),  # 1 mois: ad evergreen a tres fort reach
 ]
 
 # Parallelisation

@@ -1,12 +1,53 @@
 """
-Module de gestion de la base de donnees PostgreSQL.
+Module Facade pour la gestion de la base de donnees PostgreSQL.
 
-Ce module fournit DatabaseManager et re-exporte les modeles et fonctions
-depuis les modules specialises pour compatibilite ascendante.
+Ce module constitue le point d'entree principal pour l'acces aux donnees.
+Il fournit DatabaseManager et re-exporte tous les modeles et fonctions
+des modules specialises pour maintenir la compatibilite ascendante.
 
-Architecture:
-- models/ : Modeles SQLAlchemy
-- repositories/ : Fonctions d'acces aux donnees par domaine
+Architecture Hexagonale:
+------------------------
+Ce module fait partie de la couche Infrastructure (Adapters) et implemente
+les ports de persistence definis par le domaine.
+
+    src/infrastructure/persistence/
+    ├── database.py          <- CE FICHIER (Facade)
+    ├── models/              <- Modeles SQLAlchemy (entites ORM)
+    │   ├── base.py          Base declarative
+    │   ├── page.py          PageRecherche, SuiviPage
+    │   ├── ad.py            AdsRecherche, WinningAds
+    │   └── ...
+    └── repositories/        <- Fonctions d'acces aux donnees
+        ├── page_repository.py
+        ├── winning_ad_repository.py
+        ├── settings_repository.py
+        └── ...
+
+Pattern Facade:
+---------------
+Ce module applique le pattern Facade pour:
+1. Simplifier l'acces aux nombreuses fonctions de persistence
+2. Masquer la complexite de l'architecture interne
+3. Maintenir la compatibilite avec le code existant
+
+Usage recommande:
+-----------------
+Pour le nouveau code, importez directement depuis les sous-modules:
+    from src.infrastructure.persistence.models import PageRecherche
+    from src.infrastructure.persistence.repositories import save_winning_ads
+
+Pour le code existant, ce module reste le point d'entree principal:
+    from src.infrastructure.persistence.database import (
+        DatabaseManager, PageRecherche, save_winning_ads
+    )
+
+Connection Pooling:
+-------------------
+DatabaseManager utilise un pool de connexions SQLAlchemy optimise:
+- pool_size=5: Connexions maintenues en permanence
+- max_overflow=10: Connexions temporaires supplementaires
+- pool_recycle=1800: Recyclage toutes les 30 min (evite timeout)
+- pool_pre_ping=True: Verification avant utilisation
 """
 import os
 from datetime import datetime, timedelta
@@ -76,7 +117,31 @@ from src.infrastructure.persistence.repositories import (
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class DatabaseManager:
-    """Gestionnaire de connexion a la base de donnees avec connection pooling optimise."""
+    """
+    Gestionnaire central de connexion a la base de donnees PostgreSQL.
+
+    Cette classe encapsule la configuration SQLAlchemy et fournit un
+    context manager pour les sessions avec gestion automatique des
+    transactions (commit/rollback).
+
+    Attributes:
+        engine: Moteur SQLAlchemy avec pool de connexions
+        SessionLocal: Factory de sessions configuree
+
+    Configuration du pool:
+        - pool_size=5: 5 connexions permanentes
+        - max_overflow=10: Jusqu'a 15 connexions totales
+        - pool_timeout=30: Timeout de 30s pour obtenir une connexion
+        - pool_recycle=1800: Recyclage toutes les 30 minutes
+        - pool_pre_ping=True: Test de connexion avant utilisation
+
+    Example:
+        >>> db = DatabaseManager()
+        >>> with db.get_session() as session:
+        ...     pages = session.query(PageRecherche).all()
+        # Commit automatique si pas d'exception
+        # Rollback automatique en cas d'erreur
+    """
 
     def __init__(self, database_url: str = None):
         if database_url is None:

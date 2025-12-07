@@ -1,13 +1,72 @@
 """
-Page Search Ads - Recherche d'annonces Meta.
+Page Search Ads - Recherche d'annonces Meta Ad Library.
 
-Ce module contient toutes les fonctions liees a la recherche:
-- render_search_ads: Page principale de recherche
-- render_keyword_search: Formulaire de recherche par mots-cles
-- render_page_id_search: Formulaire de recherche par Page IDs
-- render_preview_results: Apercu des resultats
-- run_search_process: Processus de recherche par mots-cles
-- run_page_id_search: Processus de recherche par Page IDs
+Ce module gere la recherche et l'analyse des annonces publicitaires Meta.
+Il constitue le coeur fonctionnel de l'application, orchestrant le pipeline
+complet de decouverte d'annonceurs performants.
+
+Architecture du module:
+-----------------------
+- render_search_ads: Point d'entree, routage entre modes
+- render_keyword_search: Interface de recherche par mots-cles
+- render_page_id_search: Interface de recherche par Page IDs
+- render_preview_results: Apercu interactif avant sauvegarde
+- run_search_process: Pipeline complet de recherche (8 phases)
+- run_page_id_search: Recherche directe par batch de Page IDs
+
+Pipeline de recherche (run_search_process):
+-------------------------------------------
+Le processus de recherche s'execute en 8 phases sequentielles:
+
+    Phase 1: Recherche par mots-cles
+        - Appels API Meta Ad Library par keyword
+        - Deduplication des annonces (par ad_id)
+        - Agregation des resultats
+
+    Phase 2: Regroupement par page
+        - Association ads -> pages Facebook
+        - Filtrage blacklist
+        - Filtrage par seuil minimum d'ads
+
+    Phase 3: Extraction sites web
+        - Extraction des URLs depuis les ads
+        - Utilisation du cache DB si disponible
+        - Detection du site principal
+
+    Phase 4: Detection CMS (parallele)
+        - Analyse technique des sites (Shopify, WooCommerce, etc.)
+        - Execution multithreadee (8 workers)
+        - Filtrage par CMS selectionnes
+
+    Phase 5: Comptage des annonces (batch)
+        - Requetes API par batch de 10 pages
+        - Comptage exact des ads actives
+        - Attribution de l'etat (XS -> XXL)
+
+    Phase 6: Analyse sites web + Classification
+        - Extraction produits, prix, theme
+        - Classification IA (Gemini) si disponible
+        - Categorisation thematique
+
+    Phase 7: Detection Winning Ads
+        - Evaluation criteres reach/age
+        - Identification des ads performantes
+        - Comptage par page
+
+    Phase 8: Sauvegarde ou Apercu
+        - Mode apercu: affichage interactif
+        - Mode direct: persistence en base
+
+Modes de recherche:
+-------------------
+1. Mode direct: Execution synchrone avec affichage temps reel
+2. Mode arriere-plan: Ajout a la file d'attente du worker
+3. Mode apercu: Preview des resultats avant sauvegarde
+
+Gestion des tokens:
+-------------------
+Le module supporte la rotation automatique de tokens Meta API
+pour gerer les limites de rate limiting (400 req/heure/token).
 """
 from datetime import datetime
 from collections import defaultdict, Counter
@@ -488,8 +547,49 @@ def render_preview_results():
             st.rerun()
 
 
-def run_search_process(keywords, countries, languages, min_ads, selected_cms, preview_mode=False):
-    """Execute le processus de recherche complet avec tracking detaille et logging"""
+def run_search_process(
+    keywords: list,
+    countries: list,
+    languages: list,
+    min_ads: int,
+    selected_cms: list,
+    preview_mode: bool = False
+):
+    """
+    Execute le pipeline complet de recherche d'annonceurs Meta.
+
+    Ce processus orchestre 8 phases de traitement pour identifier les pages
+    Facebook avec une activite publicitaire significative, analyser leurs
+    sites web, et detecter les winning ads performantes.
+
+    Args:
+        keywords: Liste des mots-cles de recherche
+        countries: Liste des codes pays (ex: ["FR", "BE"])
+        languages: Liste des codes langues (ex: ["fr", "en"])
+        min_ads: Seuil minimum d'ads actives pour retenir une page
+        selected_cms: Liste des CMS a inclure (ex: ["Shopify"])
+        preview_mode: Si True, affiche un apercu sans sauvegarder
+
+    Phases d'execution:
+        1. Recherche API par keyword avec deduplication
+        2. Regroupement ads par page et filtrage blacklist
+        3. Extraction des URLs de sites web
+        4. Detection CMS multithreadee (8 workers)
+        5. Comptage exact ads par batch API de 10
+        6. Analyse web + classification Gemini
+        7. Detection winning ads (criteres reach/age)
+        8. Sauvegarde DB ou apercu interactif
+
+    Side effects:
+        - Cree un SearchLog en base pour tracabilite
+        - Met a jour les metriques de progression en temps reel
+        - Sauvegarde les resultats si preview_mode=False
+        - Stocke les resultats dans st.session_state si preview_mode=True
+
+    Note:
+        Le processus utilise un TokenRotator pour gerer automatiquement
+        la rotation des tokens Meta API en cas de rate limiting.
+    """
     from src.presentation.streamlit.dashboard import add_to_search_history
     from src.infrastructure.api_tracker import APITracker, set_current_tracker, clear_current_tracker
     from src.infrastructure.external_services.meta_api import init_token_rotator
