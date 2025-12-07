@@ -837,6 +837,8 @@ class MarketSpy:
         parsed = urlparse(url)
         origin = f"{parsed.scheme}://{parsed.netloc}"
 
+        logger.info(f"Shopify JSON API: Starting count for {origin}")
+
         total_products = 0
         page = 1
         max_pages = 100  # Securite anti-boucle infinie
@@ -847,14 +849,21 @@ class MarketSpy:
             try:
                 response = self.http.get(api_url, timeout=TIMEOUT_SITEMAP)
 
-                if not response or response.status_code != 200:
+                if not response:
                     if page == 1:
-                        # Premiere page echoue = API non disponible
-                        logger.warning(f"Shopify JSON API failed for {origin}: HTTP {response.status_code if response else 'None'}")
+                        logger.warning(f"Shopify JSON API failed for {origin}: No response")
                         return {"product_count": None, "error": "API not available"}
                     break
 
-                data = response.json()
+                # Parser le JSON
+                try:
+                    data = response.json()
+                except Exception as json_err:
+                    logger.warning(f"Shopify JSON parse error for {origin}: {json_err}")
+                    if page == 1:
+                        return {"product_count": None, "error": "JSON parse error"}
+                    break
+
                 products = data.get("products", [])
 
                 if not products:

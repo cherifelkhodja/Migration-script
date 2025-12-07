@@ -1034,7 +1034,9 @@ def run_search_process(
                 pid, result = future.result()
                 if pid in web_results:
                     # Sitemap Shopify: uniquement pour compter les produits
-                    web_results[pid]["product_count"] = result.get("product_count") or None
+                    # Note: Ne pas utiliser "or None" car 0 est une valeur valide
+                    count = result.get("product_count")
+                    web_results[pid]["product_count"] = count if count is not None else None
 
                 completed += 1
                 if completed % 5 == 0:
