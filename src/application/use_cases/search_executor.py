@@ -816,7 +816,8 @@ def execute_background_search(
     suivi_saved = 0
     ads_saved = 0
     winning_saved = 0
-    winning_skipped = 0
+    winning_new = 0
+    winning_updated = 0
 
     try:
         # D'abord, vérifier quelles pages existent déjà (pour l'historique)
@@ -858,7 +859,7 @@ def execute_background_search(
         ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries_list, MIN_ADS_LISTE)
 
         tracker.update_step("Sauvegarde winning ads", 4, 5)
-        winning_saved, winning_skipped = save_winning_ads(db, winning_ads_data, pages_final, log_id)
+        winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data, log_id)
 
         # ═══ Enregistrer l'historique de recherche ═══
         tracker.update_step("Historique recherche", 5, 5)
@@ -907,7 +908,7 @@ def execute_background_search(
         print(f"   📄 Pages: {pages_saved} total ({pages_new} nouvelles, {pages_existing} mises à jour)")
         print(f"   📊 Suivi: {suivi_saved}")
         print(f"   📢 Ads: {ads_saved}")
-        print(f"   🏆 Winning: {winning_saved} sauvées, {winning_skipped} doublons ignorés")
+        print(f"   🏆 Winning: {winning_saved} sauvées ({winning_new} 🆕, {winning_updated} 📝)")
         print(f"   💾 Cache phase 6: {pages_cached} pages utilisaient le cache")
 
         phase8_stats = {
@@ -918,7 +919,8 @@ def execute_background_search(
             "Suivi pages": suivi_saved,
             "Annonces sauvées": ads_saved,
             "Winning ads sauvées": winning_saved,
-            "🔄 Winning doublons": winning_skipped,
+            "🆕 Nouvelles winning": winning_new,
+            "📝 Winning mises à jour": winning_updated,
         }
         tracker.complete_phase(f"{pages_saved} pages ({pages_new} 🆕, {pages_existing} 📝), {winning_saved} winning", stats=phase8_stats)
 
