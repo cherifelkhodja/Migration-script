@@ -70,6 +70,46 @@ from src.infrastructure.persistence.database import (
 )
 
 
+def parse_ad_body(body_raw: str, max_length: int = 80) -> str:
+    """
+    Parse le texte d'une ad depuis le format brut (JSON ou string).
+
+    Args:
+        body_raw: Texte brut (peut etre JSON array ou string simple)
+        max_length: Longueur max avant troncature
+
+    Returns:
+        Texte propre sans crochets, tronque si necessaire
+    """
+    if not body_raw:
+        return ""
+
+    body = body_raw
+
+    # Si c'est une string qui ressemble a du JSON array
+    if isinstance(body, str):
+        body = body.strip()
+        if body.startswith("["):
+            try:
+                import json
+                parsed = json.loads(body)
+                if isinstance(parsed, list) and parsed:
+                    body = parsed[0]
+            except (json.JSONDecodeError, IndexError):
+                # Enlever les crochets manuellement si le parsing echoue
+                body = body.strip("[]'\"")
+
+    # Si c'est deja une liste
+    if isinstance(body, list):
+        body = body[0] if body else ""
+
+    # Nettoyer et tronquer
+    body = str(body).strip()
+    if len(body) > max_length:
+        return body[:max_length] + "..."
+    return body
+
+
 def render_classification_filters(db, key_prefix: str = "", columns: int = 3):
     """Filtres de classification (thematique, subcategory, pays)."""
     from src.infrastructure.persistence.database import (
@@ -339,7 +379,7 @@ def _render_winning_ads_list(winning_ads: list, group_by: str, period: int):
             "Reach": lambda ad: ad.get("eu_total_reach", 0),
             "Age (jours)": lambda ad: ad.get("ad_age_days", 0),
             "Critere": lambda ad: ad.get("matched_criteria", ""),
-            "Texte Ad": lambda ad: (ad.get("ad_creative_bodies", "") or "")[:200],
+            "Texte Ad": lambda ad: parse_ad_body(ad.get("ad_creative_bodies", ""), 200),
             "Site": lambda ad: ad.get("lien_site", ""),
             "CMS": lambda ad: ad.get("cms", ""),
             "URL Ad": lambda ad: ad.get("ad_snapshot_url", ""),
@@ -430,7 +470,7 @@ def _render_grouped_by_page(winning_ads: list):
                     "Reach": f"{reach_val:,}".replace(",", " "),
                     "Age (j)": ad.get('ad_age_days', 0) or 0,
                     "Critere": ad.get('matched_criteria', 'N/A'),
-                    "Texte": (ad.get('ad_creative_bodies', '') or '')[:60] + "...",
+                    "Texte": parse_ad_body(ad.get('ad_creative_bodies', ''), 60),
                     "Ad URL": ad.get('ad_snapshot_url', '')
                 })
             df = pd.DataFrame(table_data)
@@ -502,7 +542,7 @@ def _render_winning_ads_table(winning_ads: list):
             "Reach": f"{reach_val:,}".replace(",", " "),
             "Age (j)": ad.get('ad_age_days', 0) or 0,
             "Critere": ad.get('matched_criteria', 'N/A'),
-            "Texte": (ad.get('ad_creative_bodies', '') or '')[:80] + "..." if len(ad.get('ad_creative_bodies', '') or '') > 80 else (ad.get('ad_creative_bodies', '') or ''),
+            "Texte": parse_ad_body(ad.get('ad_creative_bodies', ''), 80),
         })
 
     df_winning = pd.DataFrame(table_data)
