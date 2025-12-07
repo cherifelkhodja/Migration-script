@@ -4,9 +4,8 @@
     "builder": "DOCKERFILE"
   },
   "deploy": {
-    "startCommand": "streamlit run src/presentation/streamlit/dashboard.py --server.port=${PORT:-8501} --server.address=0.0.0.0",
     "healthcheckPath": "/_stcore/health",
-    "healthcheckTimeout": 30,
+    "healthcheckTimeout": 60,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 3
   }
