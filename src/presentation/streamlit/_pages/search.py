@@ -103,7 +103,7 @@ def render_search_ads():
     """Page Search Ads - Recherche d'annonces"""
     from src.presentation.streamlit.dashboard import get_search_history, render_search_history_selector
 
-    st.title("Search Ads")
+    st.title("🔍 Search Ads")
 
     # Verifier si on a des resultats en apercu a afficher
     if st.session_state.get("show_preview_results", False):
@@ -125,12 +125,12 @@ def render_search_ads():
     # Selection du mode de recherche
     search_mode = st.radio(
         "Mode de recherche",
-        ["Par mots-cles", "Par Page IDs"],
+        ["🔤 Par mots-clés", "🆔 Par Page IDs"],
         horizontal=True,
         help="Choisissez entre recherche par mots-cles ou directement par Page IDs"
     )
 
-    if search_mode == "Par mots-cles":
+    if search_mode == "🔤 Par mots-clés":
         render_keyword_search()
     else:
         render_page_id_search()

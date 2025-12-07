@@ -54,9 +54,9 @@ from src.infrastructure.persistence.database import get_winning_ads
 
 
 def render_creative_analysis():
-    """Page Creative Analysis - Analyse des creatives publicitaires"""
-    st.title("Creative Analysis")
-    st.markdown("Analysez les tendances creatives des annonces")
+    """Page Creative Analysis - Analyse des créatives publicitaires"""
+    st.title("🎨 Creative Analysis")
+    st.markdown("Analysez les tendances créatives des annonces")
 
     db = get_database()
     if not db:
@@ -260,8 +260,8 @@ def render_background_searches():
     except ImportError:
         pass  # Package non installe, refresh manuel
 
-    st.title("Recherches en cours")
-    st.markdown("Suivi en temps reel des recherches en arriere-plan.")
+    st.title("🔄 Recherches en cours")
+    st.markdown("Suivi en temps réel des recherches en arrière-plan.")
 
     db = get_database()
     if not db:
@@ -283,7 +283,7 @@ def render_background_searches():
     # Recherches interrompues (apres redemarrage)
     interrupted = get_interrupted_searches(db)
     if interrupted:
-        st.warning(f"{len(interrupted)} recherche(s) interrompue(s) suite a une maintenance")
+        st.warning(f"⚠️ {len(interrupted)} recherche(s) interrompue(s) suite à une maintenance")
 
         for search in interrupted:
             keywords = json.loads(search.keywords) if search.keywords else []

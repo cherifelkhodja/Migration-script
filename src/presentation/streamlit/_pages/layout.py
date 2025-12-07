@@ -254,8 +254,8 @@ def render_dashboard():
     from src.presentation.streamlit.dashboard import render_classification_filters
     from src.presentation.streamlit._pages.monitoring import detect_trends, generate_alerts
 
-    st.title("Dashboard")
-    st.markdown("Vue d'ensemble de vos donnees")
+    st.title("🏠 Dashboard")
+    st.markdown("Vue d'ensemble de vos données")
 
     db = get_database()
     if not db:
@@ -263,17 +263,17 @@ def render_dashboard():
         return
 
     # Filtres de classification
-    st.markdown("#### Filtres")
+    st.markdown("#### 🔍 Filtres")
     filters = render_classification_filters(db, key_prefix="dashboard", columns=3)
 
     # Afficher les filtres actifs
     active_filters = []
     if filters.get("thematique"):
-        active_filters.append(f"{filters['thematique']}")
+        active_filters.append(f"🏷️ {filters['thematique']}")
     if filters.get("subcategory"):
-        active_filters.append(f"{filters['subcategory']}")
+        active_filters.append(f"📂 {filters['subcategory']}")
     if filters.get("pays"):
-        active_filters.append(f"{filters['pays']}")
+        active_filters.append(f"🌍 {filters['pays']}")
 
     if active_filters:
         st.caption(f"Filtres actifs: {' - '.join(active_filters)}")
@@ -317,29 +317,29 @@ def render_dashboard():
         falling = trends.get("evolution", {}).get("falling", 0)
 
         col1.metric(
-            "Total Pages",
+            "📄 Total Pages",
             total_pages,
             delta=f"+{pages_delta} (7j)" if pages_delta > 0 else f"{pages_delta} (7j)" if pages_delta < 0 else None,
             delta_color="normal"
         )
         col2.metric(
-            "Actives",
+            "✅ Actives",
             actives,
-            delta=f"{rising} montantes" if rising > 0 else None,
+            delta=f"📈 {rising} montantes" if rising > 0 else None,
             delta_color="normal"
         )
-        col3.metric("XXL (>=150)", xxl_count)
-        col4.metric("Shopify", shopify_count)
+        col3.metric("🚀 XXL (>=150)", xxl_count)
+        col4.metric("🛒 Shopify", shopify_count)
         col5.metric(
-            "Winning (7j)",
+            "🏆 Winning (7j)",
             winning_total,
-            delta=f"+{winning_delta} vs sem. prec." if winning_delta > 0 else f"{winning_delta} vs sem. prec." if winning_delta < 0 else None,
+            delta=f"+{winning_delta} vs sem. préc." if winning_delta > 0 else f"{winning_delta} vs sem. préc." if winning_delta < 0 else None,
             delta_color="normal" if winning_delta >= 0 else "inverse"
         )
 
         # Encart Tendances (7 jours)
         if rising > 0 or falling > 0 or pages_delta != 0 or winning_delta != 0:
-            with st.expander("Tendances (7 derniers jours)", expanded=False):
+            with st.expander("📈 Tendances (7 derniers jours)", expanded=False):
                 trend_cols = st.columns(4)
                 with trend_cols[0]:
                     st.metric(
@@ -373,7 +373,7 @@ def render_dashboard():
         alerts = generate_alerts(db)
         if alerts:
             st.markdown("---")
-            st.subheader("Alertes")
+            st.subheader("🔔 Alertes")
             alert_cols = st.columns(min(len(alerts), 4))
             for i, alert in enumerate(alerts[:4]):
                 with alert_cols[i]:

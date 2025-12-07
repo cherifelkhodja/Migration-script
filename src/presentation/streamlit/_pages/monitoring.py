@@ -75,8 +75,8 @@ def render_watchlists():
         render_classification_filters, render_date_filter
     )
 
-    st.title("Watchlists")
-    st.markdown("Gerer vos listes de surveillance")
+    st.title("📋 Watchlists")
+    st.markdown("Gérer vos listes de surveillance")
 
     db = get_database()
     if not db:
@@ -84,7 +84,7 @@ def render_watchlists():
         return
 
     # Filtres de classification + date
-    st.markdown("#### Filtres")
+    st.markdown("#### 🔍 Filtres")
     filter_col1, filter_col2 = st.columns([3, 1])
 
     with filter_col1:
@@ -110,7 +110,7 @@ def render_watchlists():
     st.markdown("---")
 
     # Creer 3 onglets pour les differentes vues
-    tab1, tab2, tab3 = st.tabs(["Top Performers", "Top Winning Ads", "Pages avec le + de Winning Ads"])
+    tab1, tab2, tab3 = st.tabs(["🌟 Top Performers", "🏆 Top Winning Ads", "📊 Pages avec le + de Winning Ads"])
 
     # TAB 1: Top Performers
     with tab1:
@@ -317,8 +317,8 @@ def render_alerts():
     from src.presentation.streamlit.dashboard import render_classification_filters
     # detect_trends and generate_alerts are defined in this file (monitoring.py)
 
-    st.title("Alerts")
-    st.markdown("Alertes et changements detectes automatiquement")
+    st.title("🔔 Alerts")
+    st.markdown("Alertes et changements détectés automatiquement")
 
     db = get_database()
     if not db:
@@ -326,17 +326,17 @@ def render_alerts():
         return
 
     # Filtres de classification
-    st.markdown("#### Filtres")
+    st.markdown("#### 🔍 Filtres")
     filters = render_classification_filters(db, key_prefix="alerts", columns=3)
 
     # Afficher les filtres actifs
     active_filters = []
     if filters.get("thematique"):
-        active_filters.append(f"{filters['thematique']}")
+        active_filters.append(f"🏷️ {filters['thematique']}")
     if filters.get("subcategory"):
-        active_filters.append(f"{filters['subcategory']}")
+        active_filters.append(f"📂 {filters['subcategory']}")
     if filters.get("pays"):
-        active_filters.append(f"{filters['pays']}")
+        active_filters.append(f"🌍 {filters['pays']}")
 
     if active_filters:
         st.caption(f"Filtres actifs: {' - '.join(active_filters)}")
@@ -352,7 +352,7 @@ def render_alerts():
         )
 
         if alerts:
-            st.success(f"{len(alerts)} alerte(s) active(s)")
+            st.success(f"📬 {len(alerts)} alerte(s) active(s)")
 
             for alert in alerts:
                 if alert["type"] == "success":
@@ -398,34 +398,34 @@ def render_alerts():
 
                 st.markdown("")
         else:
-            st.info("Aucune alerte pour le moment")
-            st.caption("Les alertes sont generees automatiquement lors des scans")
+            st.info("🔕 Aucune alerte pour le moment")
+            st.caption("Les alertes sont générées automatiquement lors des scans")
 
         # Section detection manuelle
         st.markdown("---")
-        st.subheader("Detection manuelle")
+        st.subheader("🔍 Détection manuelle")
 
         col1, col2 = st.columns(2)
 
         with col1:
-            if st.button("Rechercher pages en croissance", width="stretch"):
+            if st.button("📈 Rechercher pages en croissance", use_container_width=True):
                 trends = detect_trends(db, days=7)
                 if trends["rising"]:
-                    st.success(f"{len(trends['rising'])} page(s) en forte croissance")
+                    st.success(f"📈 {len(trends['rising'])} page(s) en forte croissance")
                     for t in trends["rising"]:
                         st.write(f"**{t['nom_site']}** +{t['pct_ads']:.0f}%")
                 else:
                     st.info("Aucune page en forte croissance")
 
         with col2:
-            if st.button("Rechercher pages en declin", width="stretch"):
+            if st.button("📉 Rechercher pages en déclin", use_container_width=True):
                 trends = detect_trends(db, days=7)
                 if trends["falling"]:
-                    st.warning(f"{len(trends['falling'])} page(s) en declin")
+                    st.warning(f"📉 {len(trends['falling'])} page(s) en déclin")
                     for t in trends["falling"]:
                         st.write(f"**{t['nom_site']}** {t['pct_ads']:.0f}%")
                 else:
-                    st.info("Aucune page en declin detectee")
+                    st.info("Aucune page en déclin détectée")
 
     except Exception as e:
         st.error(f"Erreur: {e}")
@@ -433,8 +433,8 @@ def render_alerts():
 
 def render_monitoring():
     """Page Monitoring - Suivi historique et evolution"""
-    st.title("Monitoring")
-    st.markdown("Suivi de l'evolution des pages depuis le dernier scan")
+    st.title("📈 Monitoring")
+    st.markdown("Suivi de l'évolution des pages depuis le dernier scan")
 
     db = get_database()
     if not db:
@@ -452,13 +452,13 @@ def render_monitoring():
         )
 
     # Section evolution
-    st.subheader("Evolution depuis le dernier scan")
+    st.subheader("📊 Évolution depuis le dernier scan")
 
     try:
         evolution = get_evolution_stats(db, period_days=period)
 
         if evolution:
-            st.info(f"{len(evolution)} pages avec evolution sur les {period} derniers jours")
+            st.info(f"📈 {len(evolution)} pages avec évolution sur les {period} derniers jours")
 
             # Metriques globales
             total_up = sum(1 for e in evolution if e["delta_ads"] > 0)
