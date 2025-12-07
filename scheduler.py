@@ -70,6 +70,8 @@ from datetime import datetime, timedelta
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Configuration du logging
 logging.basicConfig(
@@ -103,6 +105,41 @@ except ImportError as e:
     logger.error("Assurez-vous que les modules sont accessibles")
     sys.exit(1)
 
+
+# ============================================================================
+# HEALTH CHECK SERVER
+# ============================================================================
+
+class HealthHandler(BaseHTTPRequestHandler):
+    """Handler HTTP simple pour les healthchecks."""
+
+    def do_GET(self):
+        if self.path == '/health' or self.path == '/_stcore/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{"status": "healthy", "service": "scheduler"}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        # Silence les logs HTTP
+        pass
+
+
+def start_health_server(port: int = 8501):
+    """Demarre le serveur de healthcheck en background."""
+    server = HTTPServer(('0.0.0.0', port), HealthHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info(f"Health server demarré sur le port {port}")
+    return server
+
+
+# ============================================================================
+# STATE THRESHOLDS
+# ============================================================================
 
 def get_state_thresholds(db: DatabaseManager) -> dict:
     """
@@ -417,8 +454,12 @@ def process_search_queue():
 
 def main():
     """Point d'entrée principal du scheduler"""
-    logger.info("🚀 Démarrage du Meta Ads Scheduler")
-    logger.info(f"📅 Heure actuelle: {datetime.utcnow()}")
+    logger.info("Demarrage du Meta Ads Scheduler")
+    logger.info(f"Heure actuelle: {datetime.utcnow()}")
+
+    # Demarrer le serveur de healthcheck
+    health_port = int(os.getenv("PORT", 8501))
+    start_health_server(health_port)
 
     # Vérifier la configuration
     try:
