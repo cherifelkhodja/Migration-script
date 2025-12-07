@@ -53,9 +53,8 @@ from src.infrastructure.persistence.database import (
     search_pages, get_winning_ads, get_winning_ads_by_page,
     get_evolution_stats, get_page_evolution_history,
     get_winning_ads_stats, get_winning_ads_stats_filtered,
-    DatabaseManager
+    DatabaseManager, get_etat_from_ads_count
 )
-from src.domain.services.winning_ads_detector import get_etat_from_ads_count
 
 
 def render_csv_download(df: pd.DataFrame, filename: str, label: str = "📥 Exporter CSV"):

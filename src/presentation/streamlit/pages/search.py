@@ -84,12 +84,12 @@ from src.infrastructure.persistence.database import (
     get_cached_pages_info
 )
 from src.infrastructure.external_services.meta_api import MetaAdsClient
-from src.domain.services.web_analyzer import (
+from src.infrastructure.scrapers.web_analyzer import (
     detect_cms_from_url, analyze_website_complete,
     extract_website_from_ads, extract_currency_from_ads
 )
-from src.domain.services.winning_ads_detector import is_winning_ad, get_etat_from_ads_count
-from src.config import (
+from src.infrastructure.persistence.database import is_winning_ad, get_etat_from_ads_count
+from src.infrastructure.config import (
     AVAILABLE_COUNTRIES, AVAILABLE_LANGUAGES,
     DEFAULT_COUNTRIES, MIN_ADS_INITIAL,
     WINNING_AD_CRITERIA, MIN_ADS_SUIVI, MIN_ADS_LISTE,
