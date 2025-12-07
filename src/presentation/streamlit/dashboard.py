@@ -870,7 +870,7 @@ class SearchProgressTracker:
 
         # Nettoyer le tracker global
         try:
-            from src.infrastructure.api_tracker import clear_current_tracker
+            from src.infrastructure.monitoring.api_tracker import clear_current_tracker
             clear_current_tracker()
         except Exception:
             pass

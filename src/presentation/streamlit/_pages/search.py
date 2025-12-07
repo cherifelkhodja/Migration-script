@@ -591,7 +591,7 @@ def run_search_process(
         la rotation des tokens Meta API en cas de rate limiting.
     """
     from src.presentation.streamlit.dashboard import add_to_search_history
-    from src.infrastructure.api_tracker import APITracker, set_current_tracker, clear_current_tracker
+    from src.infrastructure.monitoring.api_tracker import APITracker, set_current_tracker, clear_current_tracker
     from src.infrastructure.external_services.meta_api import init_token_rotator
     from src.infrastructure.persistence.database import (
         get_active_meta_tokens_with_proxies, ensure_tables_exist, create_search_log
