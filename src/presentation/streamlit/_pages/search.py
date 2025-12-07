@@ -839,10 +839,10 @@ def run_search_process(
     def detect_cms_worker(pid_data):
         pid, data = pid_data
         try:
-            cms_result = detect_cms_from_url(data["website"])
-            return pid, cms_result
+            cms_name = detect_cms_from_url(data["website"])
+            return pid, cms_name if cms_name else "Unknown"
         except Exception:
-            return pid, {"cms": "Unknown", "is_shopify": False}
+            return pid, "Unknown"
 
     if pages_need_cms:
         completed = 0
@@ -850,10 +850,9 @@ def run_search_process(
             futures = {executor.submit(detect_cms_worker, item): item[0] for item in pages_need_cms}
 
             for future in as_completed(futures):
-                pid, cms_result = future.result()
-                cms_name = cms_result["cms"]
+                pid, cms_name = future.result()
                 pages_with_sites[pid]["cms"] = cms_name
-                pages_with_sites[pid]["is_shopify"] = cms_result.get("is_shopify", False)
+                pages_with_sites[pid]["is_shopify"] = (cms_name == "Shopify")
                 completed += 1
 
                 if completed % 5 == 0:
@@ -1259,9 +1258,9 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
     cms_options = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow"]
 
     for i, (pid, data) in enumerate(pages_with_sites.items()):
-        cms_result = detect_cms_from_url(data["website"])
-        data["cms"] = cms_result["cms"]
-        data["is_shopify"] = cms_result["is_shopify"]
+        cms_name = detect_cms_from_url(data["website"])
+        data["cms"] = cms_name if cms_name else "Unknown"
+        data["is_shopify"] = (cms_name == "Shopify")
         progress.progress((i + 1) / len(pages_with_sites))
         time.sleep(WEB_DELAY_CMS_CHECK)
 
