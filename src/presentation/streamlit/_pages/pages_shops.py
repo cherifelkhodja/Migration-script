@@ -362,16 +362,32 @@ def _render_export_csv(col_export, results: list):
             "Produits": lambda p: p.get("nombre_produits", 0),
             "Score": lambda p: p.get("score", 0),
             "Dernier Scan": lambda p: p.get("dernier_scan").strftime("%Y-%m-%d %H:%M") if p.get("dernier_scan") else "",
+            "Keywords": lambda p: p.get("keywords", ""),
             "Thematique": lambda p: p.get("thematique", ""),
             "Sous-categorie": lambda p: p.get("subcategory", ""),
+            "Confiance Classif.": lambda p: f"{int(p.get('classification_confidence', 0)*100)}%" if p.get('classification_confidence') else "",
             "Ads Library": lambda p: p.get("lien_fb_ad_library", ""),
             "Page Facebook": lambda p: f"https://www.facebook.com/{p.get('page_id', '')}",
+            "Date creation": lambda p: p.get("date_creation", ""),
+            "Derniere MAJ": lambda p: p.get("date_maj", ""),
         }
 
         default_columns = ["Page ID", "Nom", "Site", "CMS", "Etat", "Ads Actives", "Winning Ads", "Score"]
 
         with st.popover("📥 Export CSV"):
             st.markdown("**Colonnes a exporter:**")
+
+            # Presets rapides
+            col_p1, col_p2 = st.columns(2)
+            with col_p1:
+                if st.button("📋 Essentiel", key="preset_essential"):
+                    st.session_state.export_columns_pages = ["Page ID", "Nom", "Site", "CMS", "Etat", "Score"]
+                    st.rerun()
+            with col_p2:
+                if st.button("📊 Complet", key="preset_full"):
+                    st.session_state.export_columns_pages = list(all_export_columns.keys())
+                    st.rerun()
+
             selected_columns = st.multiselect(
                 "Selectionner les colonnes",
                 options=list(all_export_columns.keys()),
@@ -408,15 +424,21 @@ def _render_score_help():
 - ≥150 ads → 40 pts
 - ≥80 ads → 35 pts
 - ≥35 ads → 25 pts
+- ≥20 ads → 15 pts
+- ≥10 ads → 10 pts
+- ≥1 ad → 5 pts
 
 **Winning Ads** (max 30 pts)
 - ≥10 winning → 30 pts
 - ≥5 winning → 25 pts
 - ≥3 winning → 20 pts
+- ≥1 winning → 15 pts
 
 **Produits** (max 20 pts)
 - ≥100 produits → 20 pts
 - ≥50 produits → 15 pts
+- ≥20 produits → 10 pts
+- ≥5 produits → 5 pts
 
 **Bonus CMS** (+10 pts)
 - Shopify → +10 pts
@@ -564,6 +586,8 @@ def _render_detailed_mode(db, results: list):
                 st.write(f"**Site:** {page.get('lien_site', 'N/A')}")
                 st.write(f"**CMS:** {page.get('cms', 'N/A')} | **Produits:** {page.get('nombre_produits', 0)}")
                 st.write(f"**Score:** {score}/100 | **Winning Ads:** {winning}")
+                if page.get('keywords'):
+                    st.write(f"**Keywords:** {page.get('keywords', '')}")
 
                 # Classification editable
                 st.markdown("---")

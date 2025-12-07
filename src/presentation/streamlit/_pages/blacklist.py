@@ -57,7 +57,7 @@ def render_blacklist():
         if submitted:
             if new_page_id:
                 if add_to_blacklist(db, new_page_id.strip(), new_page_name.strip(), new_raison.strip()):
-                    st.success(f"Page {new_page_id} ajoutee a la blacklist")
+                    st.success(f"✓ Page {new_page_id} ajoutee a la blacklist")
                     st.rerun()
                 else:
                     st.warning("Cette page est deja dans la blacklist")
@@ -109,7 +109,7 @@ def render_blacklist():
                     with col4:
                         if st.button("🗑️ Retirer", key=f"remove_bl_{entry['page_id']}", help="Retirer de la blacklist"):
                             if remove_from_blacklist(db, entry['page_id']):
-                                st.success("Retire de la blacklist")
+                                st.success("✓ Retire de la blacklist")
                                 st.rerun()
 
                     st.markdown("---")

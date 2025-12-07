@@ -405,7 +405,7 @@ def render_dashboard():
 
         with col1:
             chart_header(
-                "Repartition par Etat",
+                "📊 Repartition par Etat",
                 "Classement des pages selon leur nombre d'annonces actives",
                 "XXL = >=150 ads, XL = 80-149, L = 35-79, M = 20-34, S = 10-19, XS = 1-9"
             )
@@ -427,7 +427,7 @@ def render_dashboard():
 
         with col2:
             chart_header(
-                "Repartition par CMS",
+                "🛒 Repartition par CMS",
                 "Technologie e-commerce utilisee par les sites",
                 "Shopify est la plateforme la plus populaire pour le dropshipping"
             )
@@ -446,7 +446,7 @@ def render_dashboard():
 
         # Top performers avec score
         st.markdown("---")
-        st.subheader("Top Performers (avec Score)")
+        st.subheader("🌟 Top Performers (avec Score)")
 
         top_pages = search_pages(db, limit=15)
         if top_pages:
@@ -474,7 +474,7 @@ def render_dashboard():
             # Export button
             csv_data = export_to_csv(top_pages)
             st.download_button(
-                "Exporter en CSV",
+                "📥 Exporter en CSV",
                 csv_data,
                 "top_performers.csv",
                 "text/csv",
@@ -488,19 +488,19 @@ def render_dashboard():
         col1, col2 = st.columns(2)
 
         with col1:
-            st.subheader("En forte croissance (7j)")
+            st.subheader("📈 En forte croissance (7j)")
             trend_data = detect_trends(db, days=7)
             if trend_data["rising"]:
                 for t in trend_data["rising"][:5]:
-                    st.write(f"**{t['nom_site']}** +{t['pct_ads']:.0f}% ({t['ads_actuel']} ads)")
+                    st.write(f"🚀 **{t['nom_site']}** +{t['pct_ads']:.0f}% ({t['ads_actuel']} ads)")
             else:
                 st.caption("Aucune tendance detectee")
 
         with col2:
-            st.subheader("En declin")
+            st.subheader("📉 En declin")
             if trend_data.get("falling"):
                 for t in trend_data["falling"][:5]:
-                    st.write(f"**{t['nom_site']}** {t['pct_ads']:.0f}% ({t['ads_actuel']} ads)")
+                    st.write(f"⚠️ **{t['nom_site']}** {t['pct_ads']:.0f}% ({t['ads_actuel']} ads)")
             else:
                 st.caption("Aucune page en declin")
 

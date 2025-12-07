@@ -72,7 +72,7 @@ def render_creative_analysis():
         - Les <b>call-to-actions</b> (CTA) les plus frequents<br>
         - Les <b>longueurs de texte</b> optimales
         """,
-        "info"
+        "🎨"
     )
 
     try:
@@ -129,7 +129,7 @@ def render_creative_analysis():
         col1, col2 = st.columns(2)
 
         with col1:
-            chart_header("Mots-cles frequents", "Mots les plus utilises dans les textes")
+            chart_header("🔤 Mots-cles frequents", "Mots les plus utilises dans les textes")
 
             # Compter les mots
             all_text = " ".join(all_bodies + all_titles).lower()
@@ -148,7 +148,7 @@ def render_creative_analysis():
                 st.plotly_chart(fig, key="word_freq", width="stretch")
 
         with col2:
-            chart_header("Emojis populaires", "Emojis les plus utilises")
+            chart_header("😀 Emojis populaires", "Emojis les plus utilises")
 
             emoji_counts = Counter(emojis).most_common(10)
 
@@ -160,7 +160,7 @@ def render_creative_analysis():
 
         # CTAs frequents
         st.markdown("---")
-        chart_header("Call-to-Actions detectes", "Phrases d'action les plus frequentes")
+        chart_header("📣 Call-to-Actions detectes", "Phrases d'action les plus frequentes")
 
         cta_patterns = [
             "acheter maintenant", "commander", "decouvrir", "profiter", "en savoir plus",
@@ -187,7 +187,7 @@ def render_creative_analysis():
         # GALERIE DES CREATIFS
         st.markdown("---")
         chart_header(
-            "Galerie des creatifs",
+            "🖼️ Galerie des creatifs",
             "Apercu visuel des publicites performantes",
             "Cliquez sur une ad pour voir les details"
         )
@@ -240,7 +240,7 @@ def render_creative_analysis():
                             # Lien vers l'ad
                             ad_url = ad.get("ad_snapshot_url", "")
                             if ad_url:
-                                st.link_button("Voir", ad_url, use_container_width=True)
+                                st.link_button("👁️ Voir", ad_url, use_container_width=True)
         else:
             st.info("Aucune ad avec apercu disponible")
 

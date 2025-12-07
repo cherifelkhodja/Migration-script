@@ -445,7 +445,7 @@ def render_monitoring():
     col1, col2 = st.columns([1, 3])
     with col1:
         period = st.selectbox(
-            "Periode",
+            "📅 Periode",
             options=[7, 14, 30],
             format_func=lambda x: f"1 semaine" if x == 7 else f"2 semaines" if x == 14 else "1 mois",
             index=0
@@ -466,16 +466,16 @@ def render_monitoring():
             total_stable = sum(1 for e in evolution if e["delta_ads"] == 0)
 
             col1, col2, col3 = st.columns(3)
-            col1.metric("En hausse", total_up)
-            col2.metric("En baisse", total_down)
-            col3.metric("Stable", total_stable)
+            col1.metric("📈 En hausse", total_up)
+            col2.metric("📉 En baisse", total_down)
+            col3.metric("➡️ Stable", total_stable)
 
             # Tableau d'evolution
             st.markdown("---")
 
             for evo in evolution[:20]:  # Top 20
                 delta_color = "green" if evo["delta_ads"] > 0 else "red" if evo["delta_ads"] < 0 else "gray"
-                delta_icon = "+" if evo["delta_ads"] > 0 else "-" if evo["delta_ads"] < 0 else "="
+                delta_icon = "📈" if evo["delta_ads"] > 0 else "📉" if evo["delta_ads"] < 0 else "➡️"
 
                 with st.expander(f"{delta_icon} **{evo['nom_site']}** - {evo['delta_ads']:+d} ads ({evo['pct_ads']:+.1f}%)"):
                     col1, col2, col3 = st.columns(3)
@@ -499,8 +499,8 @@ def render_monitoring():
                         st.metric("Duree entre scans", f"{evo['duree_jours']:.1f} jours")
 
                     # Dates des scans
-                    st.caption(f"Scan actuel: {evo['date_actuel'].strftime('%Y-%m-%d %H:%M') if evo['date_actuel'] else 'N/A'}")
-                    st.caption(f"Scan precedent: {evo['date_precedent'].strftime('%Y-%m-%d %H:%M') if evo['date_precedent'] else 'N/A'}")
+                    st.caption(f"🕐 Scan actuel: {evo['date_actuel'].strftime('%Y-%m-%d %H:%M') if evo['date_actuel'] else 'N/A'}")
+                    st.caption(f"🕐 Scan precedent: {evo['date_precedent'].strftime('%Y-%m-%d %H:%M') if evo['date_precedent'] else 'N/A'}")
 
                     # Bouton pour voir l'historique complet
                     if st.button(f"Voir historique complet", key=f"hist_{evo['page_id']}"):
@@ -514,7 +514,7 @@ def render_monitoring():
     st.markdown("---")
 
     # Section historique d'une page specifique
-    st.subheader("Historique d'une page")
+    st.subheader("🔍 Historique d'une page")
 
     # Recuperer page_id depuis session ou input
     default_page_id = st.session_state.get("monitoring_page_id", "")
@@ -525,12 +525,12 @@ def render_monitoring():
             history = get_page_evolution_history(db, page_id=page_id, limit=50)
 
             if history and len(history) > 0:
-                st.success(f"{len(history)} scans trouves")
+                st.success(f"📊 {len(history)} scans trouves")
 
                 # Graphique d'evolution ameliore
                 if len(history) > 1:
                     chart_header(
-                        "Evolution dans le temps",
+                        "📈 Evolution dans le temps",
                         "Suivi du nombre d'annonces et de produits",
                         "La ligne pointillee indique la tendance generale"
                     )
@@ -559,9 +559,9 @@ def render_monitoring():
                     df_data.append({
                         "Date": h["date_scan"].strftime("%Y-%m-%d %H:%M") if h["date_scan"] else "",
                         "Ads": h["nombre_ads_active"],
-                        "Delta Ads": delta_ads_str,
+                        "Δ Ads": delta_ads_str,
                         "Produits": h["nombre_produits"],
-                        "Delta Produits": delta_prod_str
+                        "Δ Produits": delta_prod_str
                     })
 
                 df = pd.DataFrame(df_data)
@@ -573,7 +573,7 @@ def render_monitoring():
 
     # COMPARAISON DE PAGES
     st.markdown("---")
-    st.subheader("Comparer des pages")
+    st.subheader("⚖️ Comparer des pages")
     st.caption("Comparez jusqu'a 3 pages cote a cote")
 
     col1, col2, col3 = st.columns(3)
@@ -585,7 +585,7 @@ def render_monitoring():
     with col3:
         page3_id = st.text_input("Page 3 (optionnel)", placeholder="Page ID", key="compare_page3")
 
-    if st.button("Comparer", type="primary", key="compare_btn"):
+    if st.button("🔄 Comparer", type="primary", key="compare_btn"):
         pages_to_compare = [p for p in [page1_id, page2_id, page3_id] if p]
 
         if len(pages_to_compare) >= 2:
@@ -598,7 +598,7 @@ def render_monitoring():
                     # Recuperer l'historique
                     history = get_page_evolution_history(db, page_id=pid, limit=10)
                     avg_ads = sum(h["nombre_ads_active"] for h in history) / len(history) if history else 0
-                    trend = "+" if history and len(history) > 1 and history[0]["delta_ads"] > 0 else "-" if history and len(history) > 1 and history[0]["delta_ads"] < 0 else "="
+                    trend = "📈" if history and len(history) > 1 and history[0]["delta_ads"] > 0 else "📉" if history and len(history) > 1 and history[0]["delta_ads"] < 0 else "➡️"
 
                     # Winning ads count
                     winning = get_winning_ads(db, page_id=pid, limit=100)
@@ -629,7 +629,7 @@ def render_monitoring():
                     })
 
             # Afficher la comparaison
-            st.markdown("##### Resultat de la comparaison")
+            st.markdown("##### 📊 Resultat de la comparaison")
             df_compare = pd.DataFrame(comparison_data)
             st.dataframe(df_compare, use_container_width=True, hide_index=True)
 
