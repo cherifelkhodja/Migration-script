@@ -1,8 +1,14 @@
 """
 Modeles SQLAlchemy pour les recherches: logs, queue, historique.
+
+Multi-tenancy:
+--------------
+Toutes les tables ont une colonne user_id pour isoler les donnees par utilisateur.
+user_id = None signifie donnees systeme/partagees.
 """
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, DateTime, Text, Float, Index, Boolean
+from sqlalchemy.dialects.postgresql import UUID
 
 from src.infrastructure.persistence.models.base import Base
 
@@ -12,6 +18,7 @@ class SearchLog(Base):
     __tablename__ = "search_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy
     keywords = Column(Text)
     countries = Column(String(100))
     languages = Column(String(100))
@@ -60,6 +67,7 @@ class SearchLog(Base):
     scraper_errors_by_type = Column(Text)
 
     __table_args__ = (
+        Index('idx_search_log_user', 'user_id'),
         Index('idx_search_log_date', 'started_at'),
         Index('idx_search_log_status', 'status'),
         Index('idx_search_log_status_date', 'status', 'started_at'),
@@ -71,6 +79,7 @@ class PageSearchHistory(Base):
     __tablename__ = "page_search_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy
     search_log_id = Column(Integer, nullable=False, index=True)
     page_id = Column(String(50), nullable=False, index=True)
     found_at = Column(DateTime, default=datetime.utcnow)
@@ -79,6 +88,7 @@ class PageSearchHistory(Base):
     keyword_matched = Column(String(255))
 
     __table_args__ = (
+        Index('idx_page_search_history_user', 'user_id'),
         Index('idx_page_search_history_search', 'search_log_id'),
         Index('idx_page_search_history_page', 'page_id'),
         Index('idx_page_search_history_composite', 'search_log_id', 'page_id'),
@@ -90,6 +100,7 @@ class WinningAdSearchHistory(Base):
     __tablename__ = "winning_ad_search_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy
     search_log_id = Column(Integer, nullable=False, index=True)
     ad_id = Column(String(50), nullable=False, index=True)
     found_at = Column(DateTime, default=datetime.utcnow)
@@ -99,6 +110,7 @@ class WinningAdSearchHistory(Base):
     matched_criteria = Column(String(100))
 
     __table_args__ = (
+        Index('idx_winning_ad_search_history_user', 'user_id'),
         Index('idx_winning_ad_search_history_search', 'search_log_id'),
         Index('idx_winning_ad_search_history_ad', 'ad_id'),
         Index('idx_winning_ad_search_history_composite', 'search_log_id', 'ad_id'),
@@ -110,6 +122,7 @@ class SearchQueue(Base):
     __tablename__ = "search_queue"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy
     status = Column(String(20), default="pending", index=True)
 
     keywords = Column(Text)
@@ -136,8 +149,9 @@ class SearchQueue(Base):
     priority = Column(Integer, default=0)
 
     __table_args__ = (
+        Index('idx_search_queue_user', 'user_id'),
         Index('idx_search_queue_status', 'status'),
-        Index('idx_search_queue_user', 'user_session'),
+        Index('idx_search_queue_session', 'user_session'),
         Index('idx_search_queue_created', 'created_at'),
     )
 
@@ -147,6 +161,7 @@ class APICallLog(Base):
     __tablename__ = "api_call_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy
     search_log_id = Column(Integer, index=True)
 
     api_type = Column(String(50))
@@ -169,6 +184,7 @@ class APICallLog(Base):
     called_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
+        Index('idx_api_call_user', 'user_id'),
         Index('idx_api_call_search', 'search_log_id'),
         Index('idx_api_call_type', 'api_type'),
         Index('idx_api_call_date', 'called_at'),

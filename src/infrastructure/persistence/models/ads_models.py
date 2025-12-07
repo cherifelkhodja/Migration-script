@@ -1,8 +1,14 @@
 """
 Modeles SQLAlchemy pour les annonces et winning ads.
+
+Multi-tenancy:
+--------------
+Toutes les tables ont une colonne user_id pour isoler les donnees par utilisateur.
+user_id = None signifie donnees systeme/partagees.
 """
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, DateTime, Text, Index, Boolean
+from sqlalchemy.dialects.postgresql import UUID
 
 from src.infrastructure.persistence.models.base import Base
 
@@ -12,6 +18,7 @@ class AdsRecherche(Base):
     __tablename__ = "liste_ads_recherche"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy
     ad_id = Column(String(50), nullable=False, index=True)
     page_id = Column(String(50), nullable=False, index=True)
     page_name = Column(String(255))
@@ -30,6 +37,8 @@ class AdsRecherche(Base):
     date_scan = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
+        Index('idx_ads_user', 'user_id'),
+        Index('idx_ads_user_ad', 'user_id', 'ad_id'),
         Index('idx_ads_page', 'page_id'),
         Index('idx_ads_date', 'date_scan'),
     )
@@ -40,7 +49,8 @@ class WinningAds(Base):
     __tablename__ = "winning_ads"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    ad_id = Column(String(50), unique=True, nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy
+    ad_id = Column(String(50), nullable=False, index=True)
     page_id = Column(String(50), nullable=False, index=True)
     page_name = Column(String(255))
     ad_creation_time = Column(DateTime)
@@ -57,6 +67,8 @@ class WinningAds(Base):
     is_new = Column(Boolean, default=True)
 
     __table_args__ = (
+        Index('idx_winning_ads_user', 'user_id'),
+        Index('idx_winning_ads_user_ad', 'user_id', 'ad_id', unique=True),  # Unique par user
         Index('idx_winning_ads_page', 'page_id'),
         Index('idx_winning_ads_date', 'date_scan'),
         Index('idx_winning_ads_ad', 'ad_id', 'date_scan'),
@@ -70,6 +82,7 @@ class AdsRechercheArchive(Base):
     __tablename__ = "liste_ads_recherche_archive"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy
     original_id = Column(Integer)
     ad_id = Column(String(50), nullable=False, index=True)
     page_id = Column(String(50), nullable=False, index=True)
@@ -95,6 +108,7 @@ class WinningAdsArchive(Base):
     __tablename__ = "winning_ads_archive"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy
     original_id = Column(Integer)
     ad_id = Column(String(50), nullable=False, index=True)
     page_id = Column(String(50), nullable=False, index=True)

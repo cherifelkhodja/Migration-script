@@ -1,8 +1,14 @@
 """
 Modeles SQLAlchemy pour les pages et leur suivi.
+
+Multi-tenancy:
+--------------
+Toutes les tables ont une colonne user_id pour isoler les donnees par utilisateur.
+user_id = None signifie donnees systeme/partagees.
 """
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, DateTime, Text, Float, Index, Boolean
+from sqlalchemy.dialects.postgresql import UUID
 
 from src.infrastructure.persistence.models.base import Base
 
@@ -12,7 +18,8 @@ class PageRecherche(Base):
     __tablename__ = "liste_page_recherche"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    page_id = Column(String(50), unique=True, nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy
+    page_id = Column(String(50), nullable=False, index=True)
     page_name = Column(String(255))
     lien_site = Column(String(500))
     lien_fb_ad_library = Column(String(500))
@@ -42,6 +49,8 @@ class PageRecherche(Base):
     was_created_in_last_search = Column(Boolean, default=True)
 
     __table_args__ = (
+        Index('idx_page_user', 'user_id'),
+        Index('idx_page_user_page', 'user_id', 'page_id', unique=True),  # Unique par user
         Index('idx_page_etat', 'etat'),
         Index('idx_page_cms', 'cms'),
         Index('idx_page_dernier_scan', 'dernier_scan'),
@@ -57,6 +66,7 @@ class SuiviPage(Base):
     __tablename__ = "suivi_page"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy
     cle_suivi = Column(String(100))
     page_id = Column(String(50), nullable=False, index=True)
     nom_site = Column(String(255))
@@ -65,6 +75,7 @@ class SuiviPage(Base):
     date_scan = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
+        Index('idx_suivi_user', 'user_id'),
         Index('idx_suivi_page_date', 'page_id', 'date_scan'),
     )
 
@@ -74,6 +85,7 @@ class SuiviPageArchive(Base):
     __tablename__ = "suivi_page_archive"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy
     original_id = Column(Integer)
     cle_suivi = Column(String(100))
     page_id = Column(String(50), nullable=False, index=True)
