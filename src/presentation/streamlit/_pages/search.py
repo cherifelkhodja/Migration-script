@@ -137,26 +137,26 @@ def render_search_ads():
 
 
 def render_keyword_search():
-    """Recherche par mots-cles"""
+    """Recherche par mots-clés"""
     from src.presentation.streamlit.dashboard import add_to_search_history
 
-    # CHAMPS ESSENTIELS (toujours visibles)
-    st.subheader("Recherche rapide")
+    # ═══ CHAMPS ESSENTIELS (toujours visibles) ═══
+    st.subheader("🎯 Recherche rapide")
 
     col1, col2 = st.columns([2, 1])
 
     with col1:
         keywords_input = st.text_area(
-            "Mots-cles (un par ligne)",
+            "Mots-clés (un par ligne)",
             placeholder="dropshipping\necommerce\nboutique en ligne",
             height=100,
-            help="Entrez vos mots-cles de recherche, un par ligne"
+            help="Entrez vos mots-clés de recherche, un par ligne"
         )
         keywords = [k.strip() for k in keywords_input.split("\n") if k.strip()]
 
     with col2:
         countries = st.multiselect(
-            "Pays",
+            "🌍 Pays",
             options=list(AVAILABLE_COUNTRIES.keys()),
             default=DEFAULT_COUNTRIES,
             format_func=lambda x: f"{x} - {AVAILABLE_COUNTRIES[x]}",
@@ -165,15 +165,15 @@ def render_keyword_search():
 
         # Indicateur rapide
         if keywords:
-            st.info(f"{len(keywords)} mot(s)-cle(s)")
+            st.info(f"🔍 {len(keywords)} mot(s)-clé(s)")
 
-    # OPTIONS AVANCEES (dans expander)
-    with st.expander("Options avancees", expanded=False):
+    # ═══ OPTIONS AVANCÉES (dans expander) ═══
+    with st.expander("⚙️ Options avancées", expanded=False):
         adv_col1, adv_col2, adv_col3 = st.columns(3)
 
         with adv_col1:
             languages = st.multiselect(
-                "Langues",
+                "🗣️ Langues",
                 options=list(AVAILABLE_LANGUAGES.keys()),
                 default=[],
                 format_func=lambda x: f"{x} - {AVAILABLE_LANGUAGES[x]}",
@@ -181,38 +181,38 @@ def render_keyword_search():
             )
 
         with adv_col2:
-            min_ads = st.slider("Min. ads pour inclusion", 1, 50, MIN_ADS_INITIAL, key="min_ads_keyword")
+            min_ads = st.slider("📊 Min. ads pour inclusion", 1, 50, MIN_ADS_INITIAL, key="min_ads_keyword")
 
         with adv_col3:
             cms_options = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow", "Autre/Inconnu"]
-            selected_cms = st.multiselect("CMS a inclure", options=cms_options, default=["Shopify"], key="cms_keyword")
+            selected_cms = st.multiselect("🛒 CMS à inclure", options=cms_options, default=["Shopify"], key="cms_keyword")
 
     # Options de mode
     opt_col1, opt_col2 = st.columns(2)
 
     with opt_col1:
         background_mode = st.checkbox(
-            "Lancer en arriere-plan",
-            help="La recherche continue meme si vous quittez la page.",
+            "⏳ Lancer en arrière-plan",
+            help="La recherche continue même si vous quittez la page. Résultats disponibles dans 'Recherches en cours'.",
             key="background_keyword"
         )
 
     with opt_col2:
         preview_mode = st.checkbox(
-            "Mode apercu",
-            help="Voir les resultats avant de les enregistrer en base de donnees",
+            "📋 Mode aperçu",
+            help="Voir les résultats avant de les enregistrer en base de données",
             key="preview_keyword",
             disabled=background_mode
         )
 
     # Bouton de recherche
-    if st.button("Lancer la recherche", type="primary", width="stretch", key="btn_keyword"):
+    if st.button("🚀 Lancer la recherche", type="primary", width="stretch", key="btn_keyword"):
         if not keywords:
-            st.error("Au moins un mot-cle requis !")
+            st.error("❌ Au moins un mot-clé requis !")
             return
 
         if background_mode:
-            # Mode arriere-plan: ajouter a la file d'attente
+            # Mode arrière-plan: ajouter à la file d'attente
             from src.infrastructure.workers.background_worker import get_worker
             worker = get_worker()
 
@@ -224,21 +224,22 @@ def render_keyword_search():
                 languages=",".join(languages) if languages else ""
             )
 
-            st.success(f"Recherche #{search_id} ajoutee a la file d'attente!")
-            st.info("Vous pouvez quitter cette page, la recherche continuera en arriere-plan.")
+            st.success(f"✅ Recherche #{search_id} ajoutée à la file d'attente!")
+            st.info("💡 Vous pouvez quitter cette page, la recherche continuera en arrière-plan. Consultez les résultats dans **Recherches en cours**.")
 
-            if st.button("Voir les recherches en arriere-plan", key="goto_bg"):
+            if st.button("📋 Voir les recherches en arrière-plan", key="goto_bg"):
                 st.session_state.current_page = "Background Searches"
                 st.rerun()
         else:
-            # Mode direct: execution synchrone
+            # Mode direct: exécution synchrone
             run_search_process(keywords, countries, languages, min_ads, selected_cms, preview_mode)
 
 
 def render_page_id_search():
-    """Recherche par Page IDs (optimisee par batch de 10)"""
+    """Recherche par Page IDs (optimisée par batch de 10)"""
 
-    st.subheader("Recherche par Page IDs")
+    # ═══ CHAMPS ESSENTIELS ═══
+    st.subheader("🆔 Recherche par Page IDs")
 
     col1, col2 = st.columns([2, 1])
 
@@ -253,24 +254,25 @@ def render_page_id_search():
 
     with col2:
         countries = st.multiselect(
-            "Pays",
+            "🌍 Pays",
             options=list(AVAILABLE_COUNTRIES.keys()),
             default=DEFAULT_COUNTRIES,
             format_func=lambda x: f"{x} - {AVAILABLE_COUNTRIES[x]}",
             key="countries_pageid"
         )
 
+        # Indicateur rapide
         if page_ids:
             batch_count = (len(page_ids) + 9) // 10
-            st.info(f"{len(page_ids)} IDs -> {batch_count} requetes")
+            st.info(f"📊 {len(page_ids)} IDs → {batch_count} requêtes")
 
-    # OPTIONS AVANCEES
-    with st.expander("Options avancees", expanded=False):
+    # ═══ OPTIONS AVANCÉES ═══
+    with st.expander("⚙️ Options avancées", expanded=False):
         adv_col1, adv_col2 = st.columns(2)
 
         with adv_col1:
             languages = st.multiselect(
-                "Langues",
+                "🗣️ Langues",
                 options=list(AVAILABLE_LANGUAGES.keys()),
                 default=[],
                 format_func=lambda x: f"{x} - {AVAILABLE_LANGUAGES[x]}",
@@ -279,19 +281,19 @@ def render_page_id_search():
 
         with adv_col2:
             cms_options = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow", "Autre/Inconnu"]
-            selected_cms = st.multiselect("CMS a inclure", options=cms_options, default=["Shopify"], key="cms_pageid")
+            selected_cms = st.multiselect("🛒 CMS à inclure", options=cms_options, default=["Shopify"], key="cms_pageid")
 
-    # Mode apercu
+    # Mode aperçu
     preview_mode = st.checkbox(
-        "Mode apercu",
-        help="Voir les resultats avant de les enregistrer",
+        "📋 Mode aperçu",
+        help="Voir les résultats avant de les enregistrer",
         key="preview_pageid"
     )
 
     # Bouton de recherche
-    if st.button("Lancer la recherche", type="primary", width="stretch", key="btn_pageid"):
+    if st.button("🚀 Lancer la recherche", type="primary", width="stretch", key="btn_pageid"):
         if not page_ids:
-            st.error("Au moins un Page ID requis !")
+            st.error("❌ Au moins un Page ID requis !")
             return
 
         run_page_id_search(page_ids, countries, languages, selected_cms, preview_mode)
@@ -312,9 +314,9 @@ def format_state_for_df(etat: str) -> str:
 
 
 def render_preview_results():
-    """Affiche les resultats en mode apercu"""
-    st.subheader("Apercu des resultats")
-    st.warning("Mode apercu active - Les donnees ne sont pas encore enregistrees")
+    """Affiche les résultats en mode aperçu"""
+    st.subheader("📋 Aperçu des résultats")
+    st.warning("⚠️ Mode aperçu activé - Les données ne sont pas encore enregistrées")
 
     db = get_database()
     pages_final = st.session_state.get("pages_final", {})
@@ -323,8 +325,8 @@ def render_preview_results():
     countries = st.session_state.get("countries", ["FR"])
 
     if not pages_final:
-        st.info("Aucun resultat a afficher")
-        if st.button("Nouvelle recherche"):
+        st.info("Aucun résultat à afficher")
+        if st.button("🔙 Nouvelle recherche"):
             st.session_state.show_preview_results = False
             st.rerun()
         return
@@ -335,7 +337,7 @@ def render_preview_results():
         wpid = w.get("page_id")
         winning_by_page[wpid] = winning_by_page.get(wpid, 0) + 1
 
-    # Recuperer les ads
+    # Récupérer les ads
     page_ads = st.session_state.get("page_ads", {})
 
     # Statistiques globales
@@ -343,17 +345,17 @@ def render_preview_results():
     total_ads = sum(d.get('ads_active_total', 0) for d in pages_final.values())
 
     col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-    col_stat1.metric("Pages", len(pages_final))
-    col_stat2.metric("Ads totales", total_ads)
-    col_stat3.metric("Winning Ads", total_winning)
-    col_stat4.metric("Pages avec Winning", len(winning_by_page))
+    col_stat1.metric("📊 Pages", len(pages_final))
+    col_stat2.metric("📢 Ads totales", total_ads)
+    col_stat3.metric("🏆 Winning Ads", total_winning)
+    col_stat4.metric("📈 Pages avec Winning", len(winning_by_page))
 
-    # 4 ONGLETS POUR LES DIFFERENTES DONNEES
+    # ═══ 4 ONGLETS POUR LES DIFFÉRENTES DONNÉES ═══
     tab_pages, tab_ads, tab_winning, tab_pages_winning = st.tabs([
-        f"Pages ({len(pages_final)})",
-        f"Ads ({total_ads})",
-        f"Winning Ads ({total_winning})",
-        f"Pages avec Winning ({len(winning_by_page)})"
+        f"📊 Pages ({len(pages_final)})",
+        f"📢 Ads ({total_ads})",
+        f"🏆 Winning Ads ({total_winning})",
+        f"📈 Pages avec Winning ({len(winning_by_page)})"
     ])
 
     # TAB 1: PAGES
@@ -368,17 +370,17 @@ def render_preview_results():
                 "Nom": data.get('page_name', 'N/A'),
                 "Site": data.get('website', ''),
                 "CMS": data.get('cms', 'N/A'),
-                "Etat": data.get('etat', 'N/A'),
+                "État": data.get('etat', 'N/A'),
                 "Ads": data.get('ads_active_total', 0),
-                "Winning": winning_count,
+                "🏆": winning_count,
                 "Produits": web.get('product_count', 0),
-                "Thematique": web.get('category', '') or web.get('gemini_category', ''),
+                "Thématique": web.get('category', '') or web.get('gemini_category', ''),
                 "Classification": web.get('gemini_subcategory', ''),
             })
 
         if pages_data:
             df_pages = pd.DataFrame(pages_data)
-            df_pages["Etat"] = df_pages["Etat"].apply(lambda x: format_state_for_df(x) if x else "")
+            df_pages["État"] = df_pages["État"].apply(lambda x: format_state_for_df(x) if x else "")
 
             st.dataframe(
                 df_pages,
@@ -473,16 +475,16 @@ def render_preview_results():
                 "Page ID": str(pid),
                 "Nom": data.get('page_name', 'N/A'),
                 "Site": data.get('website', ''),
-                "Winning Ads": count,
+                "🏆 Winning": count,
                 "Ads Totales": data.get('ads_active_total', 0),
                 "CMS": data.get('cms', 'N/A'),
-                "Etat": data.get('etat', 'N/A'),
+                "État": data.get('etat', 'N/A'),
                 "Produits": web.get('product_count', 0),
             })
 
         if pages_winning_data:
             df_pages_winning = pd.DataFrame(pages_winning_data)
-            df_pages_winning["Etat"] = df_pages_winning["Etat"].apply(lambda x: format_state_for_df(x) if x else "")
+            df_pages_winning["État"] = df_pages_winning["État"].apply(lambda x: format_state_for_df(x) if x else "")
 
             st.dataframe(
                 df_pages_winning,
@@ -499,14 +501,14 @@ def render_preview_results():
     st.markdown("---")
 
     # Actions de blacklist (expandable)
-    with st.expander("Actions de blacklist par page"):
+    with st.expander("🚫 Actions de blacklist par page"):
         for pid, data in list(pages_final.items()):
             col1, col2 = st.columns([4, 1])
             with col1:
                 st.write(f"**{data.get('page_name', 'N/A')}** ({pid})")
             with col2:
-                if st.button("Blacklist", key=f"bl_preview_{pid}", help="Blacklister"):
-                    if db and add_to_blacklist(db, pid, data.get("page_name", ""), "Blackliste depuis apercu"):
+                if st.button("🚫", key=f"bl_preview_{pid}", help="Blacklister cette page"):
+                    if db and add_to_blacklist(db, pid, data.get("page_name", ""), "Blacklisté depuis aperçu"):
                         del st.session_state.pages_final[pid]
                         if pid in st.session_state.web_results:
                             del st.session_state.web_results[pid]
@@ -518,7 +520,7 @@ def render_preview_results():
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Sauvegarder en base de donnees", type="primary", width="stretch"):
+        if st.button("💾 Sauvegarder en base de données", type="primary", width="stretch"):
             if db:
                 try:
                     thresholds = st.session_state.get("state_thresholds", None)
@@ -530,17 +532,17 @@ def render_preview_results():
                     winning_ads_data = st.session_state.get("winning_ads_data", [])
                     winning_saved, winning_skipped = save_winning_ads(db, winning_ads_data, pages_final)
 
-                    msg = f"Sauvegarde: {pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads, {winning_saved} winning"
+                    msg = f"✅ Sauvegardé : {pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads, {winning_saved} winning"
                     if winning_skipped > 0:
-                        msg += f" ({winning_skipped} doublons ignores)"
+                        msg += f" ({winning_skipped} doublons ignorés)"
                     st.success(msg)
                     st.session_state.show_preview_results = False
                     st.balloons()
                 except Exception as e:
-                    st.error(f"Erreur sauvegarde: {e}")
+                    st.error(f"❌ Erreur sauvegarde: {e}")
 
     with col2:
-        if st.button("Nouvelle recherche", width="stretch"):
+        if st.button("🔙 Nouvelle recherche", width="stretch"):
             st.session_state.show_preview_results = False
             st.session_state.pages_final = {}
             st.session_state.web_results = {}
@@ -606,17 +608,17 @@ def run_search_process(
             ensure_tables_exist(db)
             tokens_with_proxies = get_active_meta_tokens_with_proxies(db)
         except Exception as e:
-            st.warning(f"Impossible de charger les tokens depuis la DB: {e}")
+            st.warning(f"⚠️ Impossible de charger les tokens depuis la DB: {e}")
 
     # Fallback sur variable d'environnement
     if not tokens_with_proxies:
         env_token = os.getenv("META_ACCESS_TOKEN", "")
         if env_token:
             tokens_with_proxies = [{"id": None, "token": env_token, "proxy": None, "name": "Env Token"}]
-            st.info("Utilisation du token depuis META_ACCESS_TOKEN")
+            st.info("📝 Utilisation du token depuis META_ACCESS_TOKEN")
 
     if not tokens_with_proxies:
-        st.error("Aucun token Meta API disponible. Configurez vos tokens dans Settings > Tokens Meta API.")
+        st.error("❌ Aucun token Meta API disponible. Configurez vos tokens dans **Settings > Tokens Meta API**.")
         return
 
     # Sauvegarder dans l'historique
@@ -628,13 +630,13 @@ def run_search_process(
         'cms': selected_cms
     })
 
-    st.info(f"{len(tokens_with_proxies)} token(s) actif(s)")
+    st.info(f"🔄 {len(tokens_with_proxies)} token(s) actif(s)")
 
     # Initialiser le TokenRotator
     rotator = init_token_rotator(tokens_with_proxies=tokens_with_proxies, db=db)
 
     if rotator.token_count > 1:
-        st.success(f"Rotation automatique activee ({rotator.token_count} tokens)")
+        st.success(f"🔄 Rotation automatique activée ({rotator.token_count} tokens)")
 
     client = MetaAdsClient(rotator.get_current_token())
 
@@ -651,24 +653,24 @@ def run_search_process(
                 selected_cms=selected_cms if selected_cms else []
             )
         except Exception as e:
-            st.warning(f"Log non cree: {str(e)[:100]}")
+            st.warning(f"⚠️ Log non créé: {str(e)[:100]}")
 
     # Creer l'API tracker
     api_tracker = APITracker(search_log_id=log_id, db=db)
     set_current_tracker(api_tracker)
 
-    # Creer le tracker de progression
+    # Créer le tracker de progression
     progress_container = st.container()
     tracker = SearchProgressTracker(progress_container, db=db, log_id=log_id, api_tracker=api_tracker)
 
-    # Recuperer la blacklist
+    # Récupérer la blacklist
     blacklist_ids = set()
     if db:
         blacklist_ids = get_blacklist_ids(db)
         if blacklist_ids:
-            st.info(f"{len(blacklist_ids)} pages en blacklist seront ignorees")
+            st.info(f"🚫 {len(blacklist_ids)} pages en blacklist seront ignorées")
 
-    # PHASE 1: Recherche par mots-cles
+    # PHASE 1: Recherche par mots-clés
     tracker.start_phase(1, "Recherche par mots-cles", total_phases=8)
     all_ads = []
     seen_ad_ids = set()
