@@ -34,3 +34,4 @@ htmlcov/
 
 # Pytest
 .pytest_cache/
+old_dashboard.py
