@@ -463,62 +463,82 @@ def get_winning_ads_stats_filtered(
         pays: Filtrer par pays
 
     Returns:
-        Dict avec les statistiques
+        Dict avec les statistiques incluant by_page et by_criteria
     """
     cutoff = datetime.utcnow() - timedelta(days=days)
 
+    def apply_filters(query):
+        """Applique les filtres de classification à une query."""
+        if thematique:
+            query = query.filter(PageRecherche.thematique == thematique)
+        if subcategory:
+            query = query.filter(PageRecherche.subcategory == subcategory)
+        if pays:
+            query = query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+        return query
+
     with db.get_session() as session:
-        # Base query avec ou sans jointure
+        # Avec filtres de classification
         if thematique or subcategory or pays:
             base_query = session.query(WinningAds).join(
                 PageRecherche,
                 WinningAds.page_id == PageRecherche.page_id
             ).filter(WinningAds.date_scan >= cutoff)
-
-            if thematique:
-                base_query = base_query.filter(PageRecherche.thematique == thematique)
-            if subcategory:
-                base_query = base_query.filter(PageRecherche.subcategory == subcategory)
-            if pays:
-                base_query = base_query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+            base_query = apply_filters(base_query)
 
             total = base_query.count()
 
-            # Unique pages count avec les mêmes filtres
+            # Unique pages count
             unique_pages_query = session.query(
                 func.count(func.distinct(WinningAds.page_id))
             ).join(
                 PageRecherche,
                 WinningAds.page_id == PageRecherche.page_id
             ).filter(WinningAds.date_scan >= cutoff)
-
-            if thematique:
-                unique_pages_query = unique_pages_query.filter(PageRecherche.thematique == thematique)
-            if subcategory:
-                unique_pages_query = unique_pages_query.filter(PageRecherche.subcategory == subcategory)
-            if pays:
-                unique_pages_query = unique_pages_query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
-
+            unique_pages_query = apply_filters(unique_pages_query)
             unique_pages_count = unique_pages_query.scalar() or 0
 
-            # Avg reach avec les mêmes filtres
-            avg_reach = session.query(
+            # Avg reach
+            avg_reach_query = session.query(
                 func.avg(WinningAds.eu_total_reach)
             ).join(
                 PageRecherche,
                 WinningAds.page_id == PageRecherche.page_id
             ).filter(WinningAds.date_scan >= cutoff)
+            avg_reach_query = apply_filters(avg_reach_query)
+            avg_reach = avg_reach_query.scalar() or 0
 
-            if thematique:
-                avg_reach = avg_reach.filter(PageRecherche.thematique == thematique)
-            if subcategory:
-                avg_reach = avg_reach.filter(PageRecherche.subcategory == subcategory)
-            if pays:
-                avg_reach = avg_reach.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+            # Top 10 pages avec le plus de winning ads (avec filtres)
+            by_page_query = session.query(
+                WinningAds.page_id,
+                WinningAds.page_name,
+                func.count(WinningAds.id).label('count')
+            ).join(
+                PageRecherche,
+                WinningAds.page_id == PageRecherche.page_id
+            ).filter(WinningAds.date_scan >= cutoff)
+            by_page_query = apply_filters(by_page_query)
+            by_page = by_page_query.group_by(
+                WinningAds.page_id, WinningAds.page_name
+            ).order_by(
+                func.count(WinningAds.id).desc()
+            ).limit(10).all()
 
-            avg_reach = avg_reach.scalar() or 0
+            # Repartition par critere (avec filtres)
+            by_criteria_query = session.query(
+                WinningAds.matched_criteria,
+                func.count(WinningAds.id).label('count')
+            ).join(
+                PageRecherche,
+                WinningAds.page_id == PageRecherche.page_id
+            ).filter(WinningAds.date_scan >= cutoff)
+            by_criteria_query = apply_filters(by_criteria_query)
+            by_criteria = by_criteria_query.group_by(
+                WinningAds.matched_criteria
+            ).all()
+
         else:
-            # Sans filtres - utiliser la requête simple
+            # Sans filtres - utiliser les requêtes simples
             total = session.query(WinningAds).filter(
                 WinningAds.date_scan >= cutoff
             ).count()
@@ -535,10 +555,35 @@ def get_winning_ads_stats_filtered(
                 WinningAds.date_scan >= cutoff
             ).scalar() or 0
 
+            # Top 10 pages
+            by_page = session.query(
+                WinningAds.page_id,
+                WinningAds.page_name,
+                func.count(WinningAds.id).label('count')
+            ).filter(
+                WinningAds.date_scan >= cutoff
+            ).group_by(
+                WinningAds.page_id, WinningAds.page_name
+            ).order_by(
+                func.count(WinningAds.id).desc()
+            ).limit(10).all()
+
+            # Repartition par critere
+            by_criteria = session.query(
+                WinningAds.matched_criteria,
+                func.count(WinningAds.id).label('count')
+            ).filter(
+                WinningAds.date_scan >= cutoff
+            ).group_by(
+                WinningAds.matched_criteria
+            ).all()
+
         return {
             "total": total,
             "unique_pages": unique_pages_count,
             "avg_reach": int(avg_reach),
+            "by_page": [{"page_id": p[0], "page_name": p[1], "count": p[2]} for p in by_page],
+            "by_criteria": {c[0]: c[1] for c in by_criteria if c[0]},
         }
 
 

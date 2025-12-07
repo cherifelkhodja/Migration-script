@@ -400,6 +400,8 @@ def get_winning_ads_stats(db, days: int = 30) -> Dict:
             - total_reach: Somme des reach (portee cumulee)
             - avg_reach: Reach moyen par ad
             - unique_pages: Nombre de pages distinctes avec winning ads
+            - by_page: Top 10 pages avec le plus de winning ads
+            - by_criteria: Repartition par critere de qualification
     """
     cutoff = datetime.utcnow() - timedelta(days=days)
 
@@ -422,11 +424,36 @@ def get_winning_ads_stats(db, days: int = 30) -> Dict:
             WinningAds.date_scan >= cutoff
         ).scalar() or 0
 
+        # Top 10 pages avec le plus de winning ads
+        by_page = session.query(
+            WinningAds.page_id,
+            WinningAds.page_name,
+            func.count(WinningAds.id).label('count')
+        ).filter(
+            WinningAds.date_scan >= cutoff
+        ).group_by(
+            WinningAds.page_id, WinningAds.page_name
+        ).order_by(
+            func.count(WinningAds.id).desc()
+        ).limit(10).all()
+
+        # Repartition par critere de qualification
+        by_criteria = session.query(
+            WinningAds.matched_criteria,
+            func.count(WinningAds.id).label('count')
+        ).filter(
+            WinningAds.date_scan >= cutoff
+        ).group_by(
+            WinningAds.matched_criteria
+        ).all()
+
         return {
             "total": total,
             "total_reach": int(total_reach),
             "avg_reach": int(avg_reach),
             "unique_pages": unique_pages,
+            "by_page": [{"page_id": p[0], "page_name": p[1], "count": p[2]} for p in by_page],
+            "by_criteria": {c[0]: c[1] for c in by_criteria if c[0]},
         }
 
 
