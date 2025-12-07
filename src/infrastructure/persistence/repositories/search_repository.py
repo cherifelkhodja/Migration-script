@@ -1,9 +1,16 @@
 """
 Repository pour les recherches (logs, queue, historique).
+
+Multi-tenancy:
+--------------
+Toutes les fonctions acceptent un parametre optionnel user_id (UUID).
+- Si user_id est fourni: les donnees sont filtrees/associees a cet utilisateur
+- Si user_id est None: les donnees sont considerees comme systeme/partagees
 """
 import json
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
+from uuid import UUID
 
 from sqlalchemy import func, desc, and_, or_
 
@@ -18,17 +25,26 @@ from src.infrastructure.persistence.models import (
 )
 
 
+def _apply_user_filter(query, model, user_id: Optional[UUID]):
+    """Applique le filtre user_id a une query."""
+    if user_id is not None:
+        return query.filter(model.user_id == user_id)
+    return query
+
+
 def create_search_log(
     db,
     keywords: str,
     countries: str,
     languages: str = "",
     min_ads: int = 1,
-    selected_cms: str = ""
+    selected_cms: str = "",
+    user_id: Optional[UUID] = None
 ) -> int:
     """Cree un nouveau log de recherche."""
     with db.get_session() as session:
         log = SearchLog(
+            user_id=user_id,
             keywords=keywords,
             countries=countries,
             languages=languages,
@@ -102,10 +118,16 @@ def complete_search_log(
         return True
 
 
-def get_search_logs(db, limit: int = 50, status: str = None) -> List[Dict]:
+def get_search_logs(
+    db,
+    limit: int = 50,
+    status: str = None,
+    user_id: Optional[UUID] = None
+) -> List[Dict]:
     """Recupere les logs de recherche avec tous les champs."""
     with db.get_session() as session:
         query = session.query(SearchLog)
+        query = _apply_user_filter(query, SearchLog, user_id)
         if status:
             query = query.filter(SearchLog.status == status)
 
@@ -197,11 +219,13 @@ def create_search_queue(
     languages: str = "",
     min_ads: int = 1,
     cms_filter: str = "",
-    user_session: str = None
+    user_session: str = None,
+    user_id: Optional[UUID] = None
 ) -> int:
     """Cree une recherche en queue."""
     with db.get_session() as session:
         search = SearchQueue(
+            user_id=user_id,
             keywords=keywords,
             countries=countries,
             languages=languages,
@@ -298,24 +322,37 @@ def get_pending_searches(db, limit: int = 5) -> List[Dict]:
         return [get_search_queue(db, s.id) for s in searches]
 
 
-def get_queue_stats(db) -> Dict:
+def get_queue_stats(db, user_id: Optional[UUID] = None) -> Dict:
     """Statistiques de la queue."""
     with db.get_session() as session:
-        pending = session.query(func.count(SearchQueue.id)).filter(
+        base_query = session.query(func.count(SearchQueue.id))
+        if user_id is not None:
+            base_query = base_query.filter(SearchQueue.user_id == user_id)
+
+        pending = base_query.filter(
             SearchQueue.status == "pending"
         ).scalar() or 0
 
-        running = session.query(func.count(SearchQueue.id)).filter(
+        running_q = session.query(func.count(SearchQueue.id)).filter(
             SearchQueue.status == "running"
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            running_q = running_q.filter(SearchQueue.user_id == user_id)
+        running = running_q.scalar() or 0
 
-        completed = session.query(func.count(SearchQueue.id)).filter(
+        completed_q = session.query(func.count(SearchQueue.id)).filter(
             SearchQueue.status == "completed"
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            completed_q = completed_q.filter(SearchQueue.user_id == user_id)
+        completed = completed_q.scalar() or 0
 
-        failed = session.query(func.count(SearchQueue.id)).filter(
+        failed_q = session.query(func.count(SearchQueue.id)).filter(
             SearchQueue.status == "failed"
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            failed_q = failed_q.filter(SearchQueue.user_id == user_id)
+        failed = failed_q.scalar() or 0
 
         return {
             "pending": pending,
@@ -360,16 +397,24 @@ def recover_interrupted_searches(db) -> int:
 # SEARCH HISTORY
 # ============================================================================
 
-def record_page_search_history(db, page_id: str, search_log_id: int) -> bool:
+def record_page_search_history(
+    db,
+    page_id: str,
+    search_log_id: int,
+    user_id: Optional[UUID] = None
+) -> bool:
     """Enregistre l'historique de recherche d'une page."""
     with db.get_session() as session:
-        existing = session.query(PageSearchHistory).filter(
+        query = session.query(PageSearchHistory).filter(
             PageSearchHistory.page_id == str(page_id),
             PageSearchHistory.search_log_id == search_log_id
-        ).first()
+        )
+        query = _apply_user_filter(query, PageSearchHistory, user_id)
+        existing = query.first()
 
         if not existing:
             history = PageSearchHistory(
+                user_id=user_id,
                 page_id=str(page_id),
                 search_log_id=search_log_id,
                 found_at=datetime.utcnow(),
@@ -382,12 +427,13 @@ def record_page_search_history(db, page_id: str, search_log_id: int) -> bool:
 def record_pages_search_history_batch(
     db,
     page_ids: List[str],
-    search_log_id: int
+    search_log_id: int,
+    user_id: Optional[UUID] = None
 ) -> int:
     """Enregistre l'historique pour plusieurs pages."""
     count = 0
     for page_id in page_ids:
-        if record_page_search_history(db, page_id, search_log_id):
+        if record_page_search_history(db, page_id, search_log_id, user_id=user_id):
             count += 1
     return count
 
@@ -395,17 +441,21 @@ def record_pages_search_history_batch(
 def record_winning_ad_search_history(
     db,
     ad_id: str,
-    search_log_id: int
+    search_log_id: int,
+    user_id: Optional[UUID] = None
 ) -> bool:
     """Enregistre l'historique de recherche d'une winning ad."""
     with db.get_session() as session:
-        existing = session.query(WinningAdSearchHistory).filter(
+        query = session.query(WinningAdSearchHistory).filter(
             WinningAdSearchHistory.ad_id == str(ad_id),
             WinningAdSearchHistory.search_log_id == search_log_id
-        ).first()
+        )
+        query = _apply_user_filter(query, WinningAdSearchHistory, user_id)
+        existing = query.first()
 
         if not existing:
             history = WinningAdSearchHistory(
+                user_id=user_id,
                 ad_id=str(ad_id),
                 search_log_id=search_log_id,
                 found_at=datetime.utcnow(),
@@ -418,37 +468,50 @@ def record_winning_ad_search_history(
 def record_winning_ads_search_history_batch(
     db,
     ad_ids: List[str],
-    search_log_id: int
+    search_log_id: int,
+    user_id: Optional[UUID] = None
 ) -> int:
     """Enregistre l'historique pour plusieurs winning ads."""
     count = 0
     for ad_id in ad_ids:
-        if record_winning_ad_search_history(db, ad_id, search_log_id):
+        if record_winning_ad_search_history(db, ad_id, search_log_id, user_id=user_id):
             count += 1
     return count
 
 
-def get_search_history_stats(db, days: int = 30) -> Dict:
+def get_search_history_stats(db, days: int = 30, user_id: Optional[UUID] = None) -> Dict:
     """Statistiques de l'historique de recherche."""
     cutoff = datetime.utcnow() - timedelta(days=days)
 
     with db.get_session() as session:
-        total_searches = session.query(func.count(SearchLog.id)).filter(
+        search_q = session.query(func.count(SearchLog.id)).filter(
             SearchLog.started_at >= cutoff
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            search_q = search_q.filter(SearchLog.user_id == user_id)
+        total_searches = search_q.scalar() or 0
 
-        completed = session.query(func.count(SearchLog.id)).filter(
+        completed_q = session.query(func.count(SearchLog.id)).filter(
             SearchLog.started_at >= cutoff,
             SearchLog.status == "completed"
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            completed_q = completed_q.filter(SearchLog.user_id == user_id)
+        completed = completed_q.scalar() or 0
 
-        total_pages = session.query(func.count(func.distinct(PageSearchHistory.page_id))).filter(
+        pages_q = session.query(func.count(func.distinct(PageSearchHistory.page_id))).filter(
             PageSearchHistory.found_at >= cutoff
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            pages_q = pages_q.filter(PageSearchHistory.user_id == user_id)
+        total_pages = pages_q.scalar() or 0
 
-        total_winning = session.query(func.count(func.distinct(WinningAdSearchHistory.ad_id))).filter(
+        winning_q = session.query(func.count(func.distinct(WinningAdSearchHistory.ad_id))).filter(
             WinningAdSearchHistory.found_at >= cutoff
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            winning_q = winning_q.filter(WinningAdSearchHistory.user_id == user_id)
+        total_winning = winning_q.scalar() or 0
 
         return {
             "total_searches": total_searches,

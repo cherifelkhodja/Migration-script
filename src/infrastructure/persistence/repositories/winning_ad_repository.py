@@ -21,11 +21,19 @@ Exemple:
 """
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
+from uuid import UUID
 
 from sqlalchemy import func, desc, and_, or_
 from sqlalchemy.dialects.postgresql import insert
 
 from src.infrastructure.persistence.models import WinningAds, PageRecherche
+
+
+def _apply_user_filter(query, model, user_id: Optional[UUID]):
+    """Applique le filtre user_id a une query."""
+    if user_id is not None:
+        return query.filter(model.user_id == user_id)
+    return query
 
 
 # Criteres de qualification Winning Ad: (age_max_jours, reach_minimum)
@@ -131,7 +139,8 @@ def is_winning_ad(
 def save_winning_ads(
     db,
     winning_ads_data: List[Dict],
-    search_log_id: int = None
+    search_log_id: int = None,
+    user_id: Optional[UUID] = None
 ) -> Tuple[int, int, int]:
     """
     Persiste une liste de winning ads en base de donnees.
@@ -147,6 +156,7 @@ def save_winning_ads(
             - age_days: Age calcule de l'ad
             - matched_criteria: Critere de qualification matche
         search_log_id: ID optionnel du log de recherche pour tracabilite
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Tuple de 3 entiers:
@@ -172,10 +182,13 @@ def save_winning_ads(
 
             page_id = str(data.get("page_id", ""))
 
-            # Verification d'existence pour upsert
-            existing = session.query(WinningAds).filter(
-                WinningAds.ad_id == ad_id
-            ).first()
+            # Verification d'existence pour upsert (filtrer par user_id)
+            query = session.query(WinningAds).filter(WinningAds.ad_id == ad_id)
+            if user_id is not None:
+                query = query.filter(WinningAds.user_id == user_id)
+            else:
+                query = query.filter(WinningAds.user_id.is_(None))
+            existing = query.first()
 
             # Normalisation du reach
             reach = ad.get("eu_total_reach", 0) or 0
@@ -206,6 +219,7 @@ def save_winning_ads(
                         start_time = None
 
                 winning = WinningAds(
+                    user_id=user_id,  # Multi-tenancy
                     ad_id=ad_id,
                     page_id=page_id,
                     page_name=ad.get("page_name", ""),
@@ -264,7 +278,8 @@ def cleanup_duplicate_winning_ads(db) -> int:
 def get_winning_ads(
     db,
     limit: int = 100,
-    days: int = 30
+    days: int = 30,
+    user_id: Optional[UUID] = None
 ) -> List[Dict]:
     """
     Recupere les winning ads les plus recentes, triees par reach decroissant.
@@ -273,6 +288,7 @@ def get_winning_ads(
         db: Instance DatabaseManager
         limit: Nombre maximum de resultats (defaut: 100)
         days: Fenetre temporelle en jours (defaut: 30)
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Liste de dictionnaires avec tous les champs de winning ads
@@ -280,9 +296,11 @@ def get_winning_ads(
     cutoff = datetime.utcnow() - timedelta(days=days)
 
     with db.get_session() as session:
-        ads = session.query(WinningAds).filter(
+        query = session.query(WinningAds).filter(
             WinningAds.date_scan >= cutoff
-        ).order_by(
+        )
+        query = _apply_user_filter(query, WinningAds, user_id)
+        ads = query.order_by(
             desc(WinningAds.eu_total_reach)
         ).limit(limit).all()
 
@@ -315,7 +333,8 @@ def get_winning_ads_filtered(
     days: int = None,
     thematique: str = None,
     subcategory: str = None,
-    pays: str = None
+    pays: str = None,
+    user_id: Optional[UUID] = None
 ) -> List[Dict]:
     """
     Recupere les winning ads avec filtres de classification.
@@ -329,6 +348,7 @@ def get_winning_ads_filtered(
         thematique: Filtrer par categorie de la page
         subcategory: Filtrer par sous-categorie de la page
         pays: Filtrer par pays de la page
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Liste des winning ads filtrees
@@ -349,6 +369,9 @@ def get_winning_ads_filtered(
                 query = query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
         else:
             query = session.query(WinningAds)
+
+        # Appliquer le filtre user_id
+        query = _apply_user_filter(query, WinningAds, user_id)
 
         query = query.order_by(
             WinningAds.date_scan.desc(),
@@ -388,13 +411,14 @@ def get_winning_ads_filtered(
         ]
 
 
-def get_winning_ads_stats(db, days: int = 30) -> Dict:
+def get_winning_ads_stats(db, days: int = 30, user_id: Optional[UUID] = None) -> Dict:
     """
     Calcule les statistiques agregees des winning ads.
 
     Args:
         db: Instance DatabaseManager
         days: Fenetre temporelle en jours
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Dictionnaire avec:
@@ -408,22 +432,26 @@ def get_winning_ads_stats(db, days: int = 30) -> Dict:
     cutoff = datetime.utcnow() - timedelta(days=days)
 
     with db.get_session() as session:
+        base_filter = [WinningAds.date_scan >= cutoff]
+        if user_id is not None:
+            base_filter.append(WinningAds.user_id == user_id)
+
         total = session.query(func.count(WinningAds.id)).filter(
-            WinningAds.date_scan >= cutoff
+            *base_filter
         ).scalar() or 0
 
         total_reach = session.query(func.sum(WinningAds.eu_total_reach)).filter(
-            WinningAds.date_scan >= cutoff
+            *base_filter
         ).scalar() or 0
 
         avg_reach = session.query(func.avg(WinningAds.eu_total_reach)).filter(
-            WinningAds.date_scan >= cutoff
+            *base_filter
         ).scalar() or 0
 
         unique_pages = session.query(
             func.count(func.distinct(WinningAds.page_id))
         ).filter(
-            WinningAds.date_scan >= cutoff
+            *base_filter
         ).scalar() or 0
 
         # Top 10 pages avec le plus de winning ads
@@ -432,7 +460,7 @@ def get_winning_ads_stats(db, days: int = 30) -> Dict:
             WinningAds.page_name,
             func.count(WinningAds.id).label('count')
         ).filter(
-            WinningAds.date_scan >= cutoff
+            *base_filter
         ).group_by(
             WinningAds.page_id, WinningAds.page_name
         ).order_by(
@@ -444,7 +472,7 @@ def get_winning_ads_stats(db, days: int = 30) -> Dict:
             WinningAds.matched_criteria,
             func.count(WinningAds.id).label('count')
         ).filter(
-            WinningAds.date_scan >= cutoff
+            *base_filter
         ).group_by(
             WinningAds.matched_criteria
         ).all()
@@ -462,7 +490,8 @@ def get_winning_ads_stats(db, days: int = 30) -> Dict:
 def get_winning_ads_by_page(
     db,
     page_id: str,
-    limit: int = 50
+    limit: int = 50,
+    user_id: Optional[UUID] = None
 ) -> List[Dict]:
     """
     Recupere toutes les winning ads d'une page specifique.
@@ -473,14 +502,17 @@ def get_winning_ads_by_page(
         db: Instance DatabaseManager
         page_id: Identifiant Facebook de la page
         limit: Nombre maximum de resultats
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Liste des winning ads de la page, triees par reach decroissant
     """
     with db.get_session() as session:
-        ads = session.query(WinningAds).filter(
+        query = session.query(WinningAds).filter(
             WinningAds.page_id == str(page_id)
-        ).order_by(
+        )
+        query = _apply_user_filter(query, WinningAds, user_id)
+        ads = query.order_by(
             desc(WinningAds.eu_total_reach)
         ).limit(limit).all()
 
@@ -498,7 +530,11 @@ def get_winning_ads_by_page(
         ]
 
 
-def get_winning_ads_count_by_page(db, days: int = 30) -> Dict[str, int]:
+def get_winning_ads_count_by_page(
+    db,
+    days: int = 30,
+    user_id: Optional[UUID] = None
+) -> Dict[str, int]:
     """
     Compte les winning ads par page sur une periode donnee.
 
@@ -508,6 +544,7 @@ def get_winning_ads_count_by_page(db, days: int = 30) -> Dict[str, int]:
     Args:
         db: Instance DatabaseManager
         days: Nombre de jours a considerer
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Dict mapping page_id vers le nombre de winning ads
@@ -516,12 +553,14 @@ def get_winning_ads_count_by_page(db, days: int = 30) -> Dict[str, int]:
     cutoff = datetime.utcnow() - timedelta(days=days)
 
     with db.get_session() as session:
-        results = session.query(
+        query = session.query(
             WinningAds.page_id,
             func.count(WinningAds.id).label("count")
         ).filter(
             WinningAds.date_scan >= cutoff
-        ).group_by(
+        )
+        query = _apply_user_filter(query, WinningAds, user_id)
+        results = query.group_by(
             WinningAds.page_id
         ).all()
 

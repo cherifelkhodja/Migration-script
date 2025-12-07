@@ -1,8 +1,15 @@
 """
 Repository pour l'organisation des pages (tags, blacklist, favoris, collections, notes).
+
+Multi-tenancy:
+--------------
+Toutes les fonctions acceptent un parametre optionnel user_id (UUID).
+- Si user_id est fourni: les donnees sont filtrees/associees a cet utilisateur
+- Si user_id est None: les donnees sont considerees comme systeme/partagees
 """
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
+from uuid import UUID
 
 from sqlalchemy import func
 
@@ -19,19 +26,36 @@ from src.infrastructure.persistence.models import (
 )
 
 
+def _apply_user_filter(query, model, user_id: Optional[UUID]):
+    """Applique le filtre user_id a une query."""
+    if user_id is not None:
+        return query.filter(model.user_id == user_id)
+    return query
+
+
 # ============================================================================
 # BLACKLIST
 # ============================================================================
 
-def add_to_blacklist(db, page_id: str, page_name: str = "", raison: str = "") -> bool:
+def add_to_blacklist(
+    db,
+    page_id: str,
+    page_name: str = "",
+    raison: str = "",
+    user_id: Optional[UUID] = None
+) -> bool:
     """Ajoute une page a la blacklist."""
     with db.get_session() as session:
-        existing = session.query(Blacklist).filter(
-            Blacklist.page_id == str(page_id)
-        ).first()
+        query = session.query(Blacklist).filter(Blacklist.page_id == str(page_id))
+        if user_id is not None:
+            query = query.filter(Blacklist.user_id == user_id)
+        else:
+            query = query.filter(Blacklist.user_id.is_(None))
+        existing = query.first()
         if existing:
             return False
         entry = Blacklist(
+            user_id=user_id,
             page_id=str(page_id),
             page_name=page_name,
             raison=raison,
@@ -41,24 +65,24 @@ def add_to_blacklist(db, page_id: str, page_name: str = "", raison: str = "") ->
         return True
 
 
-def remove_from_blacklist(db, page_id: str) -> bool:
+def remove_from_blacklist(db, page_id: str, user_id: Optional[UUID] = None) -> bool:
     """Retire une page de la blacklist."""
     with db.get_session() as session:
-        entry = session.query(Blacklist).filter(
-            Blacklist.page_id == str(page_id)
-        ).first()
+        query = session.query(Blacklist).filter(Blacklist.page_id == str(page_id))
+        query = _apply_user_filter(query, Blacklist, user_id)
+        entry = query.first()
         if entry:
             session.delete(entry)
             return True
         return False
 
 
-def get_blacklist(db) -> List[Dict]:
+def get_blacklist(db, user_id: Optional[UUID] = None) -> List[Dict]:
     """Recupere toute la blacklist."""
     with db.get_session() as session:
-        entries = session.query(Blacklist).order_by(
-            Blacklist.added_at.desc()
-        ).all()
+        query = session.query(Blacklist)
+        query = _apply_user_filter(query, Blacklist, user_id)
+        entries = query.order_by(Blacklist.added_at.desc()).all()
         return [
             {
                 "page_id": e.page_id,
@@ -70,26 +94,33 @@ def get_blacklist(db) -> List[Dict]:
         ]
 
 
-def is_in_blacklist(db, page_id: str) -> bool:
+def is_in_blacklist(db, page_id: str, user_id: Optional[UUID] = None) -> bool:
     """Verifie si une page est dans la blacklist."""
     with db.get_session() as session:
-        return session.query(Blacklist).filter(
-            Blacklist.page_id == str(page_id)
-        ).first() is not None
+        query = session.query(Blacklist).filter(Blacklist.page_id == str(page_id))
+        query = _apply_user_filter(query, Blacklist, user_id)
+        return query.first() is not None
 
 
-def get_blacklist_ids(db) -> set:
+def get_blacklist_ids(db, user_id: Optional[UUID] = None) -> set:
     """Recupere tous les page_id de la blacklist."""
     with db.get_session() as session:
-        entries = session.query(Blacklist.page_id).all()
+        query = session.query(Blacklist.page_id)
+        query = _apply_user_filter(query, Blacklist, user_id)
+        entries = query.all()
         return {e.page_id for e in entries}
 
 
-def bulk_add_to_blacklist(db, page_ids: List[str], raison: str = "") -> int:
+def bulk_add_to_blacklist(
+    db,
+    page_ids: List[str],
+    raison: str = "",
+    user_id: Optional[UUID] = None
+) -> int:
     """Ajoute plusieurs pages a la blacklist."""
     count = 0
     for pid in page_ids:
-        if add_to_blacklist(db, pid, raison=raison):
+        if add_to_blacklist(db, pid, raison=raison, user_id=user_id):
             count += 1
     return count
 
@@ -98,78 +129,114 @@ def bulk_add_to_blacklist(db, page_ids: List[str], raison: str = "") -> int:
 # TAGS
 # ============================================================================
 
-def get_all_tags(db) -> List[Dict]:
+def get_all_tags(db, user_id: Optional[UUID] = None) -> List[Dict]:
     """Recupere tous les tags."""
     with db.get_session() as session:
-        tags = session.query(Tag).order_by(Tag.name).all()
+        query = session.query(Tag)
+        query = _apply_user_filter(query, Tag, user_id)
+        tags = query.order_by(Tag.name).all()
         return [{"id": t.id, "name": t.name, "color": t.color} for t in tags]
 
 
-def create_tag(db, name: str, color: str = "#3B82F6") -> Optional[int]:
+def create_tag(
+    db,
+    name: str,
+    color: str = "#3B82F6",
+    user_id: Optional[UUID] = None
+) -> Optional[int]:
     """Cree un nouveau tag."""
     with db.get_session() as session:
-        existing = session.query(Tag).filter(Tag.name == name).first()
+        query = session.query(Tag).filter(Tag.name == name)
+        query = _apply_user_filter(query, Tag, user_id)
+        existing = query.first()
         if existing:
             return None
-        tag = Tag(name=name, color=color)
+        tag = Tag(user_id=user_id, name=name, color=color)
         session.add(tag)
         session.flush()
         return tag.id
 
 
-def delete_tag(db, tag_id: int) -> bool:
+def delete_tag(db, tag_id: int, user_id: Optional[UUID] = None) -> bool:
     """Supprime un tag et ses associations."""
     with db.get_session() as session:
-        session.query(PageTag).filter(PageTag.tag_id == tag_id).delete()
-        deleted = session.query(Tag).filter(Tag.id == tag_id).delete()
+        pt_query = session.query(PageTag).filter(PageTag.tag_id == tag_id)
+        pt_query = _apply_user_filter(pt_query, PageTag, user_id)
+        pt_query.delete()
+        tag_query = session.query(Tag).filter(Tag.id == tag_id)
+        tag_query = _apply_user_filter(tag_query, Tag, user_id)
+        deleted = tag_query.delete()
         return deleted > 0
 
 
-def add_tag_to_page(db, page_id: str, tag_id: int) -> bool:
+def add_tag_to_page(
+    db,
+    page_id: str,
+    tag_id: int,
+    user_id: Optional[UUID] = None
+) -> bool:
     """Ajoute un tag a une page."""
     with db.get_session() as session:
-        existing = session.query(PageTag).filter(
+        query = session.query(PageTag).filter(
             PageTag.page_id == page_id,
             PageTag.tag_id == tag_id
-        ).first()
+        )
+        query = _apply_user_filter(query, PageTag, user_id)
+        existing = query.first()
         if existing:
             return False
-        pt = PageTag(page_id=page_id, tag_id=tag_id)
+        pt = PageTag(user_id=user_id, page_id=page_id, tag_id=tag_id)
         session.add(pt)
         return True
 
 
-def remove_tag_from_page(db, page_id: str, tag_id: int) -> bool:
+def remove_tag_from_page(
+    db,
+    page_id: str,
+    tag_id: int,
+    user_id: Optional[UUID] = None
+) -> bool:
     """Retire un tag d'une page."""
     with db.get_session() as session:
-        deleted = session.query(PageTag).filter(
+        query = session.query(PageTag).filter(
             PageTag.page_id == page_id,
             PageTag.tag_id == tag_id
-        ).delete()
+        )
+        query = _apply_user_filter(query, PageTag, user_id)
+        deleted = query.delete()
         return deleted > 0
 
 
-def get_page_tags(db, page_id: str) -> List[Dict]:
+def get_page_tags(db, page_id: str, user_id: Optional[UUID] = None) -> List[Dict]:
     """Recupere les tags d'une page."""
     with db.get_session() as session:
-        results = session.query(Tag).join(
+        query = session.query(Tag).join(
             PageTag, Tag.id == PageTag.tag_id
-        ).filter(PageTag.page_id == page_id).all()
+        ).filter(PageTag.page_id == page_id)
+        query = _apply_user_filter(query, Tag, user_id)
+        results = query.all()
         return [{"id": t.id, "name": t.name, "color": t.color} for t in results]
 
 
-def get_pages_by_tag(db, tag_id: int) -> List[str]:
+def get_pages_by_tag(db, tag_id: int, user_id: Optional[UUID] = None) -> List[str]:
     """Recupere les page_ids ayant un tag specifique."""
     with db.get_session() as session:
-        results = session.query(PageTag.page_id).filter(PageTag.tag_id == tag_id).all()
+        query = session.query(PageTag.page_id).filter(PageTag.tag_id == tag_id)
+        query = _apply_user_filter(query, PageTag, user_id)
+        results = query.all()
         return [r[0] for r in results]
 
 
-def bulk_add_tag(db, tag_id: int, page_ids: List[str]) -> int:
+def bulk_add_tag(
+    db,
+    tag_id: int,
+    page_ids: List[str],
+    user_id: Optional[UUID] = None
+) -> int:
     """Ajoute un tag a plusieurs pages."""
     count = 0
     for pid in page_ids:
-        if add_tag_to_page(db, pid, tag_id):
+        if add_tag_to_page(db, pid, tag_id, user_id=user_id):
             count += 1
     return count
 
@@ -178,12 +245,12 @@ def bulk_add_tag(db, tag_id: int, page_ids: List[str]) -> int:
 # NOTES
 # ============================================================================
 
-def get_page_notes(db, page_id: str) -> List[Dict]:
+def get_page_notes(db, page_id: str, user_id: Optional[UUID] = None) -> List[Dict]:
     """Recupere les notes d'une page."""
     with db.get_session() as session:
-        notes = session.query(PageNote).filter(
-            PageNote.page_id == page_id
-        ).order_by(PageNote.created_at.desc()).all()
+        query = session.query(PageNote).filter(PageNote.page_id == page_id)
+        query = _apply_user_filter(query, PageNote, user_id)
+        notes = query.order_by(PageNote.created_at.desc()).all()
         return [{
             "id": n.id,
             "content": n.content,
@@ -192,19 +259,31 @@ def get_page_notes(db, page_id: str) -> List[Dict]:
         } for n in notes]
 
 
-def add_page_note(db, page_id: str, content: str) -> int:
+def add_page_note(
+    db,
+    page_id: str,
+    content: str,
+    user_id: Optional[UUID] = None
+) -> int:
     """Ajoute une note a une page."""
     with db.get_session() as session:
-        note = PageNote(page_id=page_id, content=content)
+        note = PageNote(user_id=user_id, page_id=page_id, content=content)
         session.add(note)
         session.flush()
         return note.id
 
 
-def update_page_note(db, note_id: int, content: str) -> bool:
+def update_page_note(
+    db,
+    note_id: int,
+    content: str,
+    user_id: Optional[UUID] = None
+) -> bool:
     """Met a jour une note."""
     with db.get_session() as session:
-        note = session.query(PageNote).filter(PageNote.id == note_id).first()
+        query = session.query(PageNote).filter(PageNote.id == note_id)
+        query = _apply_user_filter(query, PageNote, user_id)
+        note = query.first()
         if note:
             note.content = content
             note.updated_at = datetime.utcnow()
@@ -212,10 +291,12 @@ def update_page_note(db, note_id: int, content: str) -> bool:
         return False
 
 
-def delete_page_note(db, note_id: int) -> bool:
+def delete_page_note(db, note_id: int, user_id: Optional[UUID] = None) -> bool:
     """Supprime une note."""
     with db.get_session() as session:
-        deleted = session.query(PageNote).filter(PageNote.id == note_id).delete()
+        query = session.query(PageNote).filter(PageNote.id == note_id)
+        query = _apply_user_filter(query, PageNote, user_id)
+        deleted = query.delete()
         return deleted > 0
 
 
@@ -223,52 +304,64 @@ def delete_page_note(db, note_id: int) -> bool:
 # FAVORITES
 # ============================================================================
 
-def get_favorites(db) -> List[str]:
+def get_favorites(db, user_id: Optional[UUID] = None) -> List[str]:
     """Recupere tous les page_ids favoris."""
     with db.get_session() as session:
-        favs = session.query(Favorite.page_id).order_by(Favorite.added_at.desc()).all()
+        query = session.query(Favorite.page_id)
+        query = _apply_user_filter(query, Favorite, user_id)
+        favs = query.order_by(Favorite.added_at.desc()).all()
         return [f[0] for f in favs]
 
 
-def is_favorite(db, page_id: str) -> bool:
+def is_favorite(db, page_id: str, user_id: Optional[UUID] = None) -> bool:
     """Verifie si une page est en favori."""
     with db.get_session() as session:
-        return session.query(Favorite).filter(Favorite.page_id == page_id).first() is not None
+        query = session.query(Favorite).filter(Favorite.page_id == page_id)
+        query = _apply_user_filter(query, Favorite, user_id)
+        return query.first() is not None
 
 
-def add_favorite(db, page_id: str) -> bool:
+def add_favorite(db, page_id: str, user_id: Optional[UUID] = None) -> bool:
     """Ajoute une page aux favoris."""
     with db.get_session() as session:
-        existing = session.query(Favorite).filter(Favorite.page_id == page_id).first()
+        query = session.query(Favorite).filter(Favorite.page_id == page_id)
+        query = _apply_user_filter(query, Favorite, user_id)
+        existing = query.first()
         if existing:
             return False
-        fav = Favorite(page_id=page_id)
+        fav = Favorite(user_id=user_id, page_id=page_id)
         session.add(fav)
         return True
 
 
-def remove_favorite(db, page_id: str) -> bool:
+def remove_favorite(db, page_id: str, user_id: Optional[UUID] = None) -> bool:
     """Retire une page des favoris."""
     with db.get_session() as session:
-        deleted = session.query(Favorite).filter(Favorite.page_id == page_id).delete()
+        query = session.query(Favorite).filter(Favorite.page_id == page_id)
+        query = _apply_user_filter(query, Favorite, user_id)
+        deleted = query.delete()
         return deleted > 0
 
 
-def toggle_favorite(db, page_id: str) -> bool:
+def toggle_favorite(db, page_id: str, user_id: Optional[UUID] = None) -> bool:
     """Bascule le statut favori. Retourne True si maintenant favori."""
-    if is_favorite(db, page_id):
-        remove_favorite(db, page_id)
+    if is_favorite(db, page_id, user_id=user_id):
+        remove_favorite(db, page_id, user_id=user_id)
         return False
     else:
-        add_favorite(db, page_id)
+        add_favorite(db, page_id, user_id=user_id)
         return True
 
 
-def bulk_add_to_favorites(db, page_ids: List[str]) -> int:
+def bulk_add_to_favorites(
+    db,
+    page_ids: List[str],
+    user_id: Optional[UUID] = None
+) -> int:
     """Ajoute plusieurs pages aux favoris."""
     count = 0
     for pid in page_ids:
-        if add_favorite(db, pid):
+        if add_favorite(db, pid, user_id=user_id):
             count += 1
     return count
 
@@ -277,15 +370,19 @@ def bulk_add_to_favorites(db, page_ids: List[str]) -> int:
 # COLLECTIONS
 # ============================================================================
 
-def get_collections(db) -> List[Dict]:
+def get_collections(db, user_id: Optional[UUID] = None) -> List[Dict]:
     """Recupere toutes les collections avec le nombre de pages."""
     with db.get_session() as session:
-        collections = session.query(Collection).order_by(Collection.name).all()
+        query = session.query(Collection)
+        query = _apply_user_filter(query, Collection, user_id)
+        collections = query.order_by(Collection.name).all()
         result = []
         for c in collections:
-            count = session.query(func.count(CollectionPage.id)).filter(
+            count_query = session.query(func.count(CollectionPage.id)).filter(
                 CollectionPage.collection_id == c.id
-            ).scalar()
+            )
+            count_query = _apply_user_filter(count_query, CollectionPage, user_id)
+            count = count_query.scalar()
             result.append({
                 "id": c.id,
                 "name": c.name,
@@ -303,11 +400,18 @@ def create_collection(
     name: str,
     description: str = "",
     color: str = "#6366F1",
-    icon: str = "📁"
+    icon: str = "📁",
+    user_id: Optional[UUID] = None
 ) -> int:
     """Cree une nouvelle collection."""
     with db.get_session() as session:
-        coll = Collection(name=name, description=description, color=color, icon=icon)
+        coll = Collection(
+            user_id=user_id,
+            name=name,
+            description=description,
+            color=color,
+            icon=icon
+        )
         session.add(coll)
         session.flush()
         return coll.id
@@ -319,11 +423,14 @@ def update_collection(
     name: str = None,
     description: str = None,
     color: str = None,
-    icon: str = None
+    icon: str = None,
+    user_id: Optional[UUID] = None
 ) -> bool:
     """Met a jour une collection."""
     with db.get_session() as session:
-        coll = session.query(Collection).filter(Collection.id == collection_id).first()
+        query = session.query(Collection).filter(Collection.id == collection_id)
+        query = _apply_user_filter(query, Collection, user_id)
+        coll = query.first()
         if not coll:
             return False
         if name is not None:
@@ -337,53 +444,85 @@ def update_collection(
         return True
 
 
-def delete_collection(db, collection_id: int) -> bool:
+def delete_collection(db, collection_id: int, user_id: Optional[UUID] = None) -> bool:
     """Supprime une collection et ses associations."""
     with db.get_session() as session:
-        session.query(CollectionPage).filter(CollectionPage.collection_id == collection_id).delete()
-        deleted = session.query(Collection).filter(Collection.id == collection_id).delete()
+        cp_query = session.query(CollectionPage).filter(
+            CollectionPage.collection_id == collection_id
+        )
+        cp_query = _apply_user_filter(cp_query, CollectionPage, user_id)
+        cp_query.delete()
+        coll_query = session.query(Collection).filter(Collection.id == collection_id)
+        coll_query = _apply_user_filter(coll_query, Collection, user_id)
+        deleted = coll_query.delete()
         return deleted > 0
 
 
-def add_page_to_collection(db, collection_id: int, page_id: str) -> bool:
+def add_page_to_collection(
+    db,
+    collection_id: int,
+    page_id: str,
+    user_id: Optional[UUID] = None
+) -> bool:
     """Ajoute une page a une collection."""
     with db.get_session() as session:
-        existing = session.query(CollectionPage).filter(
+        query = session.query(CollectionPage).filter(
             CollectionPage.collection_id == collection_id,
             CollectionPage.page_id == page_id
-        ).first()
+        )
+        query = _apply_user_filter(query, CollectionPage, user_id)
+        existing = query.first()
         if existing:
             return False
-        cp = CollectionPage(collection_id=collection_id, page_id=page_id)
+        cp = CollectionPage(
+            user_id=user_id,
+            collection_id=collection_id,
+            page_id=page_id
+        )
         session.add(cp)
         return True
 
 
-def remove_page_from_collection(db, collection_id: int, page_id: str) -> bool:
+def remove_page_from_collection(
+    db,
+    collection_id: int,
+    page_id: str,
+    user_id: Optional[UUID] = None
+) -> bool:
     """Retire une page d'une collection."""
     with db.get_session() as session:
-        deleted = session.query(CollectionPage).filter(
+        query = session.query(CollectionPage).filter(
             CollectionPage.collection_id == collection_id,
             CollectionPage.page_id == page_id
-        ).delete()
+        )
+        query = _apply_user_filter(query, CollectionPage, user_id)
+        deleted = query.delete()
         return deleted > 0
 
 
-def get_collection_pages(db, collection_id: int) -> List[str]:
+def get_collection_pages(
+    db,
+    collection_id: int,
+    user_id: Optional[UUID] = None
+) -> List[str]:
     """Recupere les page_ids d'une collection."""
     with db.get_session() as session:
-        results = session.query(CollectionPage.page_id).filter(
+        query = session.query(CollectionPage.page_id).filter(
             CollectionPage.collection_id == collection_id
-        ).order_by(CollectionPage.added_at.desc()).all()
+        )
+        query = _apply_user_filter(query, CollectionPage, user_id)
+        results = query.order_by(CollectionPage.added_at.desc()).all()
         return [r[0] for r in results]
 
 
-def get_page_collections(db, page_id: str) -> List[Dict]:
+def get_page_collections(db, page_id: str, user_id: Optional[UUID] = None) -> List[Dict]:
     """Recupere les collections d'une page."""
     with db.get_session() as session:
-        results = session.query(Collection).join(
+        query = session.query(Collection).join(
             CollectionPage, Collection.id == CollectionPage.collection_id
-        ).filter(CollectionPage.page_id == page_id).all()
+        ).filter(CollectionPage.page_id == page_id)
+        query = _apply_user_filter(query, Collection, user_id)
+        results = query.all()
         return [{
             "id": c.id,
             "name": c.name,
@@ -392,11 +531,16 @@ def get_page_collections(db, page_id: str) -> List[Dict]:
         } for c in results]
 
 
-def bulk_add_to_collection(db, collection_id: int, page_ids: List[str]) -> int:
+def bulk_add_to_collection(
+    db,
+    collection_id: int,
+    page_ids: List[str],
+    user_id: Optional[UUID] = None
+) -> int:
     """Ajoute plusieurs pages a une collection."""
     count = 0
     for pid in page_ids:
-        if add_page_to_collection(db, collection_id, pid):
+        if add_page_to_collection(db, collection_id, pid, user_id=user_id):
             count += 1
     return count
 
@@ -405,10 +549,15 @@ def bulk_add_to_collection(db, collection_id: int, page_ids: List[str]) -> int:
 # SAVED FILTERS
 # ============================================================================
 
-def get_saved_filters(db, filter_type: str = None) -> List[Dict]:
+def get_saved_filters(
+    db,
+    filter_type: str = None,
+    user_id: Optional[UUID] = None
+) -> List[Dict]:
     """Recupere les filtres sauvegardes."""
     with db.get_session() as session:
         query = session.query(SavedFilter)
+        query = _apply_user_filter(query, SavedFilter, user_id)
         if filter_type:
             query = query.filter(SavedFilter.filter_type == filter_type)
         filters = query.order_by(SavedFilter.name).all()
@@ -425,20 +574,28 @@ def save_filter(
     db,
     name: str,
     filter_type: str,
-    filter_data: str
+    filter_data: str,
+    user_id: Optional[UUID] = None
 ) -> int:
     """Sauvegarde un filtre."""
     with db.get_session() as session:
-        sf = SavedFilter(name=name, filter_type=filter_type, filter_data=filter_data)
+        sf = SavedFilter(
+            user_id=user_id,
+            name=name,
+            filter_type=filter_type,
+            filter_data=filter_data
+        )
         session.add(sf)
         session.flush()
         return sf.id
 
 
-def delete_saved_filter(db, filter_id: int) -> bool:
+def delete_saved_filter(db, filter_id: int, user_id: Optional[UUID] = None) -> bool:
     """Supprime un filtre sauvegarde."""
     with db.get_session() as session:
-        deleted = session.query(SavedFilter).filter(SavedFilter.id == filter_id).delete()
+        query = session.query(SavedFilter).filter(SavedFilter.id == filter_id)
+        query = _apply_user_filter(query, SavedFilter, user_id)
+        deleted = query.delete()
         return deleted > 0
 
 
@@ -446,10 +603,15 @@ def delete_saved_filter(db, filter_id: int) -> bool:
 # SCHEDULED SCANS
 # ============================================================================
 
-def get_scheduled_scans(db, active_only: bool = False) -> List[Dict]:
+def get_scheduled_scans(
+    db,
+    active_only: bool = False,
+    user_id: Optional[UUID] = None
+) -> List[Dict]:
     """Recupere les scans programmes."""
     with db.get_session() as session:
         query = session.query(ScheduledScan)
+        query = _apply_user_filter(query, ScheduledScan, user_id)
         if active_only:
             query = query.filter(ScheduledScan.is_active == 1)
         scans = query.order_by(ScheduledScan.next_run).all()
@@ -474,11 +636,13 @@ def create_scheduled_scan(
     countries: str = "FR",
     languages: str = "fr",
     frequency: str = "daily",
-    next_run: datetime = None
+    next_run: datetime = None,
+    user_id: Optional[UUID] = None
 ) -> int:
     """Cree un scan programme."""
     with db.get_session() as session:
         scan = ScheduledScan(
+            user_id=user_id,
             name=name,
             keywords=keywords,
             countries=countries,
@@ -501,11 +665,14 @@ def update_scheduled_scan(
     languages: str = None,
     frequency: str = None,
     is_active: bool = None,
-    next_run: datetime = None
+    next_run: datetime = None,
+    user_id: Optional[UUID] = None
 ) -> bool:
     """Met a jour un scan programme."""
     with db.get_session() as session:
-        scan = session.query(ScheduledScan).filter(ScheduledScan.id == scan_id).first()
+        query = session.query(ScheduledScan).filter(ScheduledScan.id == scan_id)
+        query = _apply_user_filter(query, ScheduledScan, user_id)
+        scan = query.first()
         if not scan:
             return False
         if name is not None:
@@ -525,17 +692,21 @@ def update_scheduled_scan(
         return True
 
 
-def delete_scheduled_scan(db, scan_id: int) -> bool:
+def delete_scheduled_scan(db, scan_id: int, user_id: Optional[UUID] = None) -> bool:
     """Supprime un scan programme."""
     with db.get_session() as session:
-        deleted = session.query(ScheduledScan).filter(ScheduledScan.id == scan_id).delete()
+        query = session.query(ScheduledScan).filter(ScheduledScan.id == scan_id)
+        query = _apply_user_filter(query, ScheduledScan, user_id)
+        deleted = query.delete()
         return deleted > 0
 
 
-def mark_scan_executed(db, scan_id: int) -> bool:
+def mark_scan_executed(db, scan_id: int, user_id: Optional[UUID] = None) -> bool:
     """Marque un scan comme execute."""
     with db.get_session() as session:
-        scan = session.query(ScheduledScan).filter(ScheduledScan.id == scan_id).first()
+        query = session.query(ScheduledScan).filter(ScheduledScan.id == scan_id)
+        query = _apply_user_filter(query, ScheduledScan, user_id)
+        scan = query.first()
         if not scan:
             return False
         scan.last_run = datetime.utcnow()

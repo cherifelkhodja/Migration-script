@@ -1,8 +1,15 @@
 """
 Repository pour les operations sur les pages.
+
+Multi-tenancy:
+--------------
+Toutes les fonctions acceptent un parametre optionnel user_id (UUID).
+- Si user_id est fourni: les donnees sont filtrees/associees a cet utilisateur
+- Si user_id est None: les donnees sont considerees comme systeme/partagees
 """
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
+from uuid import UUID
 
 from sqlalchemy import func, desc, and_, or_
 
@@ -13,6 +20,13 @@ from src.infrastructure.persistence.models import (
     WinningAds,
 )
 from src.infrastructure.persistence.repositories.utils import get_etat_from_ads_count
+
+
+def _apply_user_filter(query, model, user_id: Optional[UUID]):
+    """Applique le filtre user_id a une query."""
+    if user_id is not None:
+        return query.filter(model.user_id == user_id)
+    return query
 
 
 def _parse_product_count(value) -> int:
@@ -32,9 +46,15 @@ def save_pages_recherche(
     countries: List[str],
     languages: List[str],
     thresholds: Dict = None,
-    search_log_id: int = None
+    search_log_id: int = None,
+    user_id: Optional[UUID] = None
 ) -> tuple:
-    """Sauvegarde ou met a jour les pages dans liste_page_recherche."""
+    """
+    Sauvegarde ou met a jour les pages dans liste_page_recherche.
+
+    Args:
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
+    """
     scan_time = datetime.utcnow()
     count = 0
     new_count = 0
@@ -53,9 +73,13 @@ def save_pages_recherche(
 
             fb_link = f"https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country={countries[0]}&view_all_page_id={pid}"
 
-            existing_page = session.query(PageRecherche).filter(
-                PageRecherche.page_id == str(pid)
-            ).first()
+            # Filtrer par user_id pour trouver la page existante
+            query = session.query(PageRecherche).filter(PageRecherche.page_id == str(pid))
+            if user_id is not None:
+                query = query.filter(PageRecherche.user_id == user_id)
+            else:
+                query = query.filter(PageRecherche.user_id.is_(None))
+            existing_page = query.first()
 
             if existing_page:
                 existing_keywords_str = existing_page.keywords or ""
@@ -130,6 +154,7 @@ def save_pages_recherche(
                 classified_at_val = scan_time if web.get("gemini_category") else None
 
                 new_page = PageRecherche(
+                    user_id=user_id,  # Multi-tenancy
                     page_id=str(pid),
                     page_name=data.get("page_name", ""),
                     lien_site=data.get("website", ""),
@@ -168,8 +193,19 @@ def save_pages_recherche(
     return (count, new_count, existing_count)
 
 
-def save_suivi_page(db, pages_final: Dict, web_results: Dict, min_ads: int = 10) -> int:
-    """Sauvegarde l'historique des pages dans suivi_page."""
+def save_suivi_page(
+    db,
+    pages_final: Dict,
+    web_results: Dict,
+    min_ads: int = 10,
+    user_id: Optional[UUID] = None
+) -> int:
+    """
+    Sauvegarde l'historique des pages dans suivi_page.
+
+    Args:
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
+    """
     scan_time = datetime.utcnow()
     count = 0
 
@@ -182,6 +218,7 @@ def save_suivi_page(db, pages_final: Dict, web_results: Dict, min_ads: int = 10)
             web = web_results.get(pid, {})
 
             suivi = SuiviPage(
+                user_id=user_id,  # Multi-tenancy
                 page_id=str(pid),
                 nom_site=data.get("page_name", ""),
                 nombre_ads_active=ads_count,
@@ -193,7 +230,14 @@ def save_suivi_page(db, pages_final: Dict, web_results: Dict, min_ads: int = 10)
     return count
 
 
-def save_ads_recherche(db, pages_final: Dict, page_ads: Dict, countries: List[str] = None, min_ads_liste: int = 1) -> int:
+def save_ads_recherche(
+    db,
+    pages_final: Dict,
+    page_ads: Dict,
+    countries: List[str] = None,
+    min_ads_liste: int = 1,
+    user_id: Optional[UUID] = None
+) -> int:
     """
     Sauvegarde les annonces dans ads_recherche.
 
@@ -203,6 +247,7 @@ def save_ads_recherche(db, pages_final: Dict, page_ads: Dict, countries: List[st
         page_ads: Dict des ads par page (page_id -> list of ads)
         countries: Liste des pays (optionnel, pour compatibilité)
         min_ads_liste: Seuil minimum d'ads pour sauvegarder (optionnel)
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Nombre d'annonces sauvegardées
@@ -238,6 +283,7 @@ def save_ads_recherche(db, pages_final: Dict, page_ads: Dict, countries: List[st
                         pass
 
                 ad_record = AdsRecherche(
+                    user_id=user_id,  # Multi-tenancy
                     ad_id=str(ad.get("id", "")),
                     page_id=page_id_str,
                     page_name=ad.get("page_name", ""),
@@ -255,10 +301,21 @@ def save_ads_recherche(db, pages_final: Dict, page_ads: Dict, countries: List[st
     return count
 
 
-def get_all_pages(db, limit: int = 1000) -> List[Dict]:
-    """Recupere toutes les pages."""
+def get_all_pages(
+    db,
+    limit: int = 1000,
+    user_id: Optional[UUID] = None
+) -> List[Dict]:
+    """
+    Recupere toutes les pages.
+
+    Args:
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
+    """
     with db.get_session() as session:
-        pages = session.query(PageRecherche).order_by(
+        query = session.query(PageRecherche)
+        query = _apply_user_filter(query, PageRecherche, user_id)
+        pages = query.order_by(
             desc(PageRecherche.dernier_scan)
         ).limit(limit).all()
 
@@ -277,12 +334,23 @@ def get_all_pages(db, limit: int = 1000) -> List[Dict]:
         ]
 
 
-def get_page_history(db, page_id: str) -> List[Dict]:
-    """Recupere l'historique d'une page."""
+def get_page_history(
+    db,
+    page_id: str,
+    user_id: Optional[UUID] = None
+) -> List[Dict]:
+    """
+    Recupere l'historique d'une page.
+
+    Args:
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
+    """
     with db.get_session() as session:
-        history = session.query(SuiviPage).filter(
+        query = session.query(SuiviPage).filter(
             SuiviPage.page_id == str(page_id)
-        ).order_by(desc(SuiviPage.date_scan)).all()
+        )
+        query = _apply_user_filter(query, SuiviPage, user_id)
+        history = query.order_by(desc(SuiviPage.date_scan)).all()
 
         return [
             {
@@ -295,7 +363,12 @@ def get_page_history(db, page_id: str) -> List[Dict]:
         ]
 
 
-def get_page_evolution_history(db, page_id: str, limit: int = 30) -> List[Dict]:
+def get_page_evolution_history(
+    db,
+    page_id: str,
+    limit: int = 30,
+    user_id: Optional[UUID] = None
+) -> List[Dict]:
     """
     Recupere l'historique d'evolution d'une page pour les graphiques analytics.
 
@@ -303,14 +376,17 @@ def get_page_evolution_history(db, page_id: str, limit: int = 30) -> List[Dict]:
         db: Instance DatabaseManager
         page_id: ID de la page Facebook
         limit: Nombre max d'entrees a retourner
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Liste de dicts avec date_scan, nombre_ads_active, nombre_produits
     """
     with db.get_session() as session:
-        history = session.query(SuiviPage).filter(
+        query = session.query(SuiviPage).filter(
             SuiviPage.page_id == str(page_id)
-        ).order_by(desc(SuiviPage.date_scan)).limit(limit).all()
+        )
+        query = _apply_user_filter(query, SuiviPage, user_id)
+        history = query.order_by(desc(SuiviPage.date_scan)).limit(limit).all()
 
         return [
             {
@@ -322,7 +398,11 @@ def get_page_evolution_history(db, page_id: str, limit: int = 30) -> List[Dict]:
         ]
 
 
-def get_evolution_stats(db, period_days: int = 7) -> List[Dict]:
+def get_evolution_stats(
+    db,
+    period_days: int = 7,
+    user_id: Optional[UUID] = None
+) -> List[Dict]:
     """
     Calcule les statistiques d'evolution des pages sur une periode donnee.
 
@@ -332,6 +412,7 @@ def get_evolution_stats(db, period_days: int = 7) -> List[Dict]:
     Args:
         db: Instance DatabaseManager
         period_days: Periode en jours pour l'analyse
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Liste de dicts avec les champs:
@@ -349,9 +430,11 @@ def get_evolution_stats(db, period_days: int = 7) -> List[Dict]:
 
     with db.get_session() as session:
         # Recuperer tous les scans de la periode, groupes par page
-        scans = session.query(SuiviPage).filter(
+        query = session.query(SuiviPage).filter(
             SuiviPage.date_scan >= cutoff
-        ).order_by(SuiviPage.page_id, desc(SuiviPage.date_scan)).all()
+        )
+        query = _apply_user_filter(query, SuiviPage, user_id)
+        scans = query.order_by(SuiviPage.page_id, desc(SuiviPage.date_scan)).all()
 
         # Grouper par page_id
         pages_scans = defaultdict(list)
@@ -407,10 +490,17 @@ def get_evolution_stats(db, period_days: int = 7) -> List[Dict]:
         return evolution_list
 
 
-def get_all_countries(db) -> List[str]:
-    """Recupere tous les pays distincts."""
+def get_all_countries(db, user_id: Optional[UUID] = None) -> List[str]:
+    """
+    Recupere tous les pays distincts.
+
+    Args:
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
+    """
     with db.get_session() as session:
-        results = session.query(PageRecherche.pays).distinct().all()
+        query = session.query(PageRecherche.pays)
+        query = _apply_user_filter(query, PageRecherche, user_id)
+        results = query.distinct().all()
         countries = set()
         for r in results:
             if r.pays:
@@ -421,26 +511,48 @@ def get_all_countries(db) -> List[str]:
         return sorted(list(countries))
 
 
-def get_all_subcategories(db, category: str = None) -> List[str]:
-    """Recupere toutes les sous-categories."""
+def get_all_subcategories(
+    db,
+    category: str = None,
+    user_id: Optional[UUID] = None
+) -> List[str]:
+    """
+    Recupere toutes les sous-categories.
+
+    Args:
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
+    """
     with db.get_session() as session:
         query = session.query(PageRecherche.subcategory).filter(
             PageRecherche.subcategory != None,
             PageRecherche.subcategory != ""
         )
+        query = _apply_user_filter(query, PageRecherche, user_id)
         if category:
             query = query.filter(PageRecherche.thematique == category)
         results = query.distinct().all()
         return sorted([r.subcategory for r in results if r.subcategory])
 
 
-def add_country_to_page(db, page_id: str, country: str) -> bool:
-    """Ajoute un pays a une page."""
+def add_country_to_page(
+    db,
+    page_id: str,
+    country: str,
+    user_id: Optional[UUID] = None
+) -> bool:
+    """
+    Ajoute un pays a une page.
+
+    Args:
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
+    """
     country = country.upper().strip()
     with db.get_session() as session:
-        page = session.query(PageRecherche).filter(
+        query = session.query(PageRecherche).filter(
             PageRecherche.page_id == str(page_id)
-        ).first()
+        )
+        query = _apply_user_filter(query, PageRecherche, user_id)
+        page = query.first()
 
         if not page:
             return False
@@ -455,21 +567,36 @@ def add_country_to_page(db, page_id: str, country: str) -> bool:
         return False
 
 
-def get_pages_count(db) -> Dict:
-    """Compte les pages par statut pour la migration."""
+def get_pages_count(db, user_id: Optional[UUID] = None) -> Dict:
+    """
+    Compte les pages par statut pour la migration.
+
+    Args:
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
+    """
     with db.get_session() as session:
-        total = session.query(func.count(PageRecherche.id)).scalar() or 0
+        base_query = session.query(func.count(PageRecherche.id))
+        if user_id is not None:
+            base_query = base_query.filter(PageRecherche.user_id == user_id)
+
+        total = base_query.scalar() or 0
 
         # Pages classifiees (ont une thematique)
-        classified = session.query(func.count(PageRecherche.id)).filter(
+        classified_query = session.query(func.count(PageRecherche.id)).filter(
             PageRecherche.thematique.isnot(None),
             PageRecherche.thematique != ""
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            classified_query = classified_query.filter(PageRecherche.user_id == user_id)
+        classified = classified_query.scalar() or 0
 
         # Pages avec FR dans pays
-        with_fr = session.query(func.count(PageRecherche.id)).filter(
+        with_fr_query = session.query(func.count(PageRecherche.id)).filter(
             PageRecherche.pays.ilike("%FR%")
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            with_fr_query = with_fr_query.filter(PageRecherche.user_id == user_id)
+        with_fr = with_fr_query.scalar() or 0
 
         # Pages sans FR
         without_fr = total - with_fr
@@ -527,6 +654,7 @@ def get_suivi_stats_filtered(
     thematique: str = None,
     subcategory: str = None,
     pays: str = None,
+    user_id: Optional[UUID] = None,
 ) -> Dict:
     """
     Statistiques du suivi avec filtres.
@@ -538,12 +666,14 @@ def get_suivi_stats_filtered(
         thematique: Filtre par thematique (ex: "E-commerce")
         subcategory: Filtre par sous-categorie
         pays: Filtre par pays (recherche partielle)
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Dict avec total_pages, etats (distribution), cms (distribution)
     """
     with db.get_session() as session:
         query = session.query(PageRecherche)
+        query = _apply_user_filter(query, PageRecherche, user_id)
 
         if thematique:
             query = query.filter(PageRecherche.thematique == thematique)
@@ -576,6 +706,7 @@ def get_cached_pages_info(
     db,
     page_ids: List[str],
     cache_days: int = 1,
+    user_id: Optional[UUID] = None,
 ) -> Dict[str, Dict]:
     """
     Recupere les infos cachees des pages (scan recent).
@@ -587,6 +718,7 @@ def get_cached_pages_info(
         db: Instance DatabaseManager
         page_ids: Liste des IDs de pages a verifier
         cache_days: Nombre de jours pour considerer le cache valide
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Dict[page_id] = {
@@ -604,9 +736,11 @@ def get_cached_pages_info(
     cutoff = datetime.utcnow() - timedelta(days=cache_days)
 
     with db.get_session() as session:
-        pages = session.query(PageRecherche).filter(
+        query = session.query(PageRecherche).filter(
             PageRecherche.page_id.in_([str(pid) for pid in page_ids])
-        ).all()
+        )
+        query = _apply_user_filter(query, PageRecherche, user_id)
+        pages = query.all()
 
         result = {}
         for p in pages:
@@ -626,7 +760,7 @@ def get_cached_pages_info(
         return result
 
 
-def get_dashboard_trends(db, days: int = 7) -> Dict:
+def get_dashboard_trends(db, days: int = 7, user_id: Optional[UUID] = None) -> Dict:
     """
     Calcule les tendances pour le dashboard.
 
@@ -636,6 +770,7 @@ def get_dashboard_trends(db, days: int = 7) -> Dict:
     Args:
         db: Instance DatabaseManager
         days: Nombre de jours pour la comparaison
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Dict avec:
@@ -651,32 +786,44 @@ def get_dashboard_trends(db, days: int = 7) -> Dict:
 
     with db.get_session() as session:
         # Pages: compter les nouvelles pages
-        current_pages = session.query(func.count(PageRecherche.id)).filter(
+        current_pages_query = session.query(func.count(PageRecherche.id)).filter(
             PageRecherche.created_at >= current_start
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            current_pages_query = current_pages_query.filter(PageRecherche.user_id == user_id)
+        current_pages = current_pages_query.scalar() or 0
 
-        previous_pages = session.query(func.count(PageRecherche.id)).filter(
+        previous_pages_query = session.query(func.count(PageRecherche.id)).filter(
             PageRecherche.created_at >= previous_start,
             PageRecherche.created_at < current_start
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            previous_pages_query = previous_pages_query.filter(PageRecherche.user_id == user_id)
+        previous_pages = previous_pages_query.scalar() or 0
 
         pages_delta = current_pages - previous_pages
 
         # Winning ads
-        current_winning = session.query(func.count(WinningAds.id)).filter(
+        current_winning_query = session.query(func.count(WinningAds.id)).filter(
             WinningAds.date_scan >= current_start
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            current_winning_query = current_winning_query.filter(WinningAds.user_id == user_id)
+        current_winning = current_winning_query.scalar() or 0
 
-        previous_winning = session.query(func.count(WinningAds.id)).filter(
+        previous_winning_query = session.query(func.count(WinningAds.id)).filter(
             WinningAds.date_scan >= previous_start,
             WinningAds.date_scan < current_start
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            previous_winning_query = previous_winning_query.filter(WinningAds.user_id == user_id)
+        previous_winning = previous_winning_query.scalar() or 0
 
         winning_delta = current_winning - previous_winning
 
         # Evolution: pages en hausse/baisse
         try:
-            evolution = get_evolution_stats(db, period_days=days)
+            evolution = get_evolution_stats(db, period_days=days, user_id=user_id)
             rising = sum(1 for e in evolution if e.get("pct_ads", 0) >= 20)
             falling = sum(1 for e in evolution if e.get("pct_ads", 0) <= -20)
         except Exception:
@@ -701,12 +848,13 @@ def get_dashboard_trends(db, days: int = 7) -> Dict:
         }
 
 
-def get_archive_stats(db) -> Dict:
+def get_archive_stats(db, user_id: Optional[UUID] = None) -> Dict:
     """
     Retourne les statistiques pour l'archivage.
 
     Args:
         db: Instance DatabaseManager
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Dict avec les stats d'archivage (clés plates pour compatibilité UI)
@@ -719,36 +867,66 @@ def get_archive_stats(db) -> Dict:
 
     with db.get_session() as session:
         # Compter les suivi_page totaux et archivables
-        suivi_total = session.query(func.count(SuiviPage.id)).scalar() or 0
-        suivi_archivable = session.query(func.count(SuiviPage.id)).filter(
+        suivi_total_q = session.query(func.count(SuiviPage.id))
+        if user_id is not None:
+            suivi_total_q = suivi_total_q.filter(SuiviPage.user_id == user_id)
+        suivi_total = suivi_total_q.scalar() or 0
+
+        suivi_archivable_q = session.query(func.count(SuiviPage.id)).filter(
             SuiviPage.date_scan < cutoff_90
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            suivi_archivable_q = suivi_archivable_q.filter(SuiviPage.user_id == user_id)
+        suivi_archivable = suivi_archivable_q.scalar() or 0
 
         # Compter les ads totales et archivables
-        ads_total = session.query(func.count(AdsRecherche.id)).scalar() or 0
-        ads_archivable = session.query(func.count(AdsRecherche.id)).filter(
+        ads_total_q = session.query(func.count(AdsRecherche.id))
+        if user_id is not None:
+            ads_total_q = ads_total_q.filter(AdsRecherche.user_id == user_id)
+        ads_total = ads_total_q.scalar() or 0
+
+        ads_archivable_q = session.query(func.count(AdsRecherche.id)).filter(
             AdsRecherche.date_scan < cutoff_90
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            ads_archivable_q = ads_archivable_q.filter(AdsRecherche.user_id == user_id)
+        ads_archivable = ads_archivable_q.scalar() or 0
 
         # Compter les winning ads totales et archivables
-        winning_total = session.query(func.count(WinningAds.id)).scalar() or 0
-        winning_archivable = session.query(func.count(WinningAds.id)).filter(
+        winning_total_q = session.query(func.count(WinningAds.id))
+        if user_id is not None:
+            winning_total_q = winning_total_q.filter(WinningAds.user_id == user_id)
+        winning_total = winning_total_q.scalar() or 0
+
+        winning_archivable_q = session.query(func.count(WinningAds.id)).filter(
             WinningAds.date_scan < cutoff_90
-        ).scalar() or 0
+        )
+        if user_id is not None:
+            winning_archivable_q = winning_archivable_q.filter(WinningAds.user_id == user_id)
+        winning_archivable = winning_archivable_q.scalar() or 0
 
         # Compter les entrées déjà archivées
         try:
-            suivi_archive = session.query(func.count(SuiviPageArchive.id)).scalar() or 0
+            suivi_archive_q = session.query(func.count(SuiviPageArchive.id))
+            if user_id is not None:
+                suivi_archive_q = suivi_archive_q.filter(SuiviPageArchive.user_id == user_id)
+            suivi_archive = suivi_archive_q.scalar() or 0
         except Exception:
             suivi_archive = 0
 
         try:
-            ads_archive = session.query(func.count(AdsRechercheArchive.id)).scalar() or 0
+            ads_archive_q = session.query(func.count(AdsRechercheArchive.id))
+            if user_id is not None:
+                ads_archive_q = ads_archive_q.filter(AdsRechercheArchive.user_id == user_id)
+            ads_archive = ads_archive_q.scalar() or 0
         except Exception:
             ads_archive = 0
 
         try:
-            winning_archive = session.query(func.count(WinningAdsArchive.id)).scalar() or 0
+            winning_archive_q = session.query(func.count(WinningAdsArchive.id))
+            if user_id is not None:
+                winning_archive_q = winning_archive_q.filter(WinningAdsArchive.user_id == user_id)
+            winning_archive = winning_archive_q.scalar() or 0
         except Exception:
             winning_archive = 0
 
@@ -768,7 +946,11 @@ def get_archive_stats(db) -> Dict:
         }
 
 
-def archive_old_data(db, days_threshold: int = 90) -> Dict[str, int]:
+def archive_old_data(
+    db,
+    days_threshold: int = 90,
+    user_id: Optional[UUID] = None
+) -> Dict[str, int]:
     """
     Archive les donnees plus anciennes que le seuil specifie.
 
@@ -778,6 +960,7 @@ def archive_old_data(db, days_threshold: int = 90) -> Dict[str, int]:
     Args:
         db: Instance DatabaseManager
         days_threshold: Nombre de jours avant archivage
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Dict avec le nombre d'entrees archivees par type
@@ -787,27 +970,34 @@ def archive_old_data(db, days_threshold: int = 90) -> Dict[str, int]:
 
     with db.get_session() as session:
         # Supprimer les anciennes ads
-        ads_deleted = session.query(AdsRecherche).filter(
-            AdsRecherche.date_scan < cutoff
-        ).delete(synchronize_session=False)
+        ads_query = session.query(AdsRecherche).filter(AdsRecherche.date_scan < cutoff)
+        if user_id is not None:
+            ads_query = ads_query.filter(AdsRecherche.user_id == user_id)
+        ads_deleted = ads_query.delete(synchronize_session=False)
         result["ads"] = ads_deleted
 
         # Supprimer les anciens suivis
-        suivi_deleted = session.query(SuiviPage).filter(
-            SuiviPage.date_scan < cutoff
-        ).delete(synchronize_session=False)
+        suivi_query = session.query(SuiviPage).filter(SuiviPage.date_scan < cutoff)
+        if user_id is not None:
+            suivi_query = suivi_query.filter(SuiviPage.user_id == user_id)
+        suivi_deleted = suivi_query.delete(synchronize_session=False)
         result["suivi"] = suivi_deleted
 
         # Supprimer les anciennes winning ads
-        winning_deleted = session.query(WinningAds).filter(
-            WinningAds.date_scan < cutoff
-        ).delete(synchronize_session=False)
+        winning_query = session.query(WinningAds).filter(WinningAds.date_scan < cutoff)
+        if user_id is not None:
+            winning_query = winning_query.filter(WinningAds.user_id == user_id)
+        winning_deleted = winning_query.delete(synchronize_session=False)
         result["winning_ads"] = winning_deleted
 
     return result
 
 
-def recalculate_all_page_states(db, thresholds: Dict[str, int]) -> Dict[str, int]:
+def recalculate_all_page_states(
+    db,
+    thresholds: Dict[str, int],
+    user_id: Optional[UUID] = None
+) -> Dict[str, int]:
     """
     Recalcule l'etat de toutes les pages selon les nouveaux seuils.
 
@@ -817,6 +1007,7 @@ def recalculate_all_page_states(db, thresholds: Dict[str, int]) -> Dict[str, int
     Args:
         db: Instance DatabaseManager
         thresholds: Dict des seuils {XS: 1, S: 10, M: 20, L: 35, XL: 80, XXL: 150}
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, donnees partagees.
 
     Returns:
         Dict avec statistiques du recalcul:
@@ -831,7 +1022,9 @@ def recalculate_all_page_states(db, thresholds: Dict[str, int]) -> Dict[str, int
     }
 
     with db.get_session() as session:
-        pages = session.query(PageRecherche).all()
+        query = session.query(PageRecherche)
+        query = _apply_user_filter(query, PageRecherche, user_id)
+        pages = query.all()
         stats["total_pages"] = len(pages)
 
         for page in pages:
