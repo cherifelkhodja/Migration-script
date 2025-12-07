@@ -105,9 +105,9 @@ def render_sidebar():
     """Affiche la sidebar avec navigation"""
     with st.sidebar:
         # Header avec dark mode toggle
-        col1, col2 = st.columns([4, 1])
+        col1, col2 = st.columns([3, 1])
         with col1:
-            st.markdown("## Meta Ads")
+            st.markdown("## 📊 Meta Ads")
         with col2:
             dark_mode = st.toggle("🌙", value=st.session_state.get('dark_mode', False), key="dark_toggle", help="Mode sombre")
             if dark_mode != st.session_state.get('dark_mode', False):
@@ -119,17 +119,17 @@ def render_sidebar():
         # Main Navigation
         st.markdown("### Main")
 
-        if st.button("Dashboard", width="stretch",
+        if st.button("🏠 Dashboard", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Dashboard" else "secondary"):
             st.session_state.current_page = "Dashboard"
             st.rerun()
 
-        if st.button("Search Ads", width="stretch",
+        if st.button("🔍 Search Ads", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Search Ads" else "secondary"):
             st.session_state.current_page = "Search Ads"
             st.rerun()
 
-        if st.button("Historique", width="stretch",
+        if st.button("📜 Historique", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Historique" else "secondary"):
             st.session_state.current_page = "Historique"
             st.rerun()
@@ -140,26 +140,26 @@ def render_sidebar():
             worker = get_worker()
             active = worker.get_active_searches()
             count = len(active) if active else 0
-            btn_label = f"Recherches en cours ({count})"
+            btn_label = f"⏳ Recherches en cours ({count})"
             btn_type = "primary" if st.session_state.current_page == "Background Searches" else "secondary"
 
-            if st.button(btn_label, width="stretch", type=btn_type):
+            if st.button(btn_label, use_container_width=True, type=btn_type):
                 st.session_state.current_page = "Background Searches"
                 st.rerun()
         except Exception:
             pass
 
-        if st.button("Pages / Shops", width="stretch",
+        if st.button("🏪 Pages / Shops", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Pages / Shops" else "secondary"):
             st.session_state.current_page = "Pages / Shops"
             st.rerun()
 
-        if st.button("Watchlists", width="stretch",
+        if st.button("📋 Watchlists", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Watchlists" else "secondary"):
             st.session_state.current_page = "Watchlists"
             st.rerun()
 
-        if st.button("Alerts", width="stretch",
+        if st.button("🔔 Alerts", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Alerts" else "secondary"):
             st.session_state.current_page = "Alerts"
             st.rerun()
@@ -167,17 +167,17 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### Organisation")
 
-        if st.button("Favoris", width="stretch",
+        if st.button("⭐ Favoris", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Favoris" else "secondary"):
             st.session_state.current_page = "Favoris"
             st.rerun()
 
-        if st.button("Collections", width="stretch",
+        if st.button("📁 Collections", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Collections" else "secondary"):
             st.session_state.current_page = "Collections"
             st.rerun()
 
-        if st.button("Tags", width="stretch",
+        if st.button("🏷️ Tags", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Tags" else "secondary"):
             st.session_state.current_page = "Tags"
             st.rerun()
@@ -185,22 +185,22 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### Analyse")
 
-        if st.button("Monitoring", width="stretch",
+        if st.button("📈 Monitoring", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Monitoring" else "secondary"):
             st.session_state.current_page = "Monitoring"
             st.rerun()
 
-        if st.button("Analytics", width="stretch",
+        if st.button("📊 Analytics", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Analytics" else "secondary"):
             st.session_state.current_page = "Analytics"
             st.rerun()
 
-        if st.button("Winning Ads", width="stretch",
+        if st.button("🏆 Winning Ads", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Winning Ads" else "secondary"):
             st.session_state.current_page = "Winning Ads"
             st.rerun()
 
-        if st.button("Creative Analysis", width="stretch",
+        if st.button("🎨 Creative Analysis", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Creative Analysis" else "secondary"):
             st.session_state.current_page = "Creative Analysis"
             st.rerun()
@@ -208,7 +208,7 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### Automation")
 
-        if st.button("Scans Programmes", width="stretch",
+        if st.button("🕐 Scans Programmés", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Scheduled Scans" else "secondary"):
             st.session_state.current_page = "Scheduled Scans"
             st.rerun()
@@ -216,12 +216,12 @@ def render_sidebar():
         st.markdown("---")
         st.markdown("### Config")
 
-        if st.button("Blacklist", width="stretch",
+        if st.button("🚫 Blacklist", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Blacklist" else "secondary"):
             st.session_state.current_page = "Blacklist"
             st.rerun()
 
-        if st.button("Settings", width="stretch",
+        if st.button("⚙️ Settings", use_container_width=True,
                      type="primary" if st.session_state.current_page == "Settings" else "secondary"):
             st.session_state.current_page = "Settings"
             st.rerun()
@@ -244,9 +244,9 @@ def render_sidebar():
         st.markdown("---")
         db = get_database()
         if db:
-            st.success("DB OK")
+            st.success("🟢 DB OK")
         else:
-            st.error("DB offline")
+            st.error("🔴 DB offline")
 
 
 def render_dashboard():
