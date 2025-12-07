@@ -38,10 +38,14 @@ def detect_cms_from_url(url: str) -> Dict[str, any]:
         parsed = urlparse(url)
         base_url = f"{parsed.scheme}://{parsed.netloc}"
 
-        # Recuperer la page principale avec retry
+        # Recuperer la page principale avec retry + fallback sans proxy
         html = ""
         headers_dict = {}
         cookies = {}
+
+        # Phase 1: Essayer avec proxy (si configure)
+        from src.infrastructure.config import is_proxy_enabled
+        proxy_failed = False
 
         for attempt in range(3):
             try:
@@ -64,6 +68,35 @@ def detect_cms_from_url(url: str) -> Dict[str, any]:
                 if attempt < 2:
                     time.sleep(1)
                     continue
+                else:
+                    proxy_failed = True
+
+        # Phase 2: Fallback sans proxy si echec et proxy etait active
+        if not html and proxy_failed and is_proxy_enabled():
+            import random
+            from src.infrastructure.config import USER_AGENTS
+            direct_headers = {"User-Agent": random.choice(USER_AGENTS)}
+
+            for attempt in range(2):
+                try:
+                    timeout = TIMEOUT_SHOPIFY_CHECK + (attempt * 5)
+                    resp = requests.get(
+                        url,
+                        headers=direct_headers,
+                        timeout=timeout,
+                        allow_redirects=True
+                    )
+
+                    if resp.status_code < 400:
+                        html = resp.text[:200000].lower()
+                        headers_dict = {k.lower(): v.lower() for k, v in resp.headers.items()}
+                        cookies = resp.cookies.get_dict()
+                        break
+
+                except requests.RequestException:
+                    if attempt < 1:
+                        time.sleep(1)
+                        continue
 
         if not html:
             return result

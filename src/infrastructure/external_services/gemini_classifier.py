@@ -359,8 +359,8 @@ def fetch_site_content_sync_requests(
     """
     Recupere le contenu d'un site avec requests (synchrone, plus fiable).
     Utilise ScraperAPI si configure pour eviter les blocages.
+    Fallback automatique vers requete directe si ScraperAPI echoue.
     """
-    # Import local pour eviter les imports circulaires
     from src.infrastructure.config import SCRAPER_API_KEY, SCRAPER_API_URL
 
     original_url = url
@@ -369,42 +369,45 @@ def fetch_site_content_sync_requests(
     if not url.startswith(('http://', 'https://')):
         url = f'https://{url}'
 
-    # Utiliser ScraperAPI si configure
-    if use_scraperapi and SCRAPER_API_KEY:
-        from urllib.parse import urlencode
-        scraper_params = {
-            "api_key": SCRAPER_API_KEY,
-            "url": url,
-            "render": "false",
-            "country_code": "fr"
-        }
-        request_url = f"{SCRAPER_API_URL}?{urlencode(scraper_params)}"
-        headers = {}  # ScraperAPI gere les headers
-        logger.debug(f"ScraperAPI: {original_url[:50]}...")
-    else:
-        request_url = url
-        # Headers realistes
-        headers = {
-            'User-Agent': random.choice(USER_AGENTS),
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Cache-Control': 'max-age=0',
-        }
+    def _make_request(use_proxy: bool) -> requests.Response:
+        """Helper pour faire la requete avec ou sans proxy."""
+        if use_proxy and SCRAPER_API_KEY:
+            from urllib.parse import urlencode
+            scraper_params = {
+                "api_key": SCRAPER_API_KEY,
+                "url": url,
+                "render": "false",
+                "country_code": "fr"
+            }
+            request_url = f"{SCRAPER_API_URL}?{urlencode(scraper_params)}"
+            headers = {}
+            req_timeout = 30
+            logger.debug(f"ScraperAPI: {original_url[:50]}...")
+        else:
+            request_url = url
+            headers = {
+                'User-Agent': random.choice(USER_AGENTS),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Cache-Control': 'max-age=0',
+            }
+            req_timeout = timeout
+            if not use_proxy:
+                logger.debug(f"Direct (fallback): {original_url[:50]}...")
 
-    try:
-        # Import local pour eviter les imports circulaires
-        from src.infrastructure.config import SCRAPER_API_KEY as API_KEY
-        response = requests.get(
+        return requests.get(
             request_url,
             headers=headers,
-            timeout=timeout if not API_KEY else 30,  # Timeout plus long pour ScraperAPI
+            timeout=req_timeout,
             verify=False,
             allow_redirects=True
         )
 
+    def _process_response(response: requests.Response) -> SiteContent:
+        """Helper pour traiter la reponse."""
         if response.status_code != 200:
             logger.warning(f"HTTP {response.status_code} for {url}")
             return SiteContent(
@@ -414,7 +417,6 @@ def fetch_site_content_sync_requests(
                 error=f"HTTP {response.status_code}"
             )
 
-        # Limiter la taille du contenu
         content = response.text
         if len(content) > 500000:
             content = content[:500000]
@@ -428,6 +430,20 @@ def fetch_site_content_sync_requests(
 
         return result
 
+    # Phase 1: Essayer avec ScraperAPI si configure et active
+    proxy_error = None
+    if use_scraperapi and SCRAPER_API_KEY:
+        try:
+            response = _make_request(use_proxy=True)
+            return _process_response(response)
+        except requests.exceptions.RequestException as e:
+            proxy_error = e
+            logger.warning(f"ScraperAPI failed for {url[:50]}..., trying direct request")
+
+    # Phase 2: Fallback vers requete directe (ou requete directe si pas de proxy)
+    try:
+        response = _make_request(use_proxy=False)
+        return _process_response(response)
     except requests.exceptions.Timeout:
         logger.warning(f"Timeout: {url[:50]}...")
         return SiteContent(page_id=page_id, url=original_url, page_name=page_name, error="Timeout")
