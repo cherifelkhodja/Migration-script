@@ -611,3 +611,117 @@ def analyze_website_complete(url: str, country_code: str = "FR") -> Dict:
             "currency_from_site": "",
             "site_title": "", "site_description": "", "site_h1": "", "site_keywords": ""
         }
+
+
+# ============================================================================
+# WRAPPER FUNCTIONS (pour compatibilite avec les imports existants)
+# ============================================================================
+
+def detect_cms_from_url(url: str) -> str:
+    """
+    Detecte le CMS d'un site web a partir de son URL.
+
+    Wrapper qui fetch l'URL et appelle detect_cms().
+
+    Args:
+        url: URL du site web
+
+    Returns:
+        Nom du CMS detecte ou "Inconnu"
+    """
+    if not url:
+        return "Inconnu"
+
+    try:
+        url = ensure_url(url)
+        resp = get_web(url, timeout=TIMEOUT_WEB)
+
+        if not resp or resp.status_code >= 400:
+            return "Inconnu"
+
+        return detect_cms(resp.text, resp.headers)
+    except Exception:
+        return "Inconnu"
+
+
+def extract_website_from_ads(ads: list) -> str:
+    """
+    Extrait l'URL du site web depuis une liste d'annonces.
+
+    Cherche dans ad_creative_link_captions ou page_profile_uri.
+
+    Args:
+        ads: Liste de dictionnaires d'annonces Meta
+
+    Returns:
+        URL du site web ou chaine vide
+    """
+    if not ads:
+        return ""
+
+    for ad in ads:
+        # Essayer ad_creative_link_captions d'abord
+        link_captions = ad.get("ad_creative_link_captions", [])
+        if link_captions and isinstance(link_captions, list):
+            for caption in link_captions:
+                if caption and isinstance(caption, str):
+                    # Nettoyer et valider l'URL
+                    url = caption.strip()
+                    if url and ("." in url):
+                        return url
+
+        # Essayer page_profile_uri
+        profile_uri = ad.get("page_profile_uri")
+        if profile_uri:
+            return profile_uri
+
+    return ""
+
+
+def extract_currency_from_ads(ads: list) -> str:
+    """
+    Extrait la devise depuis une liste d'annonces.
+
+    Cherche dans ad_creative_bodies ou autres champs textuels.
+
+    Args:
+        ads: Liste de dictionnaires d'annonces Meta
+
+    Returns:
+        Code devise (EUR, USD, etc.) ou chaine vide
+    """
+    import re
+
+    if not ads:
+        return ""
+
+    # Patterns de devises courants
+    currency_patterns = [
+        (r'€|EUR', 'EUR'),
+        (r'\$|USD', 'USD'),
+        (r'£|GBP', 'GBP'),
+        (r'CHF', 'CHF'),
+        (r'CAD', 'CAD'),
+        (r'AUD', 'AUD'),
+    ]
+
+    for ad in ads:
+        # Chercher dans le body de l'annonce
+        bodies = ad.get("ad_creative_bodies", [])
+        if bodies:
+            text = " ".join(str(b) for b in bodies if b)
+
+            for pattern, currency in currency_patterns:
+                if re.search(pattern, text):
+                    return currency
+
+        # Chercher dans le titre
+        titles = ad.get("ad_creative_link_titles", [])
+        if titles:
+            text = " ".join(str(t) for t in titles if t)
+
+            for pattern, currency in currency_patterns:
+                if re.search(pattern, text):
+                    return currency
+
+    return ""
