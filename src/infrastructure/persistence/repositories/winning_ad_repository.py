@@ -121,7 +121,9 @@ def is_winning_ad(
     # On matche le premier critere ou l'ad est eligible
     for max_age, min_reach in criteria:
         if age_days <= max_age and reach >= min_reach:
-            return (True, age_days, reach, f"{age_days}j/{reach:,}")
+            # Format lisible: ≤4d & >15k (basé sur les seuils, pas les valeurs)
+            criteria_str = f"≤{max_age}d & >{min_reach // 1000}k"
+            return (True, age_days, reach, criteria_str)
 
     return (False, age_days, reach, "")
 

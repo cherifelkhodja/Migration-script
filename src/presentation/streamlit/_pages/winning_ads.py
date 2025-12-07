@@ -503,25 +503,13 @@ def _render_winning_ads_table(winning_ads: list):
             "Age (j)": ad.get('ad_age_days', 0) or 0,
             "Critere": ad.get('matched_criteria', 'N/A'),
             "Texte": (ad.get('ad_creative_bodies', '') or '')[:80] + "..." if len(ad.get('ad_creative_bodies', '') or '') > 80 else (ad.get('ad_creative_bodies', '') or ''),
-            "Site": ad.get('lien_site', ''),
-            "Ad URL": ad.get('ad_snapshot_url', ''),
-            "Page ID": ad.get('page_id', ''),
-            "Ad ID": ad.get('ad_id', ''),
-            "Scan": ad.get('date_scan').strftime('%Y-%m-%d') if ad.get('date_scan') else ''
         })
 
     df_winning = pd.DataFrame(table_data)
-
-    # Configuration des colonnes pour les liens cliquables
-    column_config = {
-        "Site": st.column_config.LinkColumn("Site"),
-        "Ad URL": st.column_config.LinkColumn("Voir Ad"),
-    }
 
     st.dataframe(
         df_winning,
         width="stretch",
         hide_index=True,
-        column_config=column_config,
         height=600
     )
