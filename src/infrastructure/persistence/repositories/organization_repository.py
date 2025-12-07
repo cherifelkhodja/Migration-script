@@ -452,17 +452,17 @@ def get_scheduled_scans(db, active_only: bool = False) -> List[Dict]:
         query = session.query(ScheduledScan)
         if active_only:
             query = query.filter(ScheduledScan.is_active == True)
-        scans = query.order_by(ScheduledScan.next_run_at).all()
+        scans = query.order_by(ScheduledScan.next_run).all()
         return [{
             "id": s.id,
             "name": s.name,
             "keywords": s.keywords,
             "countries": s.countries,
+            "languages": getattr(s, 'languages', 'fr'),
             "frequency": s.frequency,
             "is_active": s.is_active,
-            "last_run_at": s.last_run_at,
-            "next_run_at": s.next_run_at,
-            "run_count": s.run_count,
+            "last_run": s.last_run,
+            "next_run": s.next_run,
             "created_at": s.created_at
         } for s in scans]
 
@@ -472,8 +472,9 @@ def create_scheduled_scan(
     name: str,
     keywords: str,
     countries: str = "FR",
+    languages: str = "fr",
     frequency: str = "daily",
-    next_run_at: datetime = None
+    next_run: datetime = None
 ) -> int:
     """Cree un scan programme."""
     with db.get_session() as session:
@@ -481,9 +482,10 @@ def create_scheduled_scan(
             name=name,
             keywords=keywords,
             countries=countries,
+            languages=languages,
             frequency=frequency,
             is_active=True,
-            next_run_at=next_run_at or datetime.utcnow()
+            next_run=next_run or datetime.utcnow()
         )
         session.add(scan)
         session.flush()
@@ -496,9 +498,10 @@ def update_scheduled_scan(
     name: str = None,
     keywords: str = None,
     countries: str = None,
+    languages: str = None,
     frequency: str = None,
     is_active: bool = None,
-    next_run_at: datetime = None
+    next_run: datetime = None
 ) -> bool:
     """Met a jour un scan programme."""
     with db.get_session() as session:
@@ -511,12 +514,14 @@ def update_scheduled_scan(
             scan.keywords = keywords
         if countries is not None:
             scan.countries = countries
+        if languages is not None:
+            scan.languages = languages
         if frequency is not None:
             scan.frequency = frequency
         if is_active is not None:
             scan.is_active = is_active
-        if next_run_at is not None:
-            scan.next_run_at = next_run_at
+        if next_run is not None:
+            scan.next_run = next_run
         return True
 
 
@@ -533,13 +538,12 @@ def mark_scan_executed(db, scan_id: int) -> bool:
         scan = session.query(ScheduledScan).filter(ScheduledScan.id == scan_id).first()
         if not scan:
             return False
-        scan.last_run_at = datetime.utcnow()
-        scan.run_count = (scan.run_count or 0) + 1
+        scan.last_run = datetime.utcnow()
         # Calculer la prochaine execution selon la frequence
         if scan.frequency == "hourly":
-            scan.next_run_at = datetime.utcnow() + timedelta(hours=1)
+            scan.next_run = datetime.utcnow() + timedelta(hours=1)
         elif scan.frequency == "daily":
-            scan.next_run_at = datetime.utcnow() + timedelta(days=1)
+            scan.next_run = datetime.utcnow() + timedelta(days=1)
         elif scan.frequency == "weekly":
-            scan.next_run_at = datetime.utcnow() + timedelta(weeks=1)
+            scan.next_run = datetime.utcnow() + timedelta(weeks=1)
         return True
