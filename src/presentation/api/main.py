@@ -23,6 +23,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from src.presentation.api.config import get_settings
 from src.presentation.api.auth.router import router as auth_router
 from src.presentation.api.billing.router import router as billing_router
+from src.presentation.api.oauth.router import router as oauth_router
 from src.infrastructure.logging import configure_logging, get_logger
 from src.infrastructure.logging.config import RequestLogger
 
@@ -72,6 +73,7 @@ def create_app() -> FastAPI:
     # Routers
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(billing_router, prefix=settings.api_prefix)
+    app.include_router(oauth_router, prefix=settings.api_prefix)
 
     return app
 
