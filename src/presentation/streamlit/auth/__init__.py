@@ -36,6 +36,7 @@ from src.presentation.streamlit.auth.auth_guard import (
     get_current_user,
     logout,
     is_authenticated,
+    can_access_page,
 )
 from src.presentation.streamlit.auth.user_management import render_user_management
 
@@ -46,5 +47,6 @@ __all__ = [
     "get_current_user",
     "logout",
     "is_authenticated",
+    "can_access_page",
     "render_user_management",
 ]
