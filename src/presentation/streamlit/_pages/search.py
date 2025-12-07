@@ -1376,20 +1376,33 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
 
     st.success(f"{len(web_results)} sites analyses")
 
-    # Phase 4: Comptage produits Shopify (JSON API)
+    # Phase 4: Comptage produits Shopify (JSON API) - Parallele comme keyword search
     st.subheader("Phase 4: Comptage produits Shopify")
     shopify_pages = [(pid, data) for pid, data in pages_final.items() if data.get("is_shopify") and data.get("website")]
 
     if shopify_pages:
         st.caption(f"{len(shopify_pages)} boutiques Shopify a analyser")
-        progress = st.progress(0)
+        completed = 0
 
-        for i, (pid, data) in enumerate(shopify_pages):
-            result = analyze_sitemap_v2(data["website"])  # Utilise JSON API maintenant
-            if pid in web_results:
-                web_results[pid]["product_count"] = result.get("product_count")
-            progress.progress((i + 1) / len(shopify_pages))
-            time.sleep(0.1)
+        def analyze_shopify_worker(pid_data):
+            pid, data = pid_data
+            try:
+                result = analyze_sitemap_v2(data["website"])
+                return pid, result
+            except Exception as e:
+                return pid, {"product_count": None, "error": str(e)[:50]}
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(analyze_shopify_worker, item): item[0] for item in shopify_pages}
+
+            for future in as_completed(futures):
+                pid, result = future.result()
+                if pid in web_results:
+                    # Note: Ne pas utiliser "or None" car 0 est une valeur valide
+                    count = result.get("product_count")
+                    web_results[pid]["product_count"] = count if count is not None else None
+
+                completed += 1
 
         st.success(f"{len(shopify_pages)} boutiques analysees")
     else:
