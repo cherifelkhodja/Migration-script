@@ -516,25 +516,20 @@ def _render_selection_mode(db, results: list):
 
     st.markdown("---")
 
-    # Liste avec checkboxes
+    # Liste avec checkboxes - utiliser le label pour un meilleur alignement
     for page in results:
         pid = page.get("page_id")
         score = page.get("score", 0)
         score_icon = get_score_color(score)
+        label = f"{score_icon} **{page.get('page_name', 'N/A')}** | {page.get('etat', 'N/A')} | {page.get('nombre_ads_active', 0)} ads | Score: {score}"
 
-        col_check, col_info = st.columns([1, 10])
-
-        with col_check:
-            is_selected = pid in st.session_state.selected_pages
-            if st.checkbox("", value=is_selected, key=f"sel_{pid}"):
-                if pid not in st.session_state.selected_pages:
-                    st.session_state.selected_pages.append(pid)
-            else:
-                if pid in st.session_state.selected_pages:
-                    st.session_state.selected_pages.remove(pid)
-
-        with col_info:
-            st.write(f"{score_icon} **{page.get('page_name', 'N/A')}** | {page.get('etat', 'N/A')} | {page.get('nombre_ads_active', 0)} ads | Score: {score}")
+        is_selected = pid in st.session_state.selected_pages
+        if st.checkbox(label, value=is_selected, key=f"sel_{pid}"):
+            if pid not in st.session_state.selected_pages:
+                st.session_state.selected_pages.append(pid)
+        else:
+            if pid in st.session_state.selected_pages:
+                st.session_state.selected_pages.remove(pid)
 
 
 def _render_table_mode(results: list):
