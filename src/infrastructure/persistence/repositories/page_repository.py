@@ -171,12 +171,9 @@ def save_suivi_page(db, pages_final: Dict, web_results: Dict, min_ads: int = 10)
 
             suivi = SuiviPage(
                 page_id=str(pid),
-                page_name=data.get("page_name", ""),
-                ads_active=ads_count,
-                cms=data.get("cms") or web.get("cms", ""),
-                thematique=web.get("thematique", ""),
+                nom_site=data.get("page_name", ""),
+                nombre_ads_active=ads_count,
                 date_scan=scan_time,
-                pays=data.get("country", ""),
             )
             session.add(suivi)
             count += 1
