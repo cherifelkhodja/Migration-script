@@ -274,6 +274,36 @@ def get_queue_stats(db) -> Dict:
         }
 
 
+def recover_interrupted_searches(db) -> int:
+    """
+    Recupere les recherches interrompues (status='running' mais worker arrete).
+    Les remet en 'pending' pour retraitement.
+
+    Returns:
+        Nombre de recherches recuperees.
+    """
+    with db.get_session() as session:
+        # Recherches 'running' depuis plus de 30 minutes = probablement interrompues
+        threshold = datetime.utcnow() - timedelta(minutes=30)
+
+        interrupted = session.query(SearchQueue).filter(
+            SearchQueue.status == "running",
+            or_(
+                SearchQueue.updated_at < threshold,
+                SearchQueue.updated_at.is_(None)
+            )
+        ).all()
+
+        count = 0
+        for search in interrupted:
+            search.status = "pending"
+            search.message = "Recherche interrompue - relancee automatiquement"
+            search.updated_at = datetime.utcnow()
+            count += 1
+
+        return count
+
+
 # ============================================================================
 # SEARCH HISTORY
 # ============================================================================

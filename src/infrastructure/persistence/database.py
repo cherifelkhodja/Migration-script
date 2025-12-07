@@ -106,9 +106,10 @@ from src.infrastructure.persistence.repositories import (
     create_search_log, update_search_log, complete_search_log, get_search_logs,
     delete_search_log, save_api_calls, create_search_queue, get_search_queue,
     update_search_queue_status, update_search_queue_progress, cancel_search_queue,
-    get_pending_searches, get_queue_stats, record_page_search_history,
-    record_pages_search_history_batch, record_winning_ad_search_history,
-    record_winning_ads_search_history_batch, get_search_history_stats,
+    get_pending_searches, get_queue_stats, recover_interrupted_searches,
+    record_page_search_history, record_pages_search_history_batch,
+    record_winning_ad_search_history, record_winning_ads_search_history_batch,
+    get_search_history_stats,
 )
 
 

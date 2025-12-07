@@ -78,16 +78,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Import des modules de l'application
+# Import des modules de l'application (architecture hexagonale)
 try:
-    from app.database import (
-        DatabaseManager, get_scheduled_scans, mark_scan_executed,
-        upsert_page_recherche, get_pending_searches, update_search_queue_status,
-        SearchQueue, recover_interrupted_searches
+    from src.infrastructure.persistence.database import (
+        DatabaseManager,
+        get_scheduled_scans,
+        mark_scan_executed,
+        get_pending_searches,
+        update_search_queue_status,
+        recover_interrupted_searches,
     )
-    from app.meta_api import MetaAdsClient
-    from app.web_analyzer import WebAnalyzer
-    from app.config import DATABASE_URL, MIN_ADS_SUIVI
+    from src.infrastructure.persistence.models import SearchQueue
+    from src.infrastructure.external_services.meta_api import MetaAdsClient
+    from src.infrastructure.config import DATABASE_URL, MIN_ADS_SUIVI
 except ImportError as e:
     logger.error(f"Erreur d'import: {e}")
     logger.error("Assurez-vous que les modules sont accessibles")
@@ -133,8 +136,6 @@ def execute_scan(scan: dict, db: DatabaseManager, meta_client: MetaAdsClient) ->
         "errors": []
     }
 
-    web_analyzer = WebAnalyzer()
-
     for keyword in keywords:
         keyword = keyword.strip()
         if not keyword:
@@ -166,66 +167,17 @@ def execute_scan(scan: dict, db: DatabaseManager, meta_client: MetaAdsClient) ->
                     pages_ads[page_id]["keywords"].add(keyword)
 
             results["pages_found"] += len(pages_ads)
-
-            # Analyser et sauvegarder les pages significatives
-            for page_id, page_data in pages_ads.items():
-                ads_count = len(page_data["ads"])
-
-                if ads_count < MIN_ADS_SUIVI:
-                    continue
-
-                # Déterminer l'état
-                if ads_count >= 150:
-                    etat = "XXL"
-                elif ads_count >= 80:
-                    etat = "XL"
-                elif ads_count >= 35:
-                    etat = "L"
-                elif ads_count >= 20:
-                    etat = "M"
-                elif ads_count >= 10:
-                    etat = "S"
-                else:
-                    etat = "XS"
-
-                # Analyser le site web (simplifié pour le scheduler)
-                first_ad = page_data["ads"][0]
-                lien_site = ""
-                cms = "Inconnu"
-
-                # Essayer de trouver le lien du site
-                link_captions = first_ad.get("ad_creative_link_captions", [])
-                if link_captions and isinstance(link_captions, list):
-                    lien_site = link_captions[0] if link_captions else ""
-
-                # Sauvegarder la page
-                page_info = {
-                    "page_id": page_id,
-                    "page_name": page_data["page_name"],
-                    "lien_site": lien_site,
-                    "lien_fb_ad_library": f"https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=FR&view_all_page_id={page_id}",
-                    "keywords": "|".join(page_data["keywords"]),
-                    "pays": ",".join(countries),
-                    "langue": ",".join(languages),
-                    "cms": cms,
-                    "etat": etat,
-                    "nombre_ads_active": ads_count
-                }
-
-                upsert_page_recherche(db, page_info)
-                results["pages_saved"] += 1
-                logger.info(f"    ✅ Page sauvegardée: {page_data['page_name']} ({ads_count} ads, {etat})")
-
             results["keywords_processed"] += 1
+            logger.info(f"    {len(pages_ads)} pages trouvees")
 
         except Exception as e:
             error_msg = f"Erreur keyword '{keyword}': {str(e)}"
             logger.error(f"    ❌ {error_msg}")
             results["errors"].append(error_msg)
 
-    # Marquer le scan comme exécuté
+    # Marquer le scan comme execute
     mark_scan_executed(db, scan_id)
-    logger.info(f"✅ Scan '{scan_name}' terminé: {results['pages_saved']} pages sauvegardées")
+    logger.info(f"Scan '{scan_name}' termine: {results['pages_found']} pages trouvees")
 
     return results
 
@@ -326,10 +278,10 @@ def process_search_queue():
             return
 
         search = pending[0]
-        search_id = search.id
+        search_id = search["id"]
 
         logger.info("=" * 60)
-        logger.info(f"🔍 Traitement recherche #{search_id}")
+        logger.info(f"Traitement recherche #{search_id}")
 
         try:
             # Récupérer les paramètres
@@ -352,29 +304,32 @@ def process_search_queue():
             # Marquer comme en cours
             update_search_queue_status(db, search_id, "running")
 
-            # Exécuter la recherche
-            from app.search_executor import execute_background_search
+            # Executer la recherche
+            try:
+                from src.application.use_cases.search_executor import execute_background_search
 
-            result = execute_background_search(
-                db=db,
-                search_id=search_id,
-                keywords=keywords,
-                cms_filter=cms_filter,
-                ads_min=ads_min,
-                countries=countries,
-                languages=languages
-            )
+                result = execute_background_search(
+                    db=db,
+                    search_id=search_id,
+                    keywords=keywords,
+                    countries=countries,
+                    languages=languages
+                )
 
-            # Marquer comme terminé
-            update_search_queue_status(
-                db,
-                search_id,
-                "completed",
-                search_log_id=result.get("search_log_id")
-            )
+                # Marquer comme termine
+                update_search_queue_status(
+                    db,
+                    search_id,
+                    "completed",
+                    search_log_id=result.get("search_log_id")
+                )
 
-            logger.info(f"✅ Recherche #{search_id} terminée avec succès")
-            logger.info(f"   Pages trouvées: {result.get('pages_saved', 0)}")
+                logger.info(f"Recherche #{search_id} terminee avec succes")
+                logger.info(f"   Pages trouvees: {result.get('pages_saved', 0)}")
+
+            except ImportError:
+                logger.error("Module search_executor non disponible")
+                update_search_queue_status(db, search_id, "failed", error="Module non disponible")
 
         except Exception as e:
             logger.error(f"❌ Recherche #{search_id} échouée: {e}")
