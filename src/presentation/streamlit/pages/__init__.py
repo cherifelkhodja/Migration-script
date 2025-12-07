@@ -13,6 +13,21 @@ from src.presentation.streamlit.pages.settings import render_settings
 from src.presentation.streamlit.pages.winning_ads import render_winning_ads
 from src.presentation.streamlit.pages.analytics import render_analytics
 from src.presentation.streamlit.pages.search_logs import render_search_logs
+from src.presentation.streamlit.pages.pages_shops import render_pages_shops
+from src.presentation.streamlit.pages.monitoring import (
+    render_watchlists, render_alerts, render_monitoring,
+    detect_trends, generate_alerts
+)
+from src.presentation.streamlit.pages.creative import (
+    render_creative_analysis, render_background_searches
+)
+from src.presentation.streamlit.pages.search import (
+    render_search_ads, render_keyword_search, render_page_id_search,
+    render_preview_results, run_search_process, run_page_id_search
+)
+from src.presentation.streamlit.pages.layout import (
+    render_sidebar, render_dashboard
+)
 
 __all__ = [
     "render_blacklist",
@@ -24,4 +39,20 @@ __all__ = [
     "render_winning_ads",
     "render_analytics",
     "render_search_logs",
+    "render_pages_shops",
+    "render_watchlists",
+    "render_alerts",
+    "render_monitoring",
+    "render_creative_analysis",
+    "render_background_searches",
+    "render_search_ads",
+    "render_keyword_search",
+    "render_page_id_search",
+    "render_preview_results",
+    "run_search_process",
+    "run_page_id_search",
+    "render_sidebar",
+    "render_dashboard",
+    "detect_trends",
+    "generate_alerts",
 ]
