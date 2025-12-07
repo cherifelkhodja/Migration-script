@@ -15,6 +15,16 @@ from src.infrastructure.persistence.models import (
 from src.infrastructure.persistence.repositories.utils import get_etat_from_ads_count
 
 
+def _parse_product_count(value) -> int:
+    """Convertit product_count en entier (0 si N/A, None, ou invalide)."""
+    if value is None or value == "N/A":
+        return 0
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return 0
+
+
 def save_pages_recherche(
     db,
     pages_final: Dict,
@@ -92,7 +102,9 @@ def save_pages_recherche(
                 existing_page.devise = data.get("currency", "") or existing_page.devise
                 existing_page.etat = get_etat_from_ads_count(ads_count, thresholds)
                 existing_page.nombre_ads_active = ads_count
-                existing_page.nombre_produits = web.get("product_count", 0) or existing_page.nombre_produits
+                new_product_count = _parse_product_count(web.get("product_count"))
+                if new_product_count > 0:
+                    existing_page.nombre_produits = new_product_count
                 existing_page.dernier_scan = scan_time
                 existing_page.updated_at = scan_time
                 if web.get("site_title"):
@@ -136,7 +148,7 @@ def save_pages_recherche(
                     devise=data.get("currency", ""),
                     etat=get_etat_from_ads_count(ads_count, thresholds),
                     nombre_ads_active=ads_count,
-                    nombre_produits=web.get("product_count", 0),
+                    nombre_produits=_parse_product_count(web.get("product_count")),
                     dernier_scan=scan_time,
                     created_at=scan_time,
                     updated_at=scan_time,

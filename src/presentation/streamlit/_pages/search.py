@@ -1000,7 +1000,7 @@ def run_search_process(
         else:
             # Preparer les donnees avec les metadata deja extraites en Phase 3
             web_results[pid] = {
-                "product_count": "N/A",  # Sera mis a jour si Shopify
+                "product_count": None,  # Sera mis a jour si Shopify (None = non-Shopify)
                 "theme": data.get("theme", "Unknown"),
                 "site_title": data.get("_site_title", ""),
                 "site_description": data.get("_site_description", ""),
@@ -1025,7 +1025,7 @@ def run_search_process(
                 result = analyze_sitemap_v2(data["website"], countries[0] if countries else "FR")
                 return pid, result
             except Exception as e:
-                return pid, {"product_count": "N/A", "error": str(e)[:50]}
+                return pid, {"product_count": None, "error": str(e)[:50]}
 
         with ThreadPoolExecutor(max_workers=8) as executor:
             futures = {executor.submit(analyze_sitemap_worker, item): item[0] for item in pages_need_sitemap}
@@ -1033,7 +1033,7 @@ def run_search_process(
             for future in as_completed(futures):
                 pid, result = future.result()
                 if pid in web_results:
-                    web_results[pid]["product_count"] = result.get("product_count", "N/A")
+                    web_results[pid]["product_count"] = result.get("product_count") or None
                     if result.get("product_titles"):
                         web_results[pid]["product_titles"] = result["product_titles"]
 

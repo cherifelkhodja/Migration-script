@@ -30,6 +30,15 @@ from typing import Optional, List, Dict, Tuple, Any
 from urllib.parse import urlparse, urljoin
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# curl_cffi pour bypass Cloudflare (TLS fingerprint)
+try:
+    from curl_cffi import requests as curl_requests
+    CURL_CFFI_AVAILABLE = True
+except ImportError:
+    curl_requests = None
+    CURL_CFFI_AVAILABLE = False
+
+# Fallback sur requests standard
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -219,12 +228,14 @@ class AnalysisResult:
 
 
 # ===========================================================================
-# HTTP CLIENT
+# HTTP CLIENT (avec curl_cffi pour bypass Cloudflare)
 # ===========================================================================
 
 class HttpClient:
     """
     Client HTTP optimise avec:
+    - curl_cffi pour bypass Cloudflare (TLS fingerprint Chrome)
+    - Fallback sur requests standard si curl_cffi non disponible
     - Connection pooling (Session)
     - Gzip automatique
     - SSL configurable via PROXY_CA_BUNDLE
@@ -232,8 +243,14 @@ class HttpClient:
     """
 
     def __init__(self):
-        self.session = self._create_session()
+        self.use_curl_cffi = CURL_CFFI_AVAILABLE
         self._setup_ssl()
+        if not self.use_curl_cffi:
+            self.session = self._create_fallback_session()
+            logger.warning("curl_cffi not available, using requests (may get blocked by Cloudflare)")
+        else:
+            self.session = curl_requests.Session()
+            logger.info("Using curl_cffi with Chrome impersonation for Cloudflare bypass")
 
     def _setup_ssl(self):
         """Configure SSL avec PROXY_CA_BUNDLE ou fallback verify=False."""
@@ -248,11 +265,9 @@ class HttpClient:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             if self.ca_bundle:
                 logger.warning(f"SSL: CA bundle not found at {self.ca_bundle}, using verify=False")
-            else:
-                logger.info("SSL: No PROXY_CA_BUNDLE set, using verify=False")
 
-    def _create_session(self) -> requests.Session:
-        """Cree une session avec retry et connection pooling."""
+    def _create_fallback_session(self) -> requests.Session:
+        """Cree une session requests standard avec retry (fallback)."""
         session = requests.Session()
 
         # Configuration retry avec exponential backoff
@@ -290,9 +305,9 @@ class HttpClient:
         url: str,
         timeout: int = TIMEOUT_HOMEPAGE,
         stream: bool = False
-    ) -> Optional[requests.Response]:
+    ) -> Optional[Any]:
         """
-        Execute une requete GET avec retry automatique.
+        Execute une requete GET avec bypass Cloudflare (curl_cffi).
 
         Args:
             url: URL a fetcher
@@ -303,31 +318,32 @@ class HttpClient:
             Response ou None si erreur
         """
         try:
-            response = self.session.get(
-                url,
-                headers=self._get_headers(),
-                timeout=timeout,
-                verify=self.verify,
-                allow_redirects=True,
-                stream=stream,
-            )
+            if self.use_curl_cffi:
+                # curl_cffi avec impersonate Chrome pour bypass Cloudflare
+                response = self.session.get(
+                    url,
+                    headers=self._get_headers(),
+                    timeout=timeout,
+                    verify=self.verify,
+                    allow_redirects=True,
+                    impersonate="chrome110",  # TLS fingerprint Chrome
+                )
+            else:
+                # Fallback requests standard
+                response = self.session.get(
+                    url,
+                    headers=self._get_headers(),
+                    timeout=timeout,
+                    verify=self.verify,
+                    allow_redirects=True,
+                    stream=stream,
+                )
             response.raise_for_status()
             return response
 
-        except requests.exceptions.Timeout:
-            logger.debug(f"Timeout: {url[:50]}...")
-            return None
-        except requests.exceptions.SSLError as e:
-            logger.debug(f"SSL Error: {url[:50]}... - {str(e)[:30]}")
-            return None
-        except requests.exceptions.ConnectionError as e:
-            logger.debug(f"Connection Error: {url[:50]}... - {str(e)[:30]}")
-            return None
-        except requests.exceptions.HTTPError as e:
-            logger.debug(f"HTTP Error: {url[:50]}... - {str(e)[:30]}")
-            return None
         except Exception as e:
-            logger.debug(f"Request Error: {url[:50]}... - {str(e)[:30]}")
+            error_type = type(e).__name__
+            logger.debug(f"{error_type}: {url[:50]}... - {str(e)[:50]}")
             return None
 
     def get_stream(
@@ -348,30 +364,47 @@ class HttpClient:
             Tuple (content, bytes_downloaded)
         """
         try:
-            response = self.session.get(
-                url,
-                headers=self._get_headers(),
-                timeout=timeout,
-                verify=self.verify,
-                allow_redirects=True,
-                stream=True,
-            )
-            response.raise_for_status()
+            if self.use_curl_cffi:
+                # curl_cffi avec impersonate Chrome
+                response = self.session.get(
+                    url,
+                    headers=self._get_headers(),
+                    timeout=timeout,
+                    verify=self.verify,
+                    allow_redirects=True,
+                    impersonate="chrome110",
+                )
+                response.raise_for_status()
+                # curl_cffi: pas de vrai streaming, mais on peut limiter
+                content = response.text[:max_bytes] if len(response.text) > max_bytes else response.text
+                bytes_downloaded = len(content.encode('utf-8'))
+                return content, bytes_downloaded
+            else:
+                # Fallback requests avec streaming
+                response = self.session.get(
+                    url,
+                    headers=self._get_headers(),
+                    timeout=timeout,
+                    verify=self.verify,
+                    allow_redirects=True,
+                    stream=True,
+                )
+                response.raise_for_status()
 
-            chunks = []
-            bytes_downloaded = 0
+                chunks = []
+                bytes_downloaded = 0
 
-            for chunk in response.iter_content(chunk_size=8192, decode_unicode=True):
-                if chunk:
-                    chunks.append(chunk)
-                    bytes_downloaded += len(chunk.encode('utf-8') if isinstance(chunk, str) else chunk)
+                for chunk in response.iter_content(chunk_size=8192, decode_unicode=True):
+                    if chunk:
+                        chunks.append(chunk)
+                        bytes_downloaded += len(chunk.encode('utf-8') if isinstance(chunk, str) else chunk)
 
-                    if bytes_downloaded >= max_bytes:
-                        logger.debug(f"Stream limit reached: {bytes_downloaded} bytes")
-                        break
+                        if bytes_downloaded >= max_bytes:
+                            logger.debug(f"Stream limit reached: {bytes_downloaded} bytes")
+                            break
 
-            content = ''.join(chunks) if chunks else ''
-            return content, bytes_downloaded
+                content = ''.join(chunks) if chunks else ''
+                return content, bytes_downloaded
 
         except Exception as e:
             logger.debug(f"Stream Error: {url[:50]}... - {str(e)[:30]}")
