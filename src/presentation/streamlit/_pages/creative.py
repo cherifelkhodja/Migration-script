@@ -270,7 +270,7 @@ def render_background_searches():
 
     # Initialiser le worker
     try:
-        from src.infrastructure.background_worker import get_worker, init_worker
+        from src.infrastructure.workers.background_worker import get_worker, init_worker
         from src.infrastructure.persistence.database import (
             get_interrupted_searches, restart_search_queue,
             cancel_search_queue, SearchQueue

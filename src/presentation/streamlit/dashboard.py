@@ -961,7 +961,7 @@ def main():
 
     # Initialiser le worker de recherches en arrière-plan
     try:
-        from src.infrastructure.background_worker import init_worker
+        from src.infrastructure.workers.background_worker import init_worker
         from src.infrastructure.persistence.database import recover_interrupted_searches, DatabaseManager, ensure_tables_exist
 
         # Initialiser les tables si nécessaire

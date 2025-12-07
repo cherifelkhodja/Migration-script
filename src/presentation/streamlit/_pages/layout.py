@@ -136,7 +136,7 @@ def render_sidebar():
 
         # Indicateur de recherches en arriere-plan
         try:
-            from src.infrastructure.background_worker import get_worker
+            from src.infrastructure.workers.background_worker import get_worker
             worker = get_worker()
             active = worker.get_active_searches()
             count = len(active) if active else 0

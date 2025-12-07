@@ -213,7 +213,7 @@ def render_keyword_search():
 
         if background_mode:
             # Mode arriere-plan: ajouter a la file d'attente
-            from src.infrastructure.background_worker import get_worker
+            from src.infrastructure.workers.background_worker import get_worker
             worker = get_worker()
 
             search_id = worker.submit_search(
