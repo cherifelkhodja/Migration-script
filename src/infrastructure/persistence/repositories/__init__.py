@@ -156,6 +156,7 @@ from src.infrastructure.persistence.repositories.winning_ad_repository import (
     get_winning_ads_stats,
     get_winning_ads_by_page,
     get_winning_ads_count_by_page,
+    migrate_matched_criteria_format,
 )
 
 from src.infrastructure.persistence.repositories.search_repository import (
@@ -315,6 +316,7 @@ __all__ = [
     "get_winning_ads_stats",
     "get_winning_ads_by_page",
     "get_winning_ads_count_by_page",
+    "migrate_matched_criteria_format",
     # Search
     "create_search_log",
     "update_search_log",

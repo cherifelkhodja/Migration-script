@@ -769,6 +769,22 @@ def render_settings_maintenance_tab(db):
 
     st.markdown("---")
 
+    # === SECTION: MIGRATION FORMAT WINNING ADS ===
+    st.subheader("🏆 Migration format Winning Ads")
+    st.caption("Convertir les criteres au format lisible (≤4d & >15k)")
+
+    from src.infrastructure.persistence.repositories import migrate_matched_criteria_format
+
+    if st.button("🔄 Migrer le format des criteres", key="migrate_winning_format"):
+        with st.spinner("Migration en cours..."):
+            try:
+                result = migrate_matched_criteria_format(db)
+                st.success(f"✅ Migration terminee: {result['updated']}/{result['total']} winning ads mises a jour ({result['skipped']} deja au bon format)")
+            except Exception as e:
+                st.error(f"Erreur: {e}")
+
+    st.markdown("---")
+
     # === SECTION: NETTOYAGE DES DOUBLONS ===
     st.subheader("🧹 Nettoyage des doublons")
     st.caption("Supprimez les entrees en doublon (garde les plus recentes).")

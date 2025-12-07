@@ -526,3 +526,53 @@ def get_winning_ads_count_by_page(db, days: int = 30) -> Dict[str, int]:
         ).all()
 
         return {str(r.page_id): r.count for r in results}
+
+
+def migrate_matched_criteria_format(db) -> Dict[str, int]:
+    """
+    Migre le format de matched_criteria de l'ancien format (ex: "5j/23,737")
+    vers le nouveau format base sur les seuils (ex: "≤4d & >15k").
+
+    Cette fonction est utile apres la mise a jour du code pour corriger
+    les donnees existantes dans la base.
+
+    Args:
+        db: Instance DatabaseManager
+
+    Returns:
+        Dict avec statistiques de migration:
+            - total: Nombre total de winning ads
+            - updated: Nombre d'ads mises a jour
+            - skipped: Nombre d'ads deja au bon format
+    """
+    stats = {"total": 0, "updated": 0, "skipped": 0}
+
+    with db.get_session() as session:
+        winning_ads = session.query(WinningAds).all()
+        stats["total"] = len(winning_ads)
+
+        for ad in winning_ads:
+            # Verifier si deja au bon format (contient "≤" et "&")
+            current = ad.matched_criteria or ""
+            if "≤" in current and "&" in current:
+                stats["skipped"] += 1
+                continue
+
+            # Recalculer le critere base sur age et reach
+            age_days = ad.ad_age_days or 0
+            reach = ad.eu_total_reach or 0
+
+            # Trouver le critere correspondant
+            new_criteria = None
+            for max_age, min_reach in DEFAULT_WINNING_CRITERIA:
+                if age_days <= max_age and reach >= min_reach:
+                    new_criteria = f"≤{max_age}d & >{min_reach // 1000}k"
+                    break
+
+            if new_criteria and new_criteria != current:
+                ad.matched_criteria = new_criteria
+                stats["updated"] += 1
+            else:
+                stats["skipped"] += 1
+
+    return stats
