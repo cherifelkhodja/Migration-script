@@ -22,8 +22,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copier le code de l'application
-COPY app/ ./app/
-COPY run.py .
+COPY src/ ./src/
+COPY scheduler.py .
 
 # Créer le dossier pour les résultats
 RUN mkdir -p /app/résultats
@@ -36,4 +36,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl --fail http://localhost:8501/_stcore/health || exit 1
 
 # Commande de démarrage
-CMD ["streamlit", "run", "app/dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "src/presentation/streamlit/dashboard.py", "--server.port=8501", "--server.address=0.0.0.0"]
