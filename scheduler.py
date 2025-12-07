@@ -87,14 +87,38 @@ try:
         get_pending_searches,
         update_search_queue_status,
         recover_interrupted_searches,
+        get_setting,
+        save_pages_recherche,
     )
     from src.infrastructure.persistence.models import SearchQueue
+    from src.infrastructure.persistence.repositories.utils import (
+        get_etat_from_ads_count,
+        DEFAULT_STATE_THRESHOLDS,
+    )
     from src.infrastructure.external_services.meta_api import MetaAdsClient
     from src.infrastructure.config import DATABASE_URL, MIN_ADS_SUIVI
 except ImportError as e:
     logger.error(f"Erreur d'import: {e}")
     logger.error("Assurez-vous que les modules sont accessibles")
     sys.exit(1)
+
+
+def get_state_thresholds(db: DatabaseManager) -> dict:
+    """
+    Recupere les seuils d'etat depuis la BDD ou utilise les valeurs par defaut.
+
+    Les seuils peuvent etre personnalises par l'utilisateur via les Settings.
+    Format stocke: JSON {"XS": 1, "S": 10, "M": 20, "L": 35, "XL": 80, "XXL": 150}
+    """
+    try:
+        thresholds_json = get_setting(db, "state_thresholds")
+        if thresholds_json:
+            import json
+            return json.loads(thresholds_json)
+    except Exception as e:
+        logger.warning(f"Erreur lecture seuils: {e}, utilisation valeurs par defaut")
+
+    return DEFAULT_STATE_THRESHOLDS.copy()
 
 
 def get_meta_token() -> str:
@@ -107,7 +131,7 @@ def get_meta_token() -> str:
 
 def execute_scan(scan: dict, db: DatabaseManager, meta_client: MetaAdsClient) -> dict:
     """
-    Exécute un scan programmé.
+    Execute un scan programme.
 
     Args:
         scan: Dictionnaire contenant les infos du scan
@@ -115,7 +139,7 @@ def execute_scan(scan: dict, db: DatabaseManager, meta_client: MetaAdsClient) ->
         meta_client: Client Meta API
 
     Returns:
-        dict avec les résultats du scan
+        dict avec les resultats du scan
     """
     scan_id = scan["id"]
     scan_name = scan["name"]
@@ -123,9 +147,12 @@ def execute_scan(scan: dict, db: DatabaseManager, meta_client: MetaAdsClient) ->
     countries = scan.get("countries", "FR").split(",")
     languages = scan.get("languages", "fr").split(",")
 
-    logger.info(f"▶ Démarrage scan '{scan_name}' (ID: {scan_id})")
+    logger.info(f"Demarrage scan '{scan_name}' (ID: {scan_id})")
     logger.info(f"  Keywords: {keywords}")
     logger.info(f"  Pays: {countries}, Langues: {languages}")
+
+    # Recuperer les seuils d'etat depuis la BDD
+    thresholds = get_state_thresholds(db)
 
     results = {
         "scan_id": scan_id,
@@ -136,13 +163,16 @@ def execute_scan(scan: dict, db: DatabaseManager, meta_client: MetaAdsClient) ->
         "errors": []
     }
 
+    # Accumuler toutes les pages de tous les keywords
+    all_pages = {}
+
     for keyword in keywords:
         keyword = keyword.strip()
         if not keyword:
             continue
 
         try:
-            logger.info(f"  🔍 Recherche: '{keyword}'")
+            logger.info(f"  Recherche: '{keyword}'")
 
             # Recherche des ads
             ads = meta_client.search_ads(
@@ -152,32 +182,73 @@ def execute_scan(scan: dict, db: DatabaseManager, meta_client: MetaAdsClient) ->
             )
 
             # Grouper par page
-            pages_ads = {}
             for ad in ads:
                 page_id = ad.get("page_id")
                 if page_id:
-                    if page_id not in pages_ads:
-                        pages_ads[page_id] = {
+                    if page_id not in all_pages:
+                        all_pages[page_id] = {
                             "page_id": page_id,
                             "page_name": ad.get("page_name", ""),
                             "ads": [],
                             "keywords": set()
                         }
-                    pages_ads[page_id]["ads"].append(ad)
-                    pages_ads[page_id]["keywords"].add(keyword)
+                    all_pages[page_id]["ads"].append(ad)
+                    all_pages[page_id]["keywords"].add(keyword)
 
-            results["pages_found"] += len(pages_ads)
             results["keywords_processed"] += 1
-            logger.info(f"    {len(pages_ads)} pages trouvees")
+            logger.info(f"    {len(ads)} ads trouvees")
 
         except Exception as e:
             error_msg = f"Erreur keyword '{keyword}': {str(e)}"
-            logger.error(f"    ❌ {error_msg}")
+            logger.error(f"    {error_msg}")
             results["errors"].append(error_msg)
+
+    results["pages_found"] = len(all_pages)
+
+    # Sauvegarder les pages significatives
+    pages_to_save = []
+    for page_id, page_data in all_pages.items():
+        ads_count = len(page_data["ads"])
+
+        if ads_count < MIN_ADS_SUIVI:
+            continue
+
+        # Determiner l'etat selon les seuils configurables
+        etat = get_etat_from_ads_count(ads_count, thresholds)
+
+        # Extraire le lien du site depuis les ads
+        first_ad = page_data["ads"][0]
+        lien_site = ""
+        link_captions = first_ad.get("ad_creative_link_captions", [])
+        if link_captions and isinstance(link_captions, list) and link_captions:
+            lien_site = link_captions[0]
+
+        page_info = {
+            "page_id": page_id,
+            "page_name": page_data["page_name"],
+            "lien_site": lien_site,
+            "lien_fb_ad_library": f"https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country={countries[0]}&view_all_page_id={page_id}",
+            "keywords": "|".join(page_data["keywords"]),
+            "pays": ",".join(countries),
+            "langue": ",".join(languages),
+            "cms": "Inconnu",
+            "etat": etat,
+            "nombre_ads_active": ads_count
+        }
+        pages_to_save.append(page_info)
+
+    # Sauvegarder en BDD
+    if pages_to_save:
+        try:
+            save_pages_recherche(db, pages_to_save)
+            results["pages_saved"] = len(pages_to_save)
+            logger.info(f"  {len(pages_to_save)} pages sauvegardees")
+        except Exception as e:
+            logger.error(f"Erreur sauvegarde pages: {e}")
 
     # Marquer le scan comme execute
     mark_scan_executed(db, scan_id)
-    logger.info(f"Scan '{scan_name}' termine: {results['pages_found']} pages trouvees")
+    logger.info(f"Scan '{scan_name}' termine: {results['pages_saved']} pages sauvegardees")
 
     return results
 
