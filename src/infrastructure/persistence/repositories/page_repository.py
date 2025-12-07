@@ -215,7 +215,6 @@ def save_ads_recherche(db, pages_final: Dict, page_ads: Dict, countries: List[st
                 ad_creation = None
                 if ad.get("ad_creation_time"):
                     try:
-                        from datetime import datetime
                         ad_creation_str = ad["ad_creation_time"]
                         if isinstance(ad_creation_str, str):
                             ad_creation = datetime.fromisoformat(
