@@ -39,17 +39,6 @@ def render_login_page() -> bool:
                 st.rerun()
             st.stop()
     """
-    # Mini-sidebar avec branding
-    with st.sidebar:
-        st.markdown("""
-        <div style="text-align: center; padding: 2rem 1rem;">
-            <h2>📊 Meta Ads</h2>
-            <p style="color: #666; font-size: 0.85rem;">Analyzer</p>
-        </div>
-        """, unsafe_allow_html=True)
-        st.markdown("---")
-        st.caption("Connectez-vous pour acceder a toutes les fonctionnalites")
-
     # Style CSS pour centrer le formulaire
     st.markdown("""
     <style>
