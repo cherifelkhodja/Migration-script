@@ -84,8 +84,10 @@ from src.infrastructure.config import (
 from src.infrastructure.external_services.meta_api import (
     MetaAdsClient, extract_website_from_ads, extract_currency_from_ads
 )
-from src.infrastructure.scrapers.shopify_detector import detect_cms_from_url
-from src.infrastructure.scrapers.web_analyzer import analyze_website_complete
+from src.infrastructure.scrapers.web_analyzer import (
+    analyze_website_complete,
+    detect_cms_from_url,
+)
 from src.infrastructure.persistence.database import (
     DatabaseManager, save_pages_recherche, save_suivi_page,
     save_ads_recherche, get_suivi_stats, get_suivi_stats_filtered, search_pages,

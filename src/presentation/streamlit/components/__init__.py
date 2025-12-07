@@ -50,6 +50,10 @@ from src.presentation.streamlit.components.utils import (
     get_delta_indicator,
 )
 
+from src.presentation.streamlit.components.progress import (
+    SearchProgressTracker,
+)
+
 __all__ = [
     # Charts
     "CHART_COLORS",
@@ -88,4 +92,6 @@ __all__ = [
     "format_time_elapsed",
     "truncate_text",
     "get_delta_indicator",
+    # Progress
+    "SearchProgressTracker",
 ]
