@@ -530,11 +530,11 @@ def render_preview_results():
                     suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI))
                     ads_saved = save_ads_recherche(db, pages_final, st.session_state.get("page_ads", {}), countries, det.get("min_ads_liste", MIN_ADS_LISTE))
                     winning_ads_data = st.session_state.get("winning_ads_data", [])
-                    winning_saved, winning_skipped = save_winning_ads(db, winning_ads_data, pages_final)
+                    winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data)
 
                     msg = f"✅ Sauvegardé : {pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads, {winning_saved} winning"
-                    if winning_skipped > 0:
-                        msg += f" ({winning_skipped} doublons ignorés)"
+                    if winning_updated > 0:
+                        msg += f" ({winning_new} 🆕, {winning_updated} 📝)"
                     st.success(msg)
                     st.session_state.show_preview_results = False
                     st.balloons()
@@ -1114,9 +1114,9 @@ def run_search_process(
                 ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, det.get("min_ads_liste", MIN_ADS_LISTE))
 
                 tracker.update_step("Sauvegarde winning ads", 4, 4)
-                winning_saved, winning_skipped = save_winning_ads(db, winning_ads_data, pages_final)
+                winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data)
 
-                msg = f"{pages_saved} pages, {ads_saved} ads, {winning_saved} winning"
+                msg = f"{pages_saved} pages, {ads_saved} ads, {winning_saved} winning ({winning_new} 🆕)"
 
                 phase8_stats = {
                     "Pages sauvees": pages_saved,
@@ -1352,7 +1352,7 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
                 det = st.session_state.get("detection_thresholds", {})
                 suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI))
                 ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, det.get("min_ads_liste", MIN_ADS_LISTE))
-                winning_saved, winning_skipped = save_winning_ads(db, winning_ads_data, pages_final)
+                winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data)
 
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Pages", pages_saved)
