@@ -61,9 +61,11 @@ def complete_search_log(
     log_id: int,
     status: str = "completed",
     error_message: str = None,
+    metrics: dict = None,
+    api_metrics: dict = None,
     **stats
 ) -> bool:
-    """Complete un log de recherche."""
+    """Complete un log de recherche avec metriques et stats API."""
     with db.get_session() as session:
         log = session.query(SearchLog).filter(SearchLog.id == log_id).first()
         if not log:
@@ -76,6 +78,23 @@ def complete_search_log(
         if error_message:
             log.error_message = error_message
 
+        # Appliquer les metriques de recherche
+        if metrics:
+            for key, value in metrics.items():
+                if hasattr(log, key) and value is not None:
+                    setattr(log, key, value)
+
+        # Appliquer les metriques API
+        if api_metrics:
+            for key, value in api_metrics.items():
+                # Convertir les dicts en JSON pour certains champs
+                if key in ("scraper_errors_by_type", "api_details", "errors_list"):
+                    if value and isinstance(value, (dict, list)):
+                        setattr(log, key, json.dumps(value))
+                elif hasattr(log, key) and value is not None:
+                    setattr(log, key, value)
+
+        # Appliquer les autres stats
         for key, value in stats.items():
             if hasattr(log, key):
                 setattr(log, key, value)
@@ -84,7 +103,7 @@ def complete_search_log(
 
 
 def get_search_logs(db, limit: int = 50, status: str = None) -> List[Dict]:
-    """Recupere les logs de recherche."""
+    """Recupere les logs de recherche avec tous les champs."""
     with db.get_session() as session:
         query = session.query(SearchLog)
         if status:
@@ -97,14 +116,45 @@ def get_search_logs(db, limit: int = 50, status: str = None) -> List[Dict]:
                 "id": l.id,
                 "keywords": l.keywords,
                 "countries": l.countries,
+                "languages": l.languages,
+                "min_ads": l.min_ads,
+                "selected_cms": l.selected_cms,
                 "status": l.status,
                 "started_at": l.started_at,
                 "ended_at": l.ended_at,
                 "duration_seconds": l.duration_seconds,
+                "error_message": l.error_message,
+                "phases_data": l.phases_data,
+                # Stats de recherche
                 "total_ads_found": l.total_ads_found,
                 "total_pages_found": l.total_pages_found,
+                "pages_after_filter": l.pages_after_filter,
                 "pages_shopify": l.pages_shopify,
+                "pages_other_cms": l.pages_other_cms,
                 "winning_ads_count": l.winning_ads_count,
+                "blacklisted_ads_skipped": l.blacklisted_ads_skipped,
+                # Stats de sauvegarde
+                "pages_saved": l.pages_saved,
+                "ads_saved": l.ads_saved,
+                "new_pages_count": l.new_pages_count,
+                "existing_pages_updated": l.existing_pages_updated,
+                "new_winning_ads_count": l.new_winning_ads_count,
+                "existing_winning_ads_updated": l.existing_winning_ads_updated,
+                # Stats API
+                "meta_api_calls": l.meta_api_calls,
+                "scraper_api_calls": l.scraper_api_calls,
+                "web_requests": l.web_requests,
+                "meta_api_errors": l.meta_api_errors,
+                "scraper_api_errors": l.scraper_api_errors,
+                "web_errors": l.web_errors,
+                "rate_limit_hits": l.rate_limit_hits,
+                "meta_api_avg_time": l.meta_api_avg_time,
+                "scraper_api_avg_time": l.scraper_api_avg_time,
+                "web_avg_time": l.web_avg_time,
+                "scraper_api_cost": l.scraper_api_cost,
+                "api_details": l.api_details,
+                "errors_list": l.errors_list,
+                "scraper_errors_by_type": l.scraper_errors_by_type,
             }
             for l in logs
         ]
