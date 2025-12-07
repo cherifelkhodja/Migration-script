@@ -51,6 +51,7 @@ from src.presentation.streamlit.components import (
 )
 from src.infrastructure.persistence.database import (
     search_pages, get_winning_ads, get_winning_ads_by_page,
+    get_winning_ads_count_by_page,
     get_evolution_stats, get_page_evolution_history,
     get_winning_ads_stats, get_winning_ads_stats_filtered,
     DatabaseManager, get_etat_from_ads_count
@@ -238,7 +239,7 @@ def render_watchlists():
 
         try:
             # Recuperer le nombre de winning ads par page (utilise le filtre de jours)
-            winning_by_page = get_winning_ads_by_page(db, days=days_filter if days_filter > 0 else 30)
+            winning_by_page = get_winning_ads_count_by_page(db, days=days_filter if days_filter > 0 else 30)
 
             if winning_by_page:
                 # Trier par nombre decroissant
@@ -313,9 +314,8 @@ def render_watchlists():
 
 def render_alerts():
     """Page Alerts - Alertes et notifications"""
-    from src.presentation.streamlit.dashboard import (
-        render_classification_filters, detect_trends, generate_alerts
-    )
+    from src.presentation.streamlit.dashboard import render_classification_filters
+    # detect_trends and generate_alerts are defined in this file (monitoring.py)
 
     st.title("Alerts")
     st.markdown("Alertes et changements detectes automatiquement")

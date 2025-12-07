@@ -10,6 +10,7 @@ from src.infrastructure.persistence.models import (
     PageRecherche,
     SuiviPage,
     AdsRecherche,
+    WinningAds,
 )
 from src.infrastructure.persistence.repositories.utils import get_etat_from_ads_count
 
@@ -414,24 +415,70 @@ def add_country_to_page(db, page_id: str, country: str) -> bool:
 
 
 def get_pages_count(db) -> Dict:
-    """Compte les pages par statut."""
+    """Compte les pages par statut pour la migration."""
     with db.get_session() as session:
         total = session.query(func.count(PageRecherche.id)).scalar() or 0
-        by_cms = session.query(
-            PageRecherche.cms,
-            func.count(PageRecherche.id)
-        ).group_by(PageRecherche.cms).all()
 
-        by_etat = session.query(
-            PageRecherche.etat,
-            func.count(PageRecherche.id)
-        ).group_by(PageRecherche.etat).all()
+        # Pages classifiees (ont une thematique)
+        classified = session.query(func.count(PageRecherche.id)).filter(
+            PageRecherche.thematique.isnot(None),
+            PageRecherche.thematique != ""
+        ).scalar() or 0
+
+        # Pages avec FR dans pays
+        with_fr = session.query(func.count(PageRecherche.id)).filter(
+            PageRecherche.pays.ilike("%FR%")
+        ).scalar() or 0
+
+        # Pages sans FR
+        without_fr = total - with_fr
+
+        # Pages non classifiees
+        unclassified = total - classified
 
         return {
             "total": total,
-            "by_cms": {c: n for c, n in by_cms if c},
-            "by_etat": {e: n for e, n in by_etat if e},
+            "classified": classified,
+            "with_fr": with_fr,
+            "without_fr": without_fr,
+            "unclassified": unclassified,
         }
+
+
+def migration_add_country_to_all_pages(db, country: str) -> int:
+    """
+    Ajoute un pays a toutes les pages qui ne l'ont pas encore.
+
+    Args:
+        db: Instance DatabaseManager
+        country: Code pays a ajouter (ex: "FR")
+
+    Returns:
+        Nombre de pages mises a jour
+    """
+    country = country.upper().strip()
+    updated = 0
+
+    with db.get_session() as session:
+        # Trouver les pages sans ce pays
+        pages = session.query(PageRecherche).filter(
+            or_(
+                PageRecherche.pays.is_(None),
+                PageRecherche.pays == "",
+                ~PageRecherche.pays.ilike(f"%{country}%")
+            )
+        ).all()
+
+        for page in pages:
+            existing_pays = page.pays or ""
+            pays_list = [c.strip().upper() for c in existing_pays.split(",") if c.strip()]
+
+            if country not in pays_list:
+                pays_list.append(country)
+                page.pays = ",".join(pays_list)
+                updated += 1
+
+    return updated
 
 
 def get_suivi_stats_filtered(
@@ -564,12 +611,12 @@ def get_dashboard_trends(db, days: int = 7) -> Dict:
     with db.get_session() as session:
         # Pages: compter les nouvelles pages
         current_pages = session.query(func.count(PageRecherche.id)).filter(
-            PageRecherche.date_ajout >= current_start
+            PageRecherche.created_at >= current_start
         ).scalar() or 0
 
         previous_pages = session.query(func.count(PageRecherche.id)).filter(
-            PageRecherche.date_ajout >= previous_start,
-            PageRecherche.date_ajout < current_start
+            PageRecherche.created_at >= previous_start,
+            PageRecherche.created_at < current_start
         ).scalar() or 0
 
         pages_delta = current_pages - previous_pages
@@ -611,3 +658,85 @@ def get_dashboard_trends(db, days: int = 7) -> Dict:
                 "falling": falling,
             },
         }
+
+
+def get_archive_stats(db) -> Dict:
+    """
+    Retourne les statistiques pour l'archivage.
+
+    Args:
+        db: Instance DatabaseManager
+
+    Returns:
+        Dict avec les stats d'archivage (pages, ads, winning_ads)
+    """
+    cutoff_90 = datetime.utcnow() - timedelta(days=90)
+
+    with db.get_session() as session:
+        # Compter les pages anciennes (sans activite recente)
+        pages_old = session.query(func.count(PageRecherche.id)).filter(
+            or_(
+                PageRecherche.dernier_scan.is_(None),
+                PageRecherche.dernier_scan < cutoff_90
+            )
+        ).scalar() or 0
+
+        # Compter les ads anciennes
+        ads_old = session.query(func.count(AdsRecherche.id)).filter(
+            AdsRecherche.date_scan < cutoff_90
+        ).scalar() or 0
+
+        # Compter les winning ads anciennes
+        winning_old = session.query(func.count(WinningAds.id)).filter(
+            WinningAds.date_scan < cutoff_90
+        ).scalar() or 0
+
+        # Totaux
+        total_pages = session.query(func.count(PageRecherche.id)).scalar() or 0
+        total_ads = session.query(func.count(AdsRecherche.id)).scalar() or 0
+        total_winning = session.query(func.count(WinningAds.id)).scalar() or 0
+
+        return {
+            "pages": {"total": total_pages, "archivable": pages_old},
+            "ads": {"total": total_ads, "archivable": ads_old},
+            "winning_ads": {"total": total_winning, "archivable": winning_old},
+        }
+
+
+def archive_old_data(db, days_threshold: int = 90) -> Dict[str, int]:
+    """
+    Archive les donnees plus anciennes que le seuil specifie.
+
+    Note: Pour simplifier, cette fonction supprime les anciennes entrees.
+    Une implementation complete devrait deplacer vers des tables d'archive.
+
+    Args:
+        db: Instance DatabaseManager
+        days_threshold: Nombre de jours avant archivage
+
+    Returns:
+        Dict avec le nombre d'entrees archivees par type
+    """
+    cutoff = datetime.utcnow() - timedelta(days=days_threshold)
+    result = {"ads": 0, "winning_ads": 0, "suivi": 0}
+
+    with db.get_session() as session:
+        # Supprimer les anciennes ads
+        ads_deleted = session.query(AdsRecherche).filter(
+            AdsRecherche.date_scan < cutoff
+        ).delete(synchronize_session=False)
+        result["ads"] = ads_deleted
+
+        # Supprimer les anciens suivis
+        suivi_deleted = session.query(SuiviPage).filter(
+            SuiviPage.date_scan < cutoff
+        ).delete(synchronize_session=False)
+        result["suivi"] = suivi_deleted
+
+        # Supprimer les anciennes winning ads
+        winning_deleted = session.query(WinningAds).filter(
+            WinningAds.date_scan < cutoff
+        ).delete(synchronize_session=False)
+        result["winning_ads"] = winning_deleted
+
+    return result

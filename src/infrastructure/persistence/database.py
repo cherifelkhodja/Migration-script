@@ -100,7 +100,9 @@ from src.infrastructure.persistence.repositories import (
     get_token_usage_logs, get_token_stats_detailed, verify_meta_token, verify_all_tokens,
     save_pages_recherche, save_suivi_page, save_ads_recherche,
     get_all_pages, get_page_history, get_page_evolution_history, get_evolution_stats, get_all_countries, get_all_subcategories,
-    add_country_to_page, get_pages_count, get_suivi_stats_filtered, get_cached_pages_info, get_dashboard_trends,
+    add_country_to_page, get_pages_count, migration_add_country_to_all_pages,
+    get_suivi_stats_filtered, get_cached_pages_info, get_dashboard_trends,
+    get_archive_stats, archive_old_data,
     is_winning_ad, save_winning_ads, cleanup_duplicate_winning_ads,
     get_winning_ads, get_winning_ads_filtered, get_winning_ads_stats,
     get_winning_ads_by_page, get_winning_ads_count_by_page,
@@ -366,10 +368,18 @@ def search_pages(
     subcategory: str = None,
     pays: str = None,
     page_id: str = None,
+    days: int = None,
 ) -> List[Dict]:
     """Recherche de pages avec filtres."""
+    from datetime import datetime, timedelta
+
     with db.get_session() as session:
         query = session.query(PageRecherche)
+
+        # Filter by days (created_at)
+        if days:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            query = query.filter(PageRecherche.created_at >= cutoff)
 
         # Handle page_id exact match
         if page_id:
