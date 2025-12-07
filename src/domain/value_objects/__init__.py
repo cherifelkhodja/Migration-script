@@ -20,6 +20,7 @@ from src.domain.value_objects.reach import Reach
 from src.domain.value_objects.role import Role, RoleLevel
 from src.domain.value_objects.thematique import Thematique, ThematiqueClassification
 from src.domain.value_objects.url import Url
+from src.domain.value_objects.user_id import UserId, SYSTEM_USER
 
 __all__ = [
     "PageId",
@@ -33,4 +34,6 @@ __all__ = [
     "Currency",
     "Role",
     "RoleLevel",
+    "UserId",
+    "SYSTEM_USER",
 ]
