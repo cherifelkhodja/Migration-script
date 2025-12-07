@@ -57,6 +57,15 @@ from src.presentation.streamlit.pages import (
     render_winning_ads,
     render_analytics,
     render_search_logs,
+    render_pages_shops,
+    render_watchlists,
+    render_alerts,
+    render_monitoring,
+    render_creative_analysis,
+    render_background_searches,
+    render_search_ads,
+    render_sidebar,
+    render_dashboard,
 )
 
 # Import du module d'authentification
