@@ -253,6 +253,14 @@ def _run_migrations(db: DatabaseManager):
         ("liste_page_recherche", "site_keywords", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS site_keywords VARCHAR(300)"),
         ("meta_tokens", "proxy_url", "ALTER TABLE meta_tokens ADD COLUMN IF NOT EXISTS proxy_url VARCHAR(255)"),
         ("search_queue", "updated_at", "ALTER TABLE search_queue ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"),
+        # Multi-tenancy owner_id columns
+        ("tags", "owner_id", "ALTER TABLE tags ADD COLUMN IF NOT EXISTS owner_id UUID"),
+        ("collections", "owner_id", "ALTER TABLE collections ADD COLUMN IF NOT EXISTS owner_id UUID"),
+        ("favorites", "owner_id", "ALTER TABLE favorites ADD COLUMN IF NOT EXISTS owner_id UUID"),
+        ("blacklist", "owner_id", "ALTER TABLE blacklist ADD COLUMN IF NOT EXISTS owner_id UUID"),
+        ("saved_filters", "owner_id", "ALTER TABLE saved_filters ADD COLUMN IF NOT EXISTS owner_id UUID"),
+        ("scheduled_scans", "owner_id", "ALTER TABLE scheduled_scans ADD COLUMN IF NOT EXISTS owner_id UUID"),
+        ("scheduled_scans", "languages", "ALTER TABLE scheduled_scans ADD COLUMN IF NOT EXISTS languages VARCHAR(100) DEFAULT 'fr'"),
     ]
 
     index_migrations = [

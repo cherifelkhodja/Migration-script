@@ -82,6 +82,7 @@ logger = logging.getLogger(__name__)
 try:
     from src.infrastructure.persistence.database import (
         DatabaseManager,
+        ensure_tables_exist,
         get_scheduled_scans,
         mark_scan_executed,
         get_pending_searches,
@@ -427,13 +428,16 @@ def main():
         logger.error(f"❌ {e}")
         sys.exit(1)
 
-    # Tester la connexion DB
+    # Tester la connexion DB et executer les migrations
     try:
         db = DatabaseManager(DATABASE_URL)
+        logger.info("Execution des migrations...")
+        ensure_tables_exist(db)
+        logger.info("Migrations terminees")
         scans = get_scheduled_scans(db)
-        logger.info(f"✅ Connexion DB OK - {len(scans)} scans programmés")
+        logger.info(f"Connexion DB OK - {len(scans)} scans programmes")
     except Exception as e:
-        logger.error(f"❌ Erreur connexion DB: {e}")
+        logger.error(f"Erreur connexion DB: {e}")
         sys.exit(1)
 
     # Récupérer les recherches interrompues au démarrage
