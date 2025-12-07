@@ -211,6 +211,21 @@ def save_ads_recherche(db, pages_final: Dict, page_ads: Dict, countries: List[st
                 continue
 
             for ad in ads:
+                # Parser ad_creation_time
+                ad_creation = None
+                if ad.get("ad_creation_time"):
+                    try:
+                        from datetime import datetime
+                        ad_creation_str = ad["ad_creation_time"]
+                        if isinstance(ad_creation_str, str):
+                            ad_creation = datetime.fromisoformat(
+                                ad_creation_str.replace("Z", "+00:00")
+                            )
+                        else:
+                            ad_creation = ad_creation_str
+                    except (ValueError, AttributeError):
+                        pass
+
                 ad_record = AdsRecherche(
                     ad_id=str(ad.get("id", "")),
                     page_id=page_id_str,
@@ -218,7 +233,7 @@ def save_ads_recherche(db, pages_final: Dict, page_ads: Dict, countries: List[st
                     ad_creative_bodies=str(ad.get("ad_creative_bodies", [])),
                     ad_creative_link_captions=str(ad.get("ad_creative_link_captions", [])),
                     ad_creative_link_titles=str(ad.get("ad_creative_link_titles", [])),
-                    ad_delivery_start_time=ad.get("ad_delivery_start_time"),
+                    ad_creation_time=ad_creation,
                     ad_snapshot_url=ad.get("ad_snapshot_url", ""),
                     eu_total_reach=ad.get("eu_total_reach"),
                     date_scan=scan_time,

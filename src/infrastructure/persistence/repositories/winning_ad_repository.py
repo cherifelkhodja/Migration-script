@@ -58,13 +58,13 @@ def is_winning_ad(
     """
     Determine si une annonce est qualifiee comme "Winning Ad".
 
-    L'algorithme compare l'age de l'ad (depuis ad_delivery_start_time) avec
+    L'algorithme compare l'age de l'ad (depuis ad_creation_time) avec
     son reach (eu_total_reach) selon une matrice de criteres. Une ad est
     winning si elle atteint le seuil de reach requis pour son age.
 
     Args:
         ad: Dictionnaire de donnees de l'annonce Meta contenant:
-            - ad_delivery_start_time: Date ISO de debut de diffusion
+            - ad_creation_time: Date ISO de creation de l'annonce
             - eu_total_reach: Nombre de personnes atteintes (EU)
         scan_date: Date de reference pour calculer l'age de l'ad
         criteria: Liste optionnelle de tuples (age_max, reach_min).
@@ -79,7 +79,7 @@ def is_winning_ad(
                                       ou chaine vide si non qualifiee
 
     Example:
-        >>> ad = {"ad_delivery_start_time": "2024-01-01", "eu_total_reach": 50000}
+        >>> ad = {"ad_creation_time": "2024-01-01", "eu_total_reach": 50000}
         >>> is_winning, age, reach, criteria = is_winning_ad(ad, datetime(2024, 1, 8))
         >>> is_winning  # True car 7 jours avec 50K >= seuil de 40K
         True
@@ -87,8 +87,9 @@ def is_winning_ad(
     if criteria is None:
         criteria = DEFAULT_WINNING_CRITERIA
 
-    # Extraction et validation de la date de debut
-    start_str = ad.get("ad_delivery_start_time", "")
+    # Extraction et validation de la date de creation
+    # Note: L'API Meta retourne ad_creation_time (pas ad_delivery_start_time)
+    start_str = ad.get("ad_creation_time", "")
     if not start_str:
         return (False, 0, 0, "")
 
@@ -193,7 +194,7 @@ def save_winning_ads(
                     updated_count += 1
             else:
                 # Nouvelle winning ad: insertion complete
-                start_time = ad.get("ad_delivery_start_time")
+                start_time = ad.get("ad_creation_time")
                 if isinstance(start_time, str):
                     try:
                         start_time = datetime.fromisoformat(
@@ -209,10 +210,10 @@ def save_winning_ads(
                     ad_creative_bodies=str(ad.get("ad_creative_bodies", [])),
                     ad_creative_link_captions=str(ad.get("ad_creative_link_captions", [])),
                     ad_creative_link_titles=str(ad.get("ad_creative_link_titles", [])),
-                    ad_delivery_start_time=start_time,
+                    ad_creation_time=start_time,
                     ad_snapshot_url=ad.get("ad_snapshot_url", ""),
                     eu_total_reach=reach,
-                    age_days=data.get("age_days", 0),
+                    ad_age_days=data.get("age_days", 0),
                     matched_criteria=data.get("matched_criteria", ""),
                     date_scan=scan_time,
                     search_log_id=search_log_id,
