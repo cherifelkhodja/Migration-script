@@ -151,6 +151,7 @@ from src.infrastructure.persistence.repositories.winning_ad_repository import (
     get_winning_ads_filtered,
     get_winning_ads_stats,
     get_winning_ads_by_page,
+    get_winning_ads_count_by_page,
 )
 
 from src.infrastructure.persistence.repositories.search_repository import (
@@ -174,6 +175,7 @@ from src.infrastructure.persistence.repositories.search_repository import (
     record_winning_ads_search_history_batch,
     get_search_history_stats,
     update_search_log_phases,
+    get_search_logs_stats,
 )
 
 __all__ = [
@@ -302,6 +304,7 @@ __all__ = [
     "get_winning_ads_filtered",
     "get_winning_ads_stats",
     "get_winning_ads_by_page",
+    "get_winning_ads_count_by_page",
     # Search
     "create_search_log",
     "update_search_log",
@@ -323,4 +326,5 @@ __all__ = [
     "record_winning_ads_search_history_batch",
     "get_search_history_stats",
     "update_search_log_phases",
+    "get_search_logs_stats",
 ]

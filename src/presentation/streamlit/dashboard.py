@@ -46,8 +46,8 @@ from src.presentation.streamlit.components import (
     format_time_elapsed, truncate_text, get_delta_indicator,
 )
 
-# Import des pages extraites
-from src.presentation.streamlit.pages import (
+# Import des pages extraites (underscore prefix hides from Streamlit multipage)
+from src.presentation.streamlit._pages import (
     render_blacklist,
     render_favorites,
     render_collections,

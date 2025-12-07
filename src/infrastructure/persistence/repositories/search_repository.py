@@ -433,3 +433,88 @@ def update_search_log_phases(db, log_id: int, phases_completed: list) -> bool:
             pass
 
         return True
+
+
+def get_search_logs_stats(db, days: int = 30) -> Dict:
+    """
+    Statistiques des logs de recherche.
+
+    Args:
+        db: Instance DatabaseManager
+        days: Nombre de jours a considerer
+
+    Returns:
+        Dict avec les statistiques des recherches
+    """
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    with db.get_session() as session:
+        # Total searches
+        total_searches = session.query(func.count(SearchLog.id)).filter(
+            SearchLog.started_at >= cutoff
+        ).scalar() or 0
+
+        # By status
+        by_status = {}
+        for status in ["completed", "failed", "running", "preview"]:
+            count = session.query(func.count(SearchLog.id)).filter(
+                SearchLog.started_at >= cutoff,
+                SearchLog.status == status
+            ).scalar() or 0
+            by_status[status] = count
+
+        # Average duration
+        avg_duration = session.query(func.avg(SearchLog.duration_seconds)).filter(
+            SearchLog.started_at >= cutoff,
+            SearchLog.duration_seconds.isnot(None)
+        ).scalar() or 0
+
+        # Total pages found
+        total_pages = session.query(func.sum(SearchLog.total_pages_found)).filter(
+            SearchLog.started_at >= cutoff
+        ).scalar() or 0
+
+        # API stats (if columns exist)
+        total_meta_api = 0
+        total_scraper_api = 0
+        total_web_requests = 0
+        total_rate_limits = 0
+
+        try:
+            total_meta_api = session.query(func.sum(SearchLog.meta_api_calls)).filter(
+                SearchLog.started_at >= cutoff
+            ).scalar() or 0
+        except Exception:
+            pass
+
+        try:
+            total_scraper_api = session.query(func.sum(SearchLog.scraper_api_calls)).filter(
+                SearchLog.started_at >= cutoff
+            ).scalar() or 0
+        except Exception:
+            pass
+
+        try:
+            total_web_requests = session.query(func.sum(SearchLog.web_requests)).filter(
+                SearchLog.started_at >= cutoff
+            ).scalar() or 0
+        except Exception:
+            pass
+
+        try:
+            total_rate_limits = session.query(func.sum(SearchLog.rate_limit_hits)).filter(
+                SearchLog.started_at >= cutoff
+            ).scalar() or 0
+        except Exception:
+            pass
+
+        return {
+            "total_searches": total_searches,
+            "by_status": by_status,
+            "avg_duration_seconds": float(avg_duration) if avg_duration else 0,
+            "total_pages_found": int(total_pages) if total_pages else 0,
+            "total_meta_api_calls": int(total_meta_api) if total_meta_api else 0,
+            "total_scraper_api_calls": int(total_scraper_api) if total_scraper_api else 0,
+            "total_web_requests": int(total_web_requests) if total_web_requests else 0,
+            "total_rate_limit_hits": int(total_rate_limits) if total_rate_limits else 0,
+        }

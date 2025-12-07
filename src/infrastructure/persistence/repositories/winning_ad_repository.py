@@ -452,3 +452,33 @@ def get_winning_ads_by_page(
             }
             for a in ads
         ]
+
+
+def get_winning_ads_count_by_page(db, days: int = 30) -> Dict[str, int]:
+    """
+    Compte les winning ads par page sur une periode donnee.
+
+    Retourne un dictionnaire {page_id: count} pour calculer les scores
+    de performance des pages.
+
+    Args:
+        db: Instance DatabaseManager
+        days: Nombre de jours a considerer
+
+    Returns:
+        Dict mapping page_id vers le nombre de winning ads
+    """
+    from datetime import datetime, timedelta
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    with db.get_session() as session:
+        results = session.query(
+            WinningAds.page_id,
+            func.count(WinningAds.id).label("count")
+        ).filter(
+            WinningAds.date_scan >= cutoff
+        ).group_by(
+            WinningAds.page_id
+        ).all()
+
+        return {str(r.page_id): r.count for r in results}

@@ -69,7 +69,7 @@ import pandas as pd
 from src.presentation.streamlit.shared import get_database
 from src.presentation.streamlit.components import export_to_csv
 from src.infrastructure.persistence.database import (
-    search_pages, get_winning_ads_by_page,
+    search_pages, get_winning_ads_count_by_page,
     get_saved_filters, save_filter, delete_saved_filter,
     get_taxonomy_categories, get_all_subcategories, get_all_countries,
     get_collections, add_page_to_collection,
@@ -313,7 +313,7 @@ def render_pages_shops():
 
         if results:
             # Enrichir avec scores et winning ads
-            winning_by_page = get_winning_ads_by_page(db, days=30)
+            winning_by_page = get_winning_ads_count_by_page(db, days=30)
             winning_counts = {str(k): v for k, v in winning_by_page.items()}
 
             for page in results:

@@ -102,14 +102,15 @@ from src.infrastructure.persistence.repositories import (
     get_all_pages, get_page_history, get_page_evolution_history, get_evolution_stats, get_all_countries, get_all_subcategories,
     add_country_to_page, get_pages_count, get_suivi_stats_filtered, get_cached_pages_info, get_dashboard_trends,
     is_winning_ad, save_winning_ads, cleanup_duplicate_winning_ads,
-    get_winning_ads, get_winning_ads_filtered, get_winning_ads_stats, get_winning_ads_by_page,
+    get_winning_ads, get_winning_ads_filtered, get_winning_ads_stats,
+    get_winning_ads_by_page, get_winning_ads_count_by_page,
     create_search_log, update_search_log, complete_search_log, get_search_logs,
     delete_search_log, save_api_calls, create_search_queue, get_search_queue,
     update_search_queue_status, update_search_queue_progress, cancel_search_queue,
     get_pending_searches, get_queue_stats, recover_interrupted_searches,
     record_page_search_history, record_pages_search_history_batch,
     record_winning_ad_search_history, record_winning_ads_search_history_batch,
-    get_search_history_stats, update_search_log_phases,
+    get_search_history_stats, update_search_log_phases, get_search_logs_stats,
 )
 
 
@@ -358,10 +359,21 @@ def search_pages(
     category_filter: str = None,
     limit: int = 100,
     offset: int = 0,
+    # Alias parameters for compatibility
+    cms: str = None,
+    etat: str = None,
+    thematique: str = None,
+    subcategory: str = None,
+    pays: str = None,
+    page_id: str = None,
 ) -> List[Dict]:
     """Recherche de pages avec filtres."""
     with db.get_session() as session:
         query = session.query(PageRecherche)
+
+        # Handle page_id exact match
+        if page_id:
+            query = query.filter(PageRecherche.page_id == page_id)
 
         if search_term:
             search_pattern = f"%{search_term}%"
@@ -374,18 +386,34 @@ def search_pages(
                 )
             )
 
-        if cms_filter:
+        # CMS filter (accept both cms and cms_filter)
+        if cms:
+            query = query.filter(PageRecherche.cms == cms)
+        elif cms_filter:
             query = query.filter(PageRecherche.cms.in_(cms_filter))
 
-        if etat_filter:
+        # Etat filter (accept both etat and etat_filter)
+        if etat:
+            query = query.filter(PageRecherche.etat == etat)
+        elif etat_filter:
             query = query.filter(PageRecherche.etat.in_(etat_filter))
 
-        if country_filter:
+        # Country filter (accept both pays and country_filter)
+        if pays:
+            query = query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+        elif country_filter:
             conditions = [PageRecherche.pays.ilike(f"%{c}%") for c in country_filter]
             query = query.filter(or_(*conditions))
 
-        if category_filter:
+        # Thematique/category filter
+        if thematique:
+            query = query.filter(PageRecherche.thematique == thematique)
+        elif category_filter:
             query = query.filter(PageRecherche.thematique == category_filter)
+
+        # Subcategory filter
+        if subcategory:
+            query = query.filter(PageRecherche.subcategory == subcategory)
 
         pages = query.order_by(desc(PageRecherche.nombre_ads_active)).offset(offset).limit(limit).all()
 
@@ -398,6 +426,7 @@ def search_pages(
                 "etat": p.etat,
                 "nombre_ads_active": p.nombre_ads_active,
                 "thematique": p.thematique,
+                "subcategory": getattr(p, 'subcategory', None),
                 "pays": p.pays,
                 "dernier_scan": p.dernier_scan,
             }

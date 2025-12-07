@@ -55,7 +55,7 @@ from src.presentation.streamlit.components import (
 )
 from src.infrastructure.persistence.database import (
     get_suivi_stats, get_suivi_stats_filtered,
-    get_winning_ads_stats, get_winning_ads_by_page,
+    get_winning_ads_stats, get_winning_ads_count_by_page,
     get_dashboard_trends, search_pages
 )
 
@@ -246,7 +246,7 @@ def render_sidebar():
 def render_dashboard():
     """Page Dashboard - Vue d'ensemble"""
     from src.presentation.streamlit.dashboard import render_classification_filters
-    from src.presentation.streamlit.pages.monitoring import detect_trends, generate_alerts
+    from src.presentation.streamlit._pages.monitoring import detect_trends, generate_alerts
 
     st.title("Dashboard")
     st.markdown("Vue d'ensemble de vos donnees")
@@ -287,7 +287,7 @@ def render_dashboard():
             stats = get_suivi_stats(db)
 
         winning_stats = get_winning_ads_stats(db, days=7)
-        winning_by_page = get_winning_ads_by_page(db, days=30)
+        winning_by_page = get_winning_ads_count_by_page(db, days=30)
 
         # Recuperer les tendances (7 jours vs 7 jours precedents)
         trends = get_dashboard_trends(db, days=7)
