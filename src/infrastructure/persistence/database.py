@@ -99,7 +99,7 @@ from src.infrastructure.persistence.repositories import (
     record_token_usage, clear_rate_limit, reset_token_stats, log_token_usage,
     get_token_usage_logs, get_token_stats_detailed, verify_meta_token, verify_all_tokens,
     save_pages_recherche, save_suivi_page, save_ads_recherche,
-    get_all_pages, get_page_history, get_page_evolution_history, get_all_countries, get_all_subcategories,
+    get_all_pages, get_page_history, get_page_evolution_history, get_evolution_stats, get_all_countries, get_all_subcategories,
     add_country_to_page, get_pages_count,
     is_winning_ad, save_winning_ads, cleanup_duplicate_winning_ads,
     get_winning_ads, get_winning_ads_filtered, get_winning_ads_stats, get_winning_ads_by_page,

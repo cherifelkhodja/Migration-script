@@ -280,6 +280,91 @@ def get_page_evolution_history(db, page_id: str, limit: int = 30) -> List[Dict]:
         ]
 
 
+def get_evolution_stats(db, period_days: int = 7) -> List[Dict]:
+    """
+    Calcule les statistiques d'evolution des pages sur une periode donnee.
+
+    Compare le dernier scan de chaque page avec le scan precedent
+    pour detecter les hausses/baisses d'activite publicitaire.
+
+    Args:
+        db: Instance DatabaseManager
+        period_days: Periode en jours pour l'analyse
+
+    Returns:
+        Liste de dicts avec les champs:
+        - page_id, nom_site
+        - delta_ads, pct_ads (evolution ads)
+        - delta_produits (evolution produits)
+        - ads_actuel, produits_actuel
+        - date_actuel, date_precedent
+        - duree_jours (jours entre les 2 scans)
+    """
+    from sqlalchemy import func, desc
+    from collections import defaultdict
+
+    cutoff = datetime.utcnow() - timedelta(days=period_days)
+
+    with db.get_session() as session:
+        # Recuperer tous les scans de la periode, groupes par page
+        scans = session.query(SuiviPage).filter(
+            SuiviPage.date_scan >= cutoff
+        ).order_by(SuiviPage.page_id, desc(SuiviPage.date_scan)).all()
+
+        # Grouper par page_id
+        pages_scans = defaultdict(list)
+        for scan in scans:
+            pages_scans[scan.page_id].append(scan)
+
+        evolution_list = []
+
+        for page_id, page_scans in pages_scans.items():
+            # Il faut au moins 2 scans pour calculer une evolution
+            if len(page_scans) < 2:
+                continue
+
+            # Premier = plus recent, second = precedent
+            current = page_scans[0]
+            previous = page_scans[1]
+
+            # Calculer les deltas
+            ads_actuel = current.nombre_ads_active or 0
+            ads_precedent = previous.nombre_ads_active or 0
+            delta_ads = ads_actuel - ads_precedent
+
+            produits_actuel = current.nombre_produits or 0
+            produits_precedent = previous.nombre_produits or 0
+            delta_produits = produits_actuel - produits_precedent
+
+            # Pourcentage de changement
+            pct_ads = 0.0
+            if ads_precedent > 0:
+                pct_ads = (delta_ads / ads_precedent) * 100
+
+            # Duree entre les scans
+            duree_jours = 0.0
+            if current.date_scan and previous.date_scan:
+                duree_jours = (current.date_scan - previous.date_scan).total_seconds() / 86400
+
+            evolution_list.append({
+                "page_id": page_id,
+                "nom_site": current.nom_site or page_id,
+                "delta_ads": delta_ads,
+                "pct_ads": pct_ads,
+                "ads_actuel": ads_actuel,
+                "produits_actuel": produits_actuel,
+                "delta_produits": delta_produits,
+                "date_actuel": current.date_scan,
+                "date_precedent": previous.date_scan,
+                "duree_jours": duree_jours,
+            })
+
+        # Trier par amplitude du changement (absolu)
+        evolution_list.sort(key=lambda x: abs(x["delta_ads"]), reverse=True)
+
+        return evolution_list
+
+
 def get_all_countries(db) -> List[str]:
     """Recupere tous les pays distincts."""
     with db.get_session() as session:
