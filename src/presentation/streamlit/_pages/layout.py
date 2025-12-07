@@ -105,11 +105,11 @@ def render_sidebar():
     """Affiche la sidebar avec navigation"""
     with st.sidebar:
         # Header avec dark mode toggle
-        col1, col2 = st.columns([3, 1])
+        col1, col2 = st.columns([4, 1])
         with col1:
             st.markdown("## Meta Ads")
         with col2:
-            dark_mode = st.toggle("Mode sombre", value=st.session_state.get('dark_mode', False), key="dark_toggle")
+            dark_mode = st.toggle("🌙", value=st.session_state.get('dark_mode', False), key="dark_toggle", help="Mode sombre")
             if dark_mode != st.session_state.get('dark_mode', False):
                 st.session_state.dark_mode = dark_mode
                 st.rerun()
