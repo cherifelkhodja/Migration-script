@@ -793,3 +793,45 @@ def archive_old_data(db, days_threshold: int = 90) -> Dict[str, int]:
         result["winning_ads"] = winning_deleted
 
     return result
+
+
+def recalculate_all_page_states(db, thresholds: Dict[str, int]) -> Dict[str, int]:
+    """
+    Recalcule l'etat de toutes les pages selon les nouveaux seuils.
+
+    Cette fonction est appelee automatiquement lors d'un changement de seuils
+    dans les Settings pour assurer la coherence des etats.
+
+    Args:
+        db: Instance DatabaseManager
+        thresholds: Dict des seuils {XS: 1, S: 10, M: 20, L: 35, XL: 80, XXL: 150}
+
+    Returns:
+        Dict avec statistiques du recalcul:
+            - total_pages: Nombre total de pages traitees
+            - updated: Nombre de pages dont l'etat a change
+            - by_state: Repartition par nouvel etat
+    """
+    stats = {
+        "total_pages": 0,
+        "updated": 0,
+        "by_state": {"inactif": 0, "XS": 0, "S": 0, "M": 0, "L": 0, "XL": 0, "XXL": 0}
+    }
+
+    with db.get_session() as session:
+        pages = session.query(PageRecherche).all()
+        stats["total_pages"] = len(pages)
+
+        for page in pages:
+            ads_count = page.nombre_ads_active or 0
+            new_state = get_etat_from_ads_count(ads_count, thresholds)
+
+            # Compter la nouvelle repartition
+            stats["by_state"][new_state] = stats["by_state"].get(new_state, 0) + 1
+
+            # Mettre a jour si l'etat a change
+            if page.etat != new_state:
+                page.etat = new_state
+                stats["updated"] += 1
+
+    return stats

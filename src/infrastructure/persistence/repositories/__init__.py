@@ -144,6 +144,7 @@ from src.infrastructure.persistence.repositories.page_repository import (
     get_dashboard_trends,
     get_archive_stats,
     archive_old_data,
+    recalculate_all_page_states,
 )
 
 from src.infrastructure.persistence.repositories.winning_ad_repository import (
@@ -304,6 +305,7 @@ __all__ = [
     "get_dashboard_trends",
     "get_archive_stats",
     "archive_old_data",
+    "recalculate_all_page_states",
     # Winning Ads
     "is_winning_ad",
     "save_winning_ads",

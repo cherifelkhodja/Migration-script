@@ -88,6 +88,7 @@ from src.infrastructure.config import (
 from src.infrastructure.persistence.database import (
     get_suivi_stats, get_blacklist, add_to_blacklist, remove_from_blacklist
 )
+from src.infrastructure.persistence.repositories import recalculate_all_page_states
 
 
 def render_settings():
@@ -422,7 +423,12 @@ def render_settings_config_tab(db):
             if new_xs < new_s < new_m < new_l < new_xl < new_xxl:
                 st.session_state.state_thresholds = new_thresholds
                 set_app_setting(db, "state_thresholds", str(new_thresholds), "Seuils des etats")
-                st.success("✓ Seuils sauvegardes !")
+
+                # Recalculer automatiquement tous les etats
+                with st.spinner("Recalcul des etats en cours..."):
+                    recalc_stats = recalculate_all_page_states(db, new_thresholds)
+
+                st.success(f"✓ Seuils sauvegardes ! {recalc_stats['updated']}/{recalc_stats['total_pages']} pages mises a jour.")
             else:
                 st.error("Les seuils doivent etre strictement croissants (XS < S < M < L < XL < XXL)")
 
