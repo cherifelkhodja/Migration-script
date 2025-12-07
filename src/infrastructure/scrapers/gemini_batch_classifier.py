@@ -63,7 +63,7 @@ class SiteData:
             self.product_titles = []
 
     def to_prompt_text(self) -> str:
-        """Formate les donnees pour le prompt (URL + metadata)."""
+        """Formate les donnees pour le prompt (URL + metadata uniquement)."""
         parts = []
         if self.url:
             parts.append(f"URL: {self.url}")
@@ -73,15 +73,12 @@ class SiteData:
             parts.append(f"Description: {self.description[:300]}")
         if self.h1:
             parts.append(f"H1: {self.h1[:100]}")
-        # product_titles uniquement pour Shopify (vient du sitemap)
-        if self.product_titles:
-            products = ", ".join(self.product_titles[:10])
-            parts.append(f"Products: [{products}]")
+        # Note: product_titles n'est plus utilise pour la classification
         return "\n".join(parts) if parts else "(no content)"
 
     def has_content(self) -> bool:
         """Verifie si on a assez de contenu pour classifier."""
-        return bool(self.url or self.title or self.description or self.h1 or self.product_titles)
+        return bool(self.url or self.title or self.description or self.h1)
 
 
 @dataclass
@@ -317,7 +314,7 @@ class GeminiBatchClassifier:
         ])
 
         return f"""Tu es un expert E-commerce. Analyse ces sites web et classifie-les par thematique.
-Tu recois pour chaque site: URL, Title, Description, H1 (et parfois des titres de produits).
+Tu recois pour chaque site: URL, Title, Description, H1.
 Renvoie UNIQUEMENT une liste JSON d'objets, sans markdown, sans backticks.
 
 TAXONOMIE DISPONIBLE:
@@ -347,7 +344,7 @@ IMPORTANT: Renvoie EXACTEMENT {len(sites)} objets JSON, un pour chaque site."""
     def _build_single_prompt(self, site: SiteData) -> str:
         """Construit le prompt pour un site unique."""
         return f"""Tu es un expert E-commerce. Classifie ce site web par thematique.
-Tu recois: URL, Title, Description, H1 (et parfois des titres de produits).
+Tu recois: URL, Title, Description, H1.
 Renvoie UNIQUEMENT un objet JSON, sans markdown, sans backticks.
 
 TAXONOMIE DISPONIBLE:

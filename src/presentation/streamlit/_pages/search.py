@@ -1033,9 +1033,8 @@ def run_search_process(
             for future in as_completed(futures):
                 pid, result = future.result()
                 if pid in web_results:
+                    # Sitemap Shopify: uniquement pour compter les produits
                     web_results[pid]["product_count"] = result.get("product_count") or None
-                    if result.get("product_titles"):
-                        web_results[pid]["product_titles"] = result["product_titles"]
 
                 completed += 1
                 if completed % 5 == 0:
@@ -1049,16 +1048,17 @@ def run_search_process(
     for pid, web_data in web_results.items():
         if web_data.get("_skip_classification"):
             continue
-        # Verifier si on a du contenu pour classifier
-        has_content = web_data.get("site_title") or web_data.get("site_description") or web_data.get("site_h1")
+        # Verifier si on a du contenu pour classifier (URL + metadata)
+        url = pages_final.get(pid, {}).get("website", "")
+        has_content = url or web_data.get("site_title") or web_data.get("site_description") or web_data.get("site_h1")
         if has_content:
             pages_to_classify_data.append({
                 "page_id": pid,
-                "url": pages_final.get(pid, {}).get("website", ""),
+                "url": url,
                 "site_title": web_data.get("site_title", ""),
                 "site_description": web_data.get("site_description", ""),
                 "site_h1": web_data.get("site_h1", ""),
-                "product_titles": web_data.get("product_titles", [])
+                # Note: product_titles n'est plus envoye a Gemini
             })
 
     if gemini_key and pages_to_classify_data:
