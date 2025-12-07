@@ -124,7 +124,7 @@ def get_search_logs(db, limit: int = 50, status: str = None) -> List[Dict]:
                 "ended_at": l.ended_at,
                 "duration_seconds": l.duration_seconds,
                 "error_message": l.error_message,
-                "phases_data": l.phases_data,
+                "phases_data": json.loads(l.phases_data) if l.phases_data else [],
                 # Stats de recherche
                 "total_ads_found": l.total_ads_found,
                 "total_pages_found": l.total_pages_found,
