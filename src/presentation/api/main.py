@@ -29,6 +29,9 @@ from src.presentation.api.websites.router import router as websites_router
 from src.presentation.api.pages.router import router as pages_router
 from src.presentation.api.users.router import router as users_router
 from src.presentation.api.collections.router import router as collections_router
+from src.presentation.api.notifications.router import router as notifications_router
+from src.presentation.api.jobs.router import router as jobs_router
+from src.presentation.api.audit.router import router as audit_router
 from src.infrastructure.logging import configure_logging, get_logger
 from src.infrastructure.logging.config import RequestLogger
 
@@ -84,6 +87,9 @@ def create_app() -> FastAPI:
     app.include_router(pages_router, prefix=settings.api_prefix)
     app.include_router(users_router, prefix=settings.api_prefix)
     app.include_router(collections_router, prefix=settings.api_prefix)
+    app.include_router(notifications_router, prefix=settings.api_prefix)
+    app.include_router(jobs_router, prefix=settings.api_prefix)
+    app.include_router(audit_router, prefix=settings.api_prefix)
 
     return app
 
