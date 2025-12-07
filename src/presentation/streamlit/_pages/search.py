@@ -1345,22 +1345,94 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
         st.warning("Aucune page trouvee avec les CMS selectionnes")
         return
 
-    # Phase 3: Analyse web
+    # Phase 3: Analyse Homepage (MarketSpy V2 - extraction metadata)
     st.subheader("Phase 3: Analyse des sites web")
     web_results = {}
     progress = st.progress(0)
 
     for i, (pid, data) in enumerate(pages_final.items()):
         if data["website"]:
-            result = analyze_website_complete(data["website"], countries[0])
-            web_results[pid] = result
+            # MarketSpy V2: extraction title, description, h1, theme
+            result = analyze_homepage_v2(data["website"])
+            web_results[pid] = {
+                "product_count": None,  # Sera mis a jour si Shopify
+                "theme": result.get("theme", "Unknown"),
+                "site_title": result.get("site_title", ""),
+                "site_description": result.get("site_description", ""),
+                "site_h1": result.get("site_h1", ""),
+                "currency_from_site": result.get("currency_from_site", ""),
+                "_from_cache": False,
+                "_skip_classification": False
+            }
             if not data["currency"] and result.get("currency_from_site"):
                 data["currency"] = result["currency_from_site"]
+            # Mettre a jour theme si detecte
+            if result.get("theme") and result["theme"] != "Unknown":
+                data["theme"] = result["theme"]
         progress.progress((i + 1) / len(pages_final))
-        time.sleep(0.2)
+        time.sleep(0.1)
 
-    # Phase 4: Detection des Winning Ads
-    st.subheader("Phase 4: Detection des Winning Ads")
+    st.success(f"{len(web_results)} sites analyses")
+
+    # Phase 4: Comptage produits Shopify (JSON API)
+    st.subheader("Phase 4: Comptage produits Shopify")
+    shopify_pages = [(pid, data) for pid, data in pages_final.items() if data.get("is_shopify") and data.get("website")]
+
+    if shopify_pages:
+        st.caption(f"{len(shopify_pages)} boutiques Shopify a analyser")
+        progress = st.progress(0)
+
+        for i, (pid, data) in enumerate(shopify_pages):
+            result = analyze_sitemap_v2(data["website"])  # Utilise JSON API maintenant
+            if pid in web_results:
+                web_results[pid]["product_count"] = result.get("product_count")
+            progress.progress((i + 1) / len(shopify_pages))
+            time.sleep(0.1)
+
+        st.success(f"{len(shopify_pages)} boutiques analysees")
+    else:
+        st.info("Aucune boutique Shopify a analyser")
+
+    # Phase 5: Classification Gemini
+    st.subheader("Phase 5: Classification Gemini")
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+
+    pages_to_classify = []
+    for pid, web_data in web_results.items():
+        url = pages_final.get(pid, {}).get("website", "")
+        has_content = url or web_data.get("site_title") or web_data.get("site_description") or web_data.get("site_h1")
+        if has_content:
+            pages_to_classify.append({
+                "page_id": pid,
+                "url": url,
+                "site_title": web_data.get("site_title", ""),
+                "site_description": web_data.get("site_description", ""),
+                "site_h1": web_data.get("site_h1", ""),
+            })
+
+    if gemini_key and pages_to_classify:
+        batch_count = (len(pages_to_classify) + 9) // 10
+        st.caption(f"{len(pages_to_classify)} pages a classifier ({batch_count} batches)")
+
+        try:
+            classification_results = classify_pages_batch_v2(db, pages_to_classify)
+
+            for pid, classification in classification_results.items():
+                if pid in web_results:
+                    web_results[pid]["gemini_category"] = classification.get("category", "")
+                    web_results[pid]["gemini_subcategory"] = classification.get("subcategory", "")
+                    web_results[pid]["gemini_confidence"] = classification.get("confidence", 0.0)
+
+            st.success(f"{len(classification_results)} pages classifiees")
+        except Exception as e:
+            st.warning(f"Classification Gemini: {str(e)[:100]}")
+    elif not gemini_key:
+        st.warning("Cle Gemini non configuree - classification ignoree")
+    else:
+        st.info("Aucune page a classifier")
+
+    # Phase 6: Detection des Winning Ads
+    st.subheader("Phase 6: Detection des Winning Ads")
     scan_date = datetime.now()
     winning_ads_data = []
     winning_ads_by_page = {}
@@ -1403,7 +1475,7 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
         st.session_state.show_preview_results = True
         st.rerun()
     else:
-        st.subheader("Phase 5: Sauvegarde en base de donnees")
+        st.subheader("Phase 7: Sauvegarde en base de donnees")
 
         if db:
             try:
