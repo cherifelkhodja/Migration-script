@@ -76,7 +76,7 @@ from src.infrastructure.persistence.database import (
     get_all_tags, add_tag_to_page, get_page_tags,
     get_page_notes, add_page_note,
     is_favorite, toggle_favorite,
-    add_to_blacklist,
+    add_to_blacklist, get_blacklist_ids,
     bulk_add_to_blacklist, bulk_add_to_collection, bulk_add_tag, bulk_add_to_favorites,
     update_page_classification
 )
@@ -310,6 +310,11 @@ def render_pages_shops():
             page_id=page_id_filter.strip() if page_id_filter else None,
             limit=limit
         )
+
+        # Filtrer les pages blacklistées
+        if results:
+            blacklist_ids = get_blacklist_ids(db)
+            results = [p for p in results if str(p.get("page_id", "")) not in blacklist_ids]
 
         if results:
             # Enrichir avec scores et winning ads
