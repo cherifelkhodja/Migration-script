@@ -119,7 +119,7 @@ class TestTenantAwareMixin:
 
     def test_entity_has_owner_id(self):
         """Une entite TenantAware a un owner_id."""
-        from src.domain.ports.tenant_context import TenantAwareMixin
+        from src.domain.ports.tenant_aware import TenantAwareMixin
         from src.domain.value_objects.user_id import UserId
         from dataclasses import dataclass
 
@@ -135,7 +135,7 @@ class TestTenantAwareMixin:
 
     def test_belongs_to_checks_ownership(self):
         """belongs_to verifie si l'entite appartient a un utilisateur."""
-        from src.domain.ports.tenant_context import TenantAwareMixin
+        from src.domain.ports.tenant_aware import TenantAwareMixin
         from src.domain.value_objects.user_id import UserId
         from dataclasses import dataclass
 
@@ -153,7 +153,7 @@ class TestTenantAwareMixin:
 
     def test_belongs_to_system_user_is_public(self):
         """Une entite sans owner (SYSTEM_USER) est accessible a tous."""
-        from src.domain.ports.tenant_context import TenantAwareMixin
+        from src.domain.ports.tenant_aware import TenantAwareMixin
         from src.domain.value_objects.user_id import UserId, SYSTEM_USER
         from dataclasses import dataclass
 
