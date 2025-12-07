@@ -181,32 +181,50 @@ def save_suivi_page(db, pages_final: Dict, web_results: Dict, min_ads: int = 10)
     return count
 
 
-def save_ads_recherche(db, all_ads: List[Dict], pages_final: Dict) -> int:
-    """Sauvegarde les annonces dans ads_recherche."""
+def save_ads_recherche(db, pages_final: Dict, page_ads: Dict, countries: List[str] = None, min_ads_liste: int = 1) -> int:
+    """
+    Sauvegarde les annonces dans ads_recherche.
+
+    Args:
+        db: DatabaseManager instance
+        pages_final: Dict des pages finales (page_id -> page_data)
+        page_ads: Dict des ads par page (page_id -> list of ads)
+        countries: Liste des pays (optionnel, pour compatibilité)
+        min_ads_liste: Seuil minimum d'ads pour sauvegarder (optionnel)
+
+    Returns:
+        Nombre d'annonces sauvegardées
+    """
     scan_time = datetime.utcnow()
     count = 0
 
     with db.get_session() as session:
-        for ad in all_ads:
-            page_id = str(ad.get("page_id", ""))
+        for page_id, ads in page_ads.items():
+            page_id_str = str(page_id)
 
-            if page_id not in pages_final:
+            # Ne sauvegarder que les ads des pages finales
+            if page_id_str not in pages_final:
                 continue
 
-            ad_record = AdsRecherche(
-                ad_id=str(ad.get("id", "")),
-                page_id=page_id,
-                page_name=ad.get("page_name", ""),
-                ad_creative_bodies=str(ad.get("ad_creative_bodies", [])),
-                ad_creative_link_captions=str(ad.get("ad_creative_link_captions", [])),
-                ad_creative_link_titles=str(ad.get("ad_creative_link_titles", [])),
-                ad_delivery_start_time=ad.get("ad_delivery_start_time"),
-                ad_snapshot_url=ad.get("ad_snapshot_url", ""),
-                eu_total_reach=ad.get("eu_total_reach"),
-                date_scan=scan_time,
-            )
-            session.add(ad_record)
-            count += 1
+            # Vérifier le seuil minimum
+            if len(ads) < min_ads_liste:
+                continue
+
+            for ad in ads:
+                ad_record = AdsRecherche(
+                    ad_id=str(ad.get("id", "")),
+                    page_id=page_id_str,
+                    page_name=ad.get("page_name", ""),
+                    ad_creative_bodies=str(ad.get("ad_creative_bodies", [])),
+                    ad_creative_link_captions=str(ad.get("ad_creative_link_captions", [])),
+                    ad_creative_link_titles=str(ad.get("ad_creative_link_titles", [])),
+                    ad_delivery_start_time=ad.get("ad_delivery_start_time"),
+                    ad_snapshot_url=ad.get("ad_snapshot_url", ""),
+                    eu_total_reach=ad.get("eu_total_reach"),
+                    date_scan=scan_time,
+                )
+                session.add(ad_record)
+                count += 1
 
     return count
 
@@ -665,38 +683,62 @@ def get_archive_stats(db) -> Dict:
         db: Instance DatabaseManager
 
     Returns:
-        Dict avec les stats d'archivage (pages, ads, winning_ads)
+        Dict avec les stats d'archivage (clés plates pour compatibilité UI)
     """
+    from src.infrastructure.persistence.models import (
+        SuiviPageArchive, AdsRechercheArchive, WinningAdsArchive
+    )
+
     cutoff_90 = datetime.utcnow() - timedelta(days=90)
 
     with db.get_session() as session:
-        # Compter les pages anciennes (sans activite recente)
-        pages_old = session.query(func.count(PageRecherche.id)).filter(
-            or_(
-                PageRecherche.dernier_scan.is_(None),
-                PageRecherche.dernier_scan < cutoff_90
-            )
+        # Compter les suivi_page totaux et archivables
+        suivi_total = session.query(func.count(SuiviPage.id)).scalar() or 0
+        suivi_archivable = session.query(func.count(SuiviPage.id)).filter(
+            SuiviPage.date_scan < cutoff_90
         ).scalar() or 0
 
-        # Compter les ads anciennes
-        ads_old = session.query(func.count(AdsRecherche.id)).filter(
+        # Compter les ads totales et archivables
+        ads_total = session.query(func.count(AdsRecherche.id)).scalar() or 0
+        ads_archivable = session.query(func.count(AdsRecherche.id)).filter(
             AdsRecherche.date_scan < cutoff_90
         ).scalar() or 0
 
-        # Compter les winning ads anciennes
-        winning_old = session.query(func.count(WinningAds.id)).filter(
+        # Compter les winning ads totales et archivables
+        winning_total = session.query(func.count(WinningAds.id)).scalar() or 0
+        winning_archivable = session.query(func.count(WinningAds.id)).filter(
             WinningAds.date_scan < cutoff_90
         ).scalar() or 0
 
-        # Totaux
-        total_pages = session.query(func.count(PageRecherche.id)).scalar() or 0
-        total_ads = session.query(func.count(AdsRecherche.id)).scalar() or 0
-        total_winning = session.query(func.count(WinningAds.id)).scalar() or 0
+        # Compter les entrées déjà archivées
+        try:
+            suivi_archive = session.query(func.count(SuiviPageArchive.id)).scalar() or 0
+        except Exception:
+            suivi_archive = 0
+
+        try:
+            ads_archive = session.query(func.count(AdsRechercheArchive.id)).scalar() or 0
+        except Exception:
+            ads_archive = 0
+
+        try:
+            winning_archive = session.query(func.count(WinningAdsArchive.id)).scalar() or 0
+        except Exception:
+            winning_archive = 0
 
         return {
-            "pages": {"total": total_pages, "archivable": pages_old},
-            "ads": {"total": total_ads, "archivable": ads_old},
-            "winning_ads": {"total": total_winning, "archivable": winning_old},
+            # Totaux actuels
+            "suivi_page": suivi_total,
+            "liste_ads_recherche": ads_total,
+            "winning_ads": winning_total,
+            # Archivables (>90 jours)
+            "suivi_page_archivable": suivi_archivable,
+            "liste_ads_recherche_archivable": ads_archivable,
+            "winning_ads_archivable": winning_archivable,
+            # Déjà archivés
+            "suivi_page_archive": suivi_archive,
+            "liste_ads_recherche_archive": ads_archive,
+            "winning_ads_archive": winning_archive,
         }
 
 
