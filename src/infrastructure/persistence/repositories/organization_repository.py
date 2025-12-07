@@ -451,7 +451,7 @@ def get_scheduled_scans(db, active_only: bool = False) -> List[Dict]:
     with db.get_session() as session:
         query = session.query(ScheduledScan)
         if active_only:
-            query = query.filter(ScheduledScan.is_active == True)
+            query = query.filter(ScheduledScan.is_active == 1)
         scans = query.order_by(ScheduledScan.next_run).all()
         return [{
             "id": s.id,
