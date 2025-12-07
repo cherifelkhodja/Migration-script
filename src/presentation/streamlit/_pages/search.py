@@ -692,10 +692,10 @@ def run_search_process(
                     seen_ad_ids.add(ad_id)
                     new_ads_count += 1
 
-            tracker.log_detail("keyword", f"'{kw}'", count=new_ads_count, total_so_far=len(all_ads))
+            tracker.log_detail("🔑", f"'{kw}'", count=new_ads_count, total_so_far=len(all_ads))
 
         except RuntimeError as e:
-            tracker.log_detail("error", f"'{kw}' - Erreur: {str(e)[:50]}")
+            tracker.log_detail("❌", f"'{kw}' - Erreur: {str(e)[:50]}")
 
     tracker.clear_detail_logs()
 
