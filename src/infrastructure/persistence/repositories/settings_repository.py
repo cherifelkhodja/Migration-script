@@ -9,7 +9,7 @@ from src.infrastructure.persistence.models import AppSettings, UserSettings
 
 # Constantes pour les cles de parametres
 SETTING_GEMINI_MODEL = "gemini_model_name"
-SETTING_GEMINI_MODEL_DEFAULT = "gemini-1.5-flash"
+SETTING_GEMINI_MODEL_DEFAULT = "gemini-2.5-flash-lite"
 
 
 def get_app_setting(db, key: str, default: str = None) -> Optional[str]:

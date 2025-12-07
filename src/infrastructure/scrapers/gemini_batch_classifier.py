@@ -40,8 +40,8 @@ RATE_LIMIT_DELAY = 4.5  # secondes entre appels
 # Timeout
 GEMINI_TIMEOUT = 60
 
-# Modele par defaut
-DEFAULT_MODEL = "gemini-1.5-flash"
+# Modele par defaut (charge depuis BDD si disponible)
+DEFAULT_MODEL = "gemini-2.5-flash-lite"
 
 
 # ===========================================================================
@@ -528,16 +528,24 @@ def classify_pages_batch_v2(
         logger.warning("GEMINI_API_KEY non configuree - classification skippee")
         return {}
 
-    # Recuperer la taxonomie depuis la DB si disponible
+    # Recuperer la taxonomie et le modele depuis la DB si disponible
     taxonomy_text = None
+    model_name = None
     if db:
         try:
-            from src.infrastructure.persistence.database import build_taxonomy_prompt, init_default_taxonomy
+            from src.infrastructure.persistence.database import (
+                build_taxonomy_prompt, init_default_taxonomy,
+                get_app_setting, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT
+            )
             init_default_taxonomy(db)
             taxonomy_text = build_taxonomy_prompt(db)
+            # Charger le modele configure en BDD
+            model_name = get_app_setting(db, SETTING_GEMINI_MODEL, SETTING_GEMINI_MODEL_DEFAULT)
+            if model_name:
+                logger.info(f"Using Gemini model from settings: {model_name}")
         except Exception as e:
-            logger.warning(f"Could not load taxonomy from DB: {e}")
+            logger.warning(f"Could not load settings from DB: {e}")
 
-    # Classifier
-    classifier = GeminiBatchClassifier(api_key=api_key, taxonomy_text=taxonomy_text)
+    # Classifier avec le modele configure
+    classifier = GeminiBatchClassifier(api_key=api_key, model=model_name, taxonomy_text=taxonomy_text)
     return classifier.classify_dict(pages_data, progress_callback)
