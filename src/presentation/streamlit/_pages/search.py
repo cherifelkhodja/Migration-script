@@ -78,6 +78,7 @@ import streamlit as st
 import pandas as pd
 
 from src.presentation.streamlit.shared import get_database
+from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 from src.infrastructure.persistence.database import (
     get_blacklist_ids, add_to_blacklist,
     save_pages_recherche, save_suivi_page, save_ads_recherche, save_winning_ads,
@@ -326,6 +327,8 @@ def render_preview_results():
     st.warning("⚠️ Mode aperçu activé - Les données ne sont pas encore enregistrées")
 
     db = get_database()
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
     pages_final = st.session_state.get("pages_final", {})
     web_results = st.session_state.get("web_results", {})
     winning_ads_data = st.session_state.get("winning_ads_data", [])
@@ -515,7 +518,7 @@ def render_preview_results():
                 st.write(f"**{data.get('page_name', 'N/A')}** ({pid})")
             with col2:
                 if st.button("🚫", key=f"bl_preview_{pid}", help="Blacklister cette page"):
-                    if db and add_to_blacklist(db, pid, data.get("page_name", ""), "Blacklisté depuis aperçu"):
+                    if db and add_to_blacklist(db, pid, data.get("page_name", ""), "Blacklisté depuis aperçu", user_id=user_id):
                         del st.session_state.pages_final[pid]
                         if pid in st.session_state.web_results:
                             del st.session_state.web_results[pid]
@@ -532,12 +535,12 @@ def render_preview_results():
                 try:
                     thresholds = st.session_state.get("state_thresholds", None)
                     languages = st.session_state.get("languages", ["fr"])
-                    pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds)
+                    pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds, user_id=user_id)
                     det = st.session_state.get("detection_thresholds", {})
-                    suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI))
-                    ads_saved = save_ads_recherche(db, pages_final, st.session_state.get("page_ads", {}), countries, det.get("min_ads_liste", MIN_ADS_LISTE))
+                    suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI), user_id=user_id)
+                    ads_saved = save_ads_recherche(db, pages_final, st.session_state.get("page_ads", {}), countries, det.get("min_ads_liste", MIN_ADS_LISTE), user_id=user_id)
                     winning_ads_data = st.session_state.get("winning_ads_data", [])
-                    winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data)
+                    winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data, user_id=user_id)
 
                     msg = f"✅ Sauvegardé : {pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads, {winning_saved} winning"
                     if winning_updated > 0:
@@ -607,6 +610,8 @@ def run_search_process(
     )
 
     db = get_database()
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
 
     # Charger les tokens depuis la base de donnees
     tokens_with_proxies = []
@@ -657,7 +662,8 @@ def run_search_process(
                 countries=countries,
                 languages=languages,
                 min_ads=min_ads,
-                selected_cms=selected_cms if selected_cms else []
+                selected_cms=selected_cms if selected_cms else [],
+                user_id=user_id
             )
         except Exception as e:
             st.warning(f"⚠️ Log non créé: {str(e)[:100]}")
@@ -673,7 +679,7 @@ def run_search_process(
     # Récupérer la blacklist
     blacklist_ids = set()
     if db:
-        blacklist_ids = get_blacklist_ids(db)
+        blacklist_ids = get_blacklist_ids(db, user_id=user_id)
         if blacklist_ids:
             st.info(f"🚫 {len(blacklist_ids)} pages en blacklist seront ignorées")
 
@@ -799,7 +805,7 @@ def run_search_process(
 
     cached_pages = {}
     if db:
-        cached_pages = get_cached_pages_info(db, list(pages_filtered.keys()), cache_days=1)
+        cached_pages = get_cached_pages_info(db, list(pages_filtered.keys()), cache_days=1, user_id=user_id)
         valid_cache = sum(1 for c in cached_pages.values() if not c.get("needs_rescan"))
         if valid_cache > 0:
             st.info(f"📦 {valid_cache} pages en cache BDD (scan < 1 jour)")
@@ -1160,7 +1166,7 @@ def run_search_process(
             try:
                 tracker.update_step("Sauvegarde pages", 1, 4)
                 thresholds = st.session_state.get("state_thresholds", None)
-                pages_result = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds)
+                pages_result = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds, user_id=user_id)
                 if isinstance(pages_result, tuple):
                     pages_saved, pages_new, pages_existing = pages_result
                 else:
@@ -1170,13 +1176,13 @@ def run_search_process(
 
                 tracker.update_step("Sauvegarde suivi", 2, 4)
                 det = st.session_state.get("detection_thresholds", {})
-                suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI))
+                suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI), user_id=user_id)
 
                 tracker.update_step("Sauvegarde annonces", 3, 4)
-                ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, det.get("min_ads_liste", MIN_ADS_LISTE))
+                ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, det.get("min_ads_liste", MIN_ADS_LISTE), user_id=user_id)
 
                 tracker.update_step("Sauvegarde winning ads", 4, 4)
-                winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data)
+                winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data, user_id=user_id)
 
                 msg = f"{pages_saved} pages, {ads_saved} ads, {winning_saved} winning ({winning_new} 🆕)"
 
@@ -1216,6 +1222,8 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
     from src.infrastructure.persistence.database import get_active_meta_tokens_with_proxies, ensure_tables_exist
 
     db = get_database()
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
 
     # Charger les tokens
     tokens_with_proxies = []
@@ -1253,7 +1261,7 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
     # Recuperer la blacklist
     blacklist_ids = set()
     if db:
-        blacklist_ids = get_blacklist_ids(db)
+        blacklist_ids = get_blacklist_ids(db, user_id=user_id)
         if blacklist_ids:
             st.info(f"{len(blacklist_ids)} pages en blacklist seront ignorees")
 
@@ -1495,11 +1503,11 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
         if db:
             try:
                 thresholds = st.session_state.get("state_thresholds", None)
-                pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds)
+                pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds, user_id=user_id)
                 det = st.session_state.get("detection_thresholds", {})
-                suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI))
-                ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, det.get("min_ads_liste", MIN_ADS_LISTE))
-                winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data)
+                suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI), user_id=user_id)
+                ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, det.get("min_ads_liste", MIN_ADS_LISTE), user_id=user_id)
+                winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data, user_id=user_id)
 
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Pages", pages_saved)
