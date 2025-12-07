@@ -364,7 +364,7 @@ def render_dashboard():
                     net_evolution = rising - falling
                     st.metric(
                         "Balance evolution",
-                        f"{rising} / {falling}",
+                        f"📈 {rising} / 📉 {falling}",
                         delta=f"+{net_evolution} net" if net_evolution > 0 else f"{net_evolution} net" if net_evolution < 0 else "equilibre",
                         delta_color="normal" if net_evolution >= 0 else "inverse"
                     )
@@ -391,13 +391,13 @@ def render_dashboard():
             "Comment lire ces graphiques ?",
             """
             <b>Etats des pages</b> : Classement base sur le nombre d'annonces actives.<br>
-            - <b>XXL</b> (>=150 ads) = Pages tres actives, probablement rentables<br>
-            - <b>XL</b> (80-149) = Pages performantes<br>
-            - <b>L</b> (35-79) = Bonne activite<br>
-            - <b>M/S/XS</b> = Activite moderee a faible<br><br>
+            • <b>XXL</b> (>=150 ads) = Pages tres actives, probablement rentables<br>
+            • <b>XL</b> (80-149) = Pages performantes<br>
+            • <b>L</b> (35-79) = Bonne activite<br>
+            • <b>M/S/XS</b> = Activite moderee a faible<br><br>
             <b>CMS</b> : La technologie utilisee par le site (Shopify est le plus courant en e-commerce).
             """,
-            "info"
+            "📚"
         )
 
         # Graphiques ameliores
@@ -466,7 +466,7 @@ def render_dashboard():
 
             df = pd.DataFrame(top_pages)
             cols_to_show = ["page_name", "cms", "etat_display", "nombre_ads_active", "winning_count", "score_display"]
-            col_names = ["Nom", "CMS", "Etat", "Ads", "Winning", "Score"]
+            col_names = ["Nom", "CMS", "Etat", "Ads", "🏆 Winning", "Score"]
             df_display = df[[c for c in cols_to_show if c in df.columns]]
             df_display.columns = col_names[:len(df_display.columns)]
             st.dataframe(df_display, width="stretch", hide_index=True)

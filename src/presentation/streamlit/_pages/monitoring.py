@@ -724,7 +724,7 @@ def generate_alerts(
         if recent_xxl:
             alerts.append({
                 "type": "success",
-                "icon": "rocket",
+                "icon": "🚀",
                 "title": f"{len(recent_xxl)} nouvelle(s) page(s) XXL",
                 "message": f"Pages detectees avec >=150 ads actives",
                 "data": recent_xxl[:5]
@@ -746,7 +746,7 @@ def generate_alerts(
         if trends["rising"]:
             alerts.append({
                 "type": "info",
-                "icon": "trending_up",
+                "icon": "📈",
                 "title": f"{len(trends['rising'])} page(s) en forte croissance",
                 "message": "Pages avec +50% d'ads en 7 jours",
                 "data": trends["rising"][:5]
@@ -756,7 +756,7 @@ def generate_alerts(
         if trends["falling"]:
             alerts.append({
                 "type": "warning",
-                "icon": "trending_down",
+                "icon": "📉",
                 "title": f"{len(trends['falling'])} page(s) en declin",
                 "message": "Pages avec -30% d'ads ou plus",
                 "data": trends["falling"][:5]
@@ -774,7 +774,7 @@ def generate_alerts(
         if winning_stats.get("total", 0) > 0:
             alerts.append({
                 "type": "success",
-                "icon": "trophy",
+                "icon": "🏆",
                 "title": f"{winning_stats['total']} winning ad(s) aujourd'hui",
                 "message": f"Reach moyen: {winning_stats.get('avg_reach', 0):,}",
                 "data": winning_stats.get("by_page", [])[:5]
