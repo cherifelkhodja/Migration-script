@@ -586,7 +586,7 @@ def get_winning_ads_for_search(db, search_log_id: int, limit: int = 100) -> List
                 "ad_id": a.ad_id,
                 "page_id": a.page_id,
                 "eu_total_reach": a.eu_total_reach,
-                "age_days": a.age_days,
+                "age_days": a.ad_age_days,
                 "matched_criteria": a.matched_criteria,
                 "ad_snapshot_url": a.ad_snapshot_url,
                 "date_scan": a.date_scan,
