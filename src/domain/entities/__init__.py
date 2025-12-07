@@ -10,11 +10,13 @@ Entites principales:
     - Ad: Annonce publicitaire Meta
     - WinningAd: Annonce performante (reach eleve + recente)
     - Collection: Groupe de pages creees par l'utilisateur
+    - User: Utilisateur avec role et permissions
 """
 
 from src.domain.entities.ad import Ad
 from src.domain.entities.collection import Collection
 from src.domain.entities.page import Page
+from src.domain.entities.user import User
 from src.domain.entities.winning_ad import WinningAd
 
 __all__ = [
@@ -22,4 +24,5 @@ __all__ = [
     "Ad",
     "WinningAd",
     "Collection",
+    "User",
 ]

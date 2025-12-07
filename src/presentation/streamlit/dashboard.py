@@ -59,6 +59,18 @@ from src.presentation.streamlit.pages import (
     render_search_logs,
 )
 
+# Import du module d'authentification
+from src.presentation.streamlit.auth import (
+    render_login_page,
+    require_auth,
+    can_access_page,
+    get_current_user,
+    logout,
+    is_authenticated,
+    render_user_management,
+)
+from src.presentation.streamlit.auth.login_page import render_logout_button
+
 # Infrastructure imports
 from src.infrastructure.config import (
     AVAILABLE_COUNTRIES, AVAILABLE_LANGUAGES,
@@ -134,6 +146,9 @@ def init_session_state():
         'bulk_mode': False,
         # Historique des recherches (max 10)
         'search_history': [],
+        # Authentification
+        'authenticated': False,
+        'user': None,
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -926,6 +941,13 @@ def main():
 
     init_session_state()
 
+    # Verifier l'authentification
+    if not require_auth():
+        apply_custom_css()
+        if render_login_page():
+            st.rerun()
+        st.stop()
+
     # Initialiser le worker de recherches en arrière-plan
     try:
         from src.infrastructure.background_worker import init_worker
@@ -950,8 +972,20 @@ def main():
     apply_custom_css()  # Appliquer les styles personnalisés
     render_sidebar()
 
-    # Router
+    # Bouton de deconnexion dans la sidebar
+    if render_logout_button():
+        st.rerun()
+
+    # Router avec verification des permissions
     page = st.session_state.current_page
+
+    # Verifier l'acces a la page
+    if not can_access_page(page):
+        st.error(f"Vous n'avez pas acces a cette page: {page}")
+        user = get_current_user()
+        if user:
+            st.info(f"Votre role: {user.get('role', 'viewer').capitalize()}")
+        st.stop()
 
     if page == "Dashboard":
         render_dashboard()
@@ -973,6 +1007,8 @@ def main():
         render_blacklist()
     elif page == "Settings":
         render_settings()
+    elif page == "Users":
+        render_user_management()
     # Nouvelles pages
     elif page == "Favoris":
         render_favorites()

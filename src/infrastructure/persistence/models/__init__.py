@@ -58,6 +58,12 @@ from src.infrastructure.persistence.models.cache_models import (
     APICache,
 )
 
+from src.infrastructure.persistence.models.auth_models import (
+    UserModel,
+    AuditLog,
+    AuditAction,
+)
+
 __all__ = [
     # Base
     "Base",
@@ -94,4 +100,8 @@ __all__ = [
     "AppSettings",
     # Cache
     "APICache",
+    # Auth
+    "UserModel",
+    "AuditLog",
+    "AuditAction",
 ]

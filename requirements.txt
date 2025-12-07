@@ -42,3 +42,6 @@ streamlit-autorefresh>=1.0.1
 
 # AI Classification (Gemini)
 google-generativeai>=0.8.0
+
+# Authentication
+bcrypt>=4.0.0

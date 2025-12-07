@@ -226,6 +226,14 @@ def render_sidebar():
             st.session_state.current_page = "Settings"
             st.rerun()
 
+        # Page Users (admin only)
+        user = st.session_state.get("user")
+        if user and user.get("is_admin"):
+            if st.button("👥 Users", width="stretch",
+                         type="primary" if st.session_state.current_page == "Users" else "secondary"):
+                st.session_state.current_page = "Users"
+                st.rerun()
+
         # Database status
         st.markdown("---")
         db = get_database()
