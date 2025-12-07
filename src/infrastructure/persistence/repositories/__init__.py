@@ -138,6 +138,9 @@ from src.infrastructure.persistence.repositories.page_repository import (
     get_all_subcategories,
     add_country_to_page,
     get_pages_count,
+    get_suivi_stats_filtered,
+    get_cached_pages_info,
+    get_dashboard_trends,
 )
 
 from src.infrastructure.persistence.repositories.winning_ad_repository import (
@@ -170,6 +173,7 @@ from src.infrastructure.persistence.repositories.search_repository import (
     record_winning_ad_search_history,
     record_winning_ads_search_history_batch,
     get_search_history_stats,
+    update_search_log_phases,
 )
 
 __all__ = [
@@ -287,6 +291,9 @@ __all__ = [
     "get_all_subcategories",
     "add_country_to_page",
     "get_pages_count",
+    "get_suivi_stats_filtered",
+    "get_cached_pages_info",
+    "get_dashboard_trends",
     # Winning Ads
     "is_winning_ad",
     "save_winning_ads",
@@ -315,4 +322,5 @@ __all__ = [
     "record_winning_ad_search_history",
     "record_winning_ads_search_history_batch",
     "get_search_history_stats",
+    "update_search_log_phases",
 ]

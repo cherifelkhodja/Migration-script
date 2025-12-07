@@ -100,7 +100,7 @@ from src.infrastructure.persistence.repositories import (
     get_token_usage_logs, get_token_stats_detailed, verify_meta_token, verify_all_tokens,
     save_pages_recherche, save_suivi_page, save_ads_recherche,
     get_all_pages, get_page_history, get_page_evolution_history, get_evolution_stats, get_all_countries, get_all_subcategories,
-    add_country_to_page, get_pages_count,
+    add_country_to_page, get_pages_count, get_suivi_stats_filtered, get_cached_pages_info, get_dashboard_trends,
     is_winning_ad, save_winning_ads, cleanup_duplicate_winning_ads,
     get_winning_ads, get_winning_ads_filtered, get_winning_ads_stats, get_winning_ads_by_page,
     create_search_log, update_search_log, complete_search_log, get_search_logs,
@@ -109,7 +109,7 @@ from src.infrastructure.persistence.repositories import (
     get_pending_searches, get_queue_stats, recover_interrupted_searches,
     record_page_search_history, record_pages_search_history_batch,
     record_winning_ad_search_history, record_winning_ads_search_history_batch,
-    get_search_history_stats,
+    get_search_history_stats, update_search_log_phases,
 )
 
 
@@ -436,161 +436,9 @@ def get_winning_ads_stats_filtered(
         }
 
 
-def get_suivi_stats_filtered(
-    db: DatabaseManager,
-    thematique: str = None,
-    subcategory: str = None,
-    pays: str = None,
-) -> Dict:
-    """Statistiques du suivi avec filtres."""
-    with db.get_session() as session:
-        # Base query sur PageRecherche pour avoir les filtres
-        query = session.query(PageRecherche)
-
-        if thematique:
-            query = query.filter(PageRecherche.thematique == thematique)
-        if subcategory:
-            query = query.filter(PageRecherche.subcategory == subcategory)
-        if pays:
-            query = query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
-
-        pages = query.all()
-        total_pages = len(pages)
-
-        # Compter par etat
-        etats = {}
-        cms_stats = {}
-        for p in pages:
-            etat = p.etat or "inactif"
-            etats[etat] = etats.get(etat, 0) + 1
-
-            cms = p.cms or "Inconnu"
-            cms_stats[cms] = cms_stats.get(cms, 0) + 1
-
-        return {
-            "total_pages": total_pages,
-            "etats": etats,
-            "cms": cms_stats,
-        }
-
-
-def get_cached_pages_info(
-    db: DatabaseManager,
-    page_ids: List[str],
-    cache_days: int = 1,
-) -> Dict[str, Dict]:
-    """
-    Recupere les infos cachees des pages (scan recent).
-
-    Returns:
-        Dict[page_id] = {"lien_site": X, "cms": X, "needs_rescan": bool}
-    """
-    if not page_ids:
-        return {}
-
-    cutoff = datetime.utcnow() - timedelta(days=cache_days)
-
-    with db.get_session() as session:
-        pages = session.query(PageRecherche).filter(
-            PageRecherche.page_id.in_([str(pid) for pid in page_ids])
-        ).all()
-
-        result = {}
-        for p in pages:
-            needs_rescan = True
-            if p.dernier_scan and p.dernier_scan >= cutoff:
-                needs_rescan = False
-
-            result[str(p.page_id)] = {
-                "lien_site": p.lien_site,
-                "cms": p.cms,
-                "etat": p.etat,
-                "nombre_ads_active": p.nombre_ads_active,
-                "thematique": p.thematique,
-                "needs_rescan": needs_rescan,
-            }
-
-        return result
-
-
-def get_dashboard_trends(db: DatabaseManager, days: int = 7) -> Dict:
-    """
-    Calcule les tendances pour le dashboard.
-
-    Compare la periode actuelle avec la periode precedente.
-    """
-    now = datetime.utcnow()
-    current_start = now - timedelta(days=days)
-    previous_start = now - timedelta(days=days * 2)
-
-    with db.get_session() as session:
-        # Pages: compter les nouvelles pages
-        current_pages = session.query(func.count(PageRecherche.id)).filter(
-            PageRecherche.date_ajout >= current_start
-        ).scalar() or 0
-
-        previous_pages = session.query(func.count(PageRecherche.id)).filter(
-            PageRecherche.date_ajout >= previous_start,
-            PageRecherche.date_ajout < current_start
-        ).scalar() or 0
-
-        pages_delta = current_pages - previous_pages
-
-        # Winning ads
-        current_winning = session.query(func.count(WinningAds.id)).filter(
-            WinningAds.date_scan >= current_start
-        ).scalar() or 0
-
-        previous_winning = session.query(func.count(WinningAds.id)).filter(
-            WinningAds.date_scan >= previous_start,
-            WinningAds.date_scan < current_start
-        ).scalar() or 0
-
-        winning_delta = current_winning - previous_winning
-
-        # Evolution: pages en hausse/baisse (via get_evolution_stats)
-        try:
-            from src.infrastructure.persistence.repositories import get_evolution_stats
-            evolution = get_evolution_stats(db, period_days=days)
-            rising = sum(1 for e in evolution if e.get("pct_ads", 0) >= 20)
-            falling = sum(1 for e in evolution if e.get("pct_ads", 0) <= -20)
-        except Exception:
-            rising = 0
-            falling = 0
-
-        return {
-            "pages": {
-                "current": current_pages,
-                "previous": previous_pages,
-                "delta": pages_delta,
-            },
-            "winning_ads": {
-                "current": current_winning,
-                "previous": previous_winning,
-                "delta": winning_delta,
-            },
-            "evolution": {
-                "rising": rising,
-                "falling": falling,
-            },
-        }
-
-
-def update_search_log_phases(db: DatabaseManager, log_id: int, phases_completed: List) -> bool:
-    """Met a jour les phases completees d'un log de recherche."""
-    with db.get_session() as session:
-        log = session.query(SearchLog).filter(SearchLog.id == log_id).first()
-        if not log:
-            return False
-
-        # Stocker les phases en JSON si le champ existe
-        try:
-            import json
-            log.phases_data = json.dumps(phases_completed)
-        except Exception:
-            pass
-
-        return True
+# NOTE: get_suivi_stats_filtered, get_cached_pages_info, get_dashboard_trends,
+# update_search_log_phases sont maintenant dans les repositories appropriés
+# et sont ré-exportés via les imports ci-dessus.
 
 
 def get_search_log_detail(db: DatabaseManager, log_id: int) -> Optional[Dict]:

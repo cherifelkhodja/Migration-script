@@ -404,3 +404,32 @@ def get_search_history_stats(db, days: int = 30) -> Dict:
             "unique_pages_found": total_pages,
             "unique_winning_ads": total_winning,
         }
+
+
+def update_search_log_phases(db, log_id: int, phases_completed: list) -> bool:
+    """
+    Met a jour les phases completees d'un log de recherche.
+
+    Permet de tracker la progression d'une recherche en sauvegardant
+    les phases completees (ex: "Recherche", "Detection CMS", etc.)
+
+    Args:
+        db: Instance DatabaseManager
+        log_id: ID du log de recherche
+        phases_completed: Liste des phases completees
+
+    Returns:
+        True si mise a jour reussie, False sinon
+    """
+    with db.get_session() as session:
+        log = session.query(SearchLog).filter(SearchLog.id == log_id).first()
+        if not log:
+            return False
+
+        # Stocker les phases en JSON
+        try:
+            log.phases_data = json.dumps(phases_completed)
+        except Exception:
+            pass
+
+        return True
