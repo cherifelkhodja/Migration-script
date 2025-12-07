@@ -63,21 +63,25 @@ class SiteData:
             self.product_titles = []
 
     def to_prompt_text(self) -> str:
-        """Formate les donnees pour le prompt."""
+        """Formate les donnees pour le prompt (URL + metadata)."""
         parts = []
+        if self.url:
+            parts.append(f"URL: {self.url}")
         if self.title:
             parts.append(f"Title: {self.title[:200]}")
         if self.description:
             parts.append(f"Description: {self.description[:300]}")
         if self.h1:
             parts.append(f"H1: {self.h1[:100]}")
+        # product_titles uniquement pour Shopify (vient du sitemap)
         if self.product_titles:
             products = ", ".join(self.product_titles[:10])
             parts.append(f"Products: [{products}]")
-        return " | ".join(parts) if parts else "(no content)"
+        return "\n".join(parts) if parts else "(no content)"
 
     def has_content(self) -> bool:
-        return bool(self.title or self.description or self.h1 or self.product_titles)
+        """Verifie si on a assez de contenu pour classifier."""
+        return bool(self.url or self.title or self.description or self.h1 or self.product_titles)
 
 
 @dataclass
@@ -312,35 +316,38 @@ class GeminiBatchClassifier:
             for i, site in enumerate(sites, 1)
         ])
 
-        return f"""Tu es un expert E-commerce. Analyse cette liste de sites et classifie-les.
+        return f"""Tu es un expert E-commerce. Analyse ces sites web et classifie-les par thematique.
+Tu recois pour chaque site: URL, Title, Description, H1 (et parfois des titres de produits).
 Renvoie UNIQUEMENT une liste JSON d'objets, sans markdown, sans backticks.
 
 TAXONOMIE DISPONIBLE:
 {self.taxonomy_text}
 
-INPUT DATA:
+SITES A CLASSIFIER:
 ---
 {input_section}
 ---
 
 OUTPUT FORMAT ATTENDU (JSON strict):
 [
-  {{"id": "SITE_01", "page_id": "123456", "niche": "Catégorie", "subcategory": "Sous-catégorie", "confidence": 0.85}},
-  {{"id": "SITE_02", "page_id": "789012", "niche": "Catégorie", "subcategory": "Sous-catégorie", "confidence": 0.75}}
+  {{"id": "SITE_01", "page_id": "123456", "niche": "Categorie", "subcategory": "Sous-categorie", "confidence": 0.85}},
+  {{"id": "SITE_02", "page_id": "789012", "niche": "Categorie", "subcategory": "Sous-categorie", "confidence": 0.75}}
 ]
 
 REGLES:
-1. Le champ "id" doit correspondre EXACTEMENT a l'ID fourni (SITE_01, SITE_02, etc.)
-2. Le champ "page_id" doit correspondre EXACTEMENT au Page_ID fourni
-3. Choisis la categorie la plus SPECIFIQUE possible
-4. Confidence: 0.9+ si tres clair, 0.7-0.89 si probable, 0.5-0.69 si incertain
-5. Si impossible a classifier: niche="Divers & Spécialisé", subcategory="Généraliste"
+1. Analyse l'URL, le titre, la description et le H1 pour determiner la thematique
+2. Le champ "id" doit correspondre EXACTEMENT a l'ID fourni (SITE_01, SITE_02, etc.)
+3. Le champ "page_id" doit correspondre EXACTEMENT au Page_ID fourni
+4. Choisis la categorie la plus SPECIFIQUE possible basee sur les metadonnees
+5. Confidence: 0.9+ si tres clair, 0.7-0.89 si probable, 0.5-0.69 si incertain
+6. Si impossible a classifier: niche="Divers & Specialise", subcategory="Generaliste"
 
 IMPORTANT: Renvoie EXACTEMENT {len(sites)} objets JSON, un pour chaque site."""
 
     def _build_single_prompt(self, site: SiteData) -> str:
         """Construit le prompt pour un site unique."""
-        return f"""Tu es un expert E-commerce. Classifie ce site.
+        return f"""Tu es un expert E-commerce. Classifie ce site web par thematique.
+Tu recois: URL, Title, Description, H1 (et parfois des titres de produits).
 Renvoie UNIQUEMENT un objet JSON, sans markdown, sans backticks.
 
 TAXONOMIE DISPONIBLE:
@@ -351,12 +358,13 @@ Page_ID: {site.page_id}
 {site.to_prompt_text()}
 
 OUTPUT FORMAT ATTENDU (JSON strict):
-{{"page_id": "{site.page_id}", "niche": "Catégorie", "subcategory": "Sous-catégorie", "confidence": 0.85}}
+{{"page_id": "{site.page_id}", "niche": "Categorie", "subcategory": "Sous-categorie", "confidence": 0.85}}
 
 REGLES:
-1. Le champ "page_id" doit etre EXACTEMENT "{site.page_id}"
-2. Choisis la categorie la plus SPECIFIQUE possible
-3. Confidence: 0.9+ si tres clair, 0.7-0.89 si probable, 0.5-0.69 si incertain"""
+1. Analyse l'URL, le titre, la description et le H1 pour determiner la thematique
+2. Le champ "page_id" doit etre EXACTEMENT "{site.page_id}"
+3. Choisis la categorie la plus SPECIFIQUE possible basee sur les metadonnees
+4. Confidence: 0.9+ si tres clair, 0.7-0.89 si probable, 0.5-0.69 si incertain"""
 
     def _call_gemini(self, prompt: str) -> Dict:
         """Appelle l'API Gemini."""
