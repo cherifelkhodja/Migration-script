@@ -218,23 +218,79 @@ def render_settings_api_tab(db):
                 stat_cols[2].metric("Rate limits", t["rate_limit_hits"])
                 stat_cols[3].metric("Statut", "Actif" if t["is_active"] else "Inactif")
 
-                # Proxy info
+                # === SECTION EDITION ===
+                st.markdown("---")
+                st.markdown("**✏️ Modifier le token**")
+
+                # Nom du token
+                edit_name = st.text_input(
+                    "Nom",
+                    value=t["name"],
+                    key=f"edit_name_{t['id']}",
+                    help="Nom pour identifier ce token"
+                )
+
+                # Token avec toggle afficher/masquer
+                show_token_key = f"show_token_{t['id']}"
+                if show_token_key not in st.session_state:
+                    st.session_state[show_token_key] = False
+
+                col_token, col_toggle = st.columns([4, 1])
+                with col_token:
+                    if st.session_state[show_token_key]:
+                        edit_token = st.text_input(
+                            "Token Meta API",
+                            value=t["token"],
+                            key=f"edit_token_{t['id']}",
+                            help="Modifiez le token si necessaire"
+                        )
+                    else:
+                        edit_token = st.text_input(
+                            "Token Meta API",
+                            value=t["token"],
+                            type="password",
+                            key=f"edit_token_{t['id']}",
+                            help="Cliquez sur 👁️ pour afficher le token"
+                        )
+                with col_toggle:
+                    st.write("")  # Espacement
+                    if st.button("👁️" if not st.session_state[show_token_key] else "🙈", key=f"toggle_show_{t['id']}"):
+                        st.session_state[show_token_key] = not st.session_state[show_token_key]
+                        st.rerun()
+
+                # Proxy URL
                 current_proxy = t.get("proxy_url") or ""
-                if current_proxy:
-                    try:
-                        from urllib.parse import urlparse
-                        parsed = urlparse(current_proxy)
-                        if parsed.password:
-                            masked = current_proxy.replace(parsed.password, "****")
-                        else:
-                            masked = current_proxy
-                    except:
-                        masked = current_proxy[:30] + "..."
-                    st.caption(f"🌐 Proxy: {masked}")
-                else:
-                    st.caption("🌐 Proxy: Non configure")
+                edit_proxy = st.text_input(
+                    "Proxy URL",
+                    value=current_proxy,
+                    key=f"edit_proxy_{t['id']}",
+                    placeholder="http://user:pass@ip:port",
+                    help="Proxy associe a ce token (optionnel)"
+                )
+
+                # Bouton sauvegarder les modifications
+                if st.button("💾 Sauvegarder les modifications", key=f"save_edit_{t['id']}", type="primary"):
+                    changes_made = False
+                    if edit_name != t["name"]:
+                        update_meta_token(db, t["id"], name=edit_name)
+                        changes_made = True
+                    if edit_token != t["token"] and edit_token.strip():
+                        update_meta_token(db, t["id"], token_value=edit_token.strip())
+                        changes_made = True
+                    if edit_proxy != current_proxy:
+                        update_meta_token(db, t["id"], proxy_url=edit_proxy.strip())
+                        changes_made = True
+
+                    if changes_made:
+                        st.success("✅ Modifications sauvegardees!")
+                        st.rerun()
+                    else:
+                        st.info("Aucune modification detectee")
+
+                st.markdown("---")
 
                 # Actions rapides
+                st.markdown("**⚡ Actions rapides**")
                 action_cols = st.columns(5)
                 with action_cols[0]:
                     new_active = not t["is_active"]
