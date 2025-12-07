@@ -1,13 +1,66 @@
 #!/usr/bin/env python3
 """
-Script de nettoyage des doublons dans la base de données.
-Garde uniquement les entrées les plus récentes pour chaque ad_id.
+Script de nettoyage des doublons dans la base de donnees.
+
+Ce script detecte et supprime les entrees dupliquees dans les tables
+principales, en gardant toujours l'entree la plus recente.
 
 Usage:
+------
     python scripts/cleanup_duplicates.py [--dry-run]
 
 Options:
-    --dry-run   Affiche les doublons sans les supprimer
+--------
+    --dry-run   Simule le nettoyage sans modifier la base
+
+Tables nettoyees:
+-----------------
+1. **liste_ads_recherche** : Doublons par ad_id
+   - Garde l'entree avec date_scan la plus recente
+   - Supprime les autres entrees pour le meme ad_id
+
+2. **winning_ads** : Doublons par ad_id
+   - Meme logique que ads_recherche
+   - Une ad ne peut etre "winning" qu'une seule fois
+
+3. **suivi_page** : Doublons par (page_id, jour)
+   - Plusieurs scans le meme jour = doublon
+   - Garde un seul enregistrement par page par jour
+
+Origine des doublons:
+---------------------
+Les doublons peuvent apparaitre quand :
+- Plusieurs recherches trouvent la meme ad
+- Un scan est relance plusieurs fois le meme jour
+- Bug dans le code de deduplication amont
+
+Workflow recommande:
+--------------------
+1. Lancer avec --dry-run pour evaluer l'impact
+2. Verifier les statistiques affichees
+3. Relancer sans --dry-run pour nettoyer
+
+Exemple:
+--------
+    $ python scripts/cleanup_duplicates.py --dry-run
+    📊 STATISTIQUES ACTUELLES
+    📢 Ads: 15,234 total, 12,456 uniques
+       ⚠️ 2,778 doublons potentiels
+
+    $ python scripts/cleanup_duplicates.py
+    🗑️ 2,778 doublons supprimes
+
+Impact sur les performances:
+----------------------------
+La suppression des doublons ameliore :
+- Temps de requete sur les tables
+- Espace disque utilise
+- Coherence des statistiques (count distinct)
+
+Note:
+-----
+Ce script est aussi accessible via Settings > Maintenance
+dans le dashboard Streamlit.
 """
 
 import sys

@@ -1,10 +1,65 @@
 #!/usr/bin/env python3
 """
-Scheduler pour les scans automatiques Meta Ads ET les recherches en arrière-plan.
-Exécute les scans programmés selon leur fréquence (daily, weekly, monthly).
-Traite aussi les recherches de la SearchQueue soumises via l'UI.
+Scheduler APScheduler pour l'automatisation des recherches Meta Ads.
 
-Pour Railway: Déployer comme service "worker" séparé.
+Ce worker execute deux types de taches en arriere-plan :
+1. Scans programmes (daily/weekly/monthly)
+2. Recherches de la SearchQueue soumises via l'UI
+
+Architecture:
+-------------
+Utilise APScheduler en mode BlockingScheduler avec deux jobs :
+- check_and_run_scheduled_scans : toutes les 5 minutes
+- process_search_queue : toutes les 30 secondes
+
+Deploiement Railway:
+--------------------
+Deployer comme service "worker" separe du web (dashboard).
+Configuration recommandee :
+- Service type: Worker
+- Command: python scheduler.py
+- Variables: META_ACCESS_TOKEN, DATABASE_URL
+
+Variables d'environnement requises:
+-----------------------------------
+- META_ACCESS_TOKEN : Token API Meta Ads (obligatoire)
+- DATABASE_URL : URL PostgreSQL (obligatoire)
+
+Gestion des interruptions:
+--------------------------
+Au demarrage, le scheduler recupere les recherches interrompues
+(status="running" mais worker arrete) et les remet en "pending".
+
+Execution des scans:
+--------------------
+Pour chaque scan programme dont next_run <= now :
+1. Recupere les keywords du scan
+2. Appelle Meta API pour chaque keyword
+3. Groupe les ads par page_id
+4. Calcule l'etat (XS-XXL) selon le nombre d'ads
+5. Sauvegarde les pages avec >= MIN_ADS_SUIVI ads
+6. Met a jour next_run selon la frequence
+
+Traitement de la queue:
+-----------------------
+Pour chaque recherche en "pending" :
+1. Marque comme "running"
+2. Execute via execute_background_search()
+3. Marque comme "completed" ou "failed"
+
+Lock anti-parallele:
+--------------------
+Variable globale _search_queue_running empeche les executions
+concurrentes du traitement de queue.
+
+Logs:
+-----
+Format: timestamp - logger - level - message
+Niveau: INFO par defaut
+
+Arret propre:
+-------------
+Ctrl+C declenche scheduler.shutdown() via KeyboardInterrupt.
 """
 import os
 import sys

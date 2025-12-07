@@ -1,11 +1,36 @@
 #!/usr/bin/env python3
 """
-Point d'entrée pour lancer le dashboard Meta Ads Analyzer
+Point d'entree principal pour lancer le dashboard Meta Ads Analyzer.
+
+Ce script est le lanceur recommande pour demarrer l'application
+Streamlit en mode developpement ou production locale.
 
 Usage:
+------
     python3 run.py
-    ou
+    # ou directement:
     streamlit run app/dashboard.py
+
+Comportement:
+-------------
+1. Verifie que le fichier dashboard.py existe
+2. Lance Streamlit avec les options par defaut
+3. Desactive la collecte de statistiques Streamlit
+
+Options Streamlit passees:
+--------------------------
+- --browser.gatherUsageStats=false : Desactive la telemetrie
+
+Erreurs courantes:
+------------------
+- "dashboard.py introuvable" : Verifier la structure du projet
+- "Streamlit non trouve" : pip install streamlit
+- "FileNotFoundError" : pip install -r requirements.txt
+
+Note:
+-----
+Pour le deploiement Railway/production, utiliser plutot:
+    streamlit run src/presentation/streamlit/dashboard.py --server.port $PORT
 """
 import sys
 import subprocess
