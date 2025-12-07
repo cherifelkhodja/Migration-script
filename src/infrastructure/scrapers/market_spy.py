@@ -818,6 +818,73 @@ class MarketSpy:
         url = self._normalize_url(url)
         return self.sitemap_analyzer.analyze(url, country_code)
 
+    def count_shopify_products_json(self, url: str) -> Dict[str, Any]:
+        """
+        Compte les produits Shopify via l'API JSON publique /products.json.
+
+        Plus fiable que les sitemaps car:
+        - API officielle Shopify
+        - Compte uniquement les produits actifs
+        - Pas de probleme de parsing XML
+
+        Args:
+            url: URL du site Shopify
+
+        Returns:
+            Dict avec product_count (int) et error (si erreur)
+        """
+        url = self._normalize_url(url)
+        parsed = urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+
+        total_products = 0
+        page = 1
+        max_pages = 100  # Securite anti-boucle infinie
+
+        while page <= max_pages:
+            api_url = f"{origin}/products.json?limit=250&page={page}"
+
+            try:
+                response = self.http.get(api_url, timeout=TIMEOUT_SITEMAP)
+
+                if not response or response.status_code != 200:
+                    if page == 1:
+                        # Premiere page echoue = API non disponible
+                        logger.warning(f"Shopify JSON API failed for {origin}: HTTP {response.status_code if response else 'None'}")
+                        return {"product_count": None, "error": "API not available"}
+                    break
+
+                data = response.json()
+                products = data.get("products", [])
+
+                if not products:
+                    break
+
+                # Filtrer uniquement les produits actifs
+                active_products = [p for p in products if p.get("status") == "active"]
+                total_products += len(active_products)
+
+                # Si moins de 250 produits, c'est la derniere page
+                if len(products) < 250:
+                    break
+
+                page += 1
+                time.sleep(0.3)  # Rate limiting
+
+            except requests.RequestException as e:
+                logger.warning(f"Shopify JSON API error for {origin}: {e}")
+                if page == 1:
+                    return {"product_count": None, "error": str(e)[:50]}
+                break
+            except Exception as e:
+                logger.warning(f"Shopify JSON parse error for {origin}: {e}")
+                if page == 1:
+                    return {"product_count": None, "error": str(e)[:50]}
+                break
+
+        logger.info(f"Shopify JSON API: {origin} = {total_products} produits actifs")
+        return {"product_count": total_products, "error": None}
+
     def analyze_batch(
         self,
         urls: List[str],
@@ -1070,23 +1137,22 @@ def analyze_homepage_v2(url: str) -> Dict[str, Any]:
 
 def analyze_sitemap_v2(url: str, country_code: str = "FR") -> Dict[str, Any]:
     """
-    Analyse sitemap uniquement (pour Phase 6 apres filtre CMS).
+    Compte les produits Shopify via l'API JSON publique.
+
+    Utilise /products.json (plus fiable que les sitemaps).
 
     Args:
-        url: URL du site
-        country_code: Code pays
+        url: URL du site Shopify
+        country_code: Code pays (non utilise, conserve pour compatibilite)
 
     Returns:
-        Dict avec product_count, product_titles
+        Dict avec product_count (int ou None si erreur)
     """
     with MarketSpy() as spy:
-        data = spy.analyze_sitemap_only(url, country_code)
+        result = spy.count_shopify_products_json(url)
         return {
-            "product_count": data.product_count,
-            "product_titles": data.product_titles,
-            "sitemap_count": data.sitemap_count,
-            "bytes_downloaded": data.bytes_downloaded,
-            "error": data.error,
+            "product_count": result.get("product_count"),
+            "error": result.get("error"),
         }
 
 
