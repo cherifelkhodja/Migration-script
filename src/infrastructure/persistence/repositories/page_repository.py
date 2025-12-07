@@ -245,9 +245,36 @@ def get_page_history(db, page_id: str) -> List[Dict]:
         return [
             {
                 "date_scan": h.date_scan,
-                "ads_active": h.ads_active,
-                "cms": h.cms,
-                "thematique": h.thematique,
+                "nombre_ads_active": h.nombre_ads_active,
+                "nombre_produits": h.nombre_produits,
+                "nom_site": h.nom_site,
+            }
+            for h in history
+        ]
+
+
+def get_page_evolution_history(db, page_id: str, limit: int = 30) -> List[Dict]:
+    """
+    Recupere l'historique d'evolution d'une page pour les graphiques analytics.
+
+    Args:
+        db: Instance DatabaseManager
+        page_id: ID de la page Facebook
+        limit: Nombre max d'entrees a retourner
+
+    Returns:
+        Liste de dicts avec date_scan, nombre_ads_active, nombre_produits
+    """
+    with db.get_session() as session:
+        history = session.query(SuiviPage).filter(
+            SuiviPage.page_id == str(page_id)
+        ).order_by(desc(SuiviPage.date_scan)).limit(limit).all()
+
+        return [
+            {
+                "date_scan": h.date_scan,
+                "nombre_ads_active": h.nombre_ads_active or 0,
+                "nombre_produits": h.nombre_produits or 0,
             }
             for h in history
         ]
