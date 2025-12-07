@@ -273,9 +273,7 @@ def get_winning_ads(
         days: Fenetre temporelle en jours (defaut: 30)
 
     Returns:
-        Liste de dictionnaires contenant les champs essentiels de chaque ad:
-        id, ad_id, page_id, page_name, eu_total_reach, age_days,
-        matched_criteria, ad_snapshot_url, date_scan
+        Liste de dictionnaires avec tous les champs de winning ads
     """
     cutoff = datetime.utcnow() - timedelta(days=days)
 
@@ -292,10 +290,15 @@ def get_winning_ads(
                 "ad_id": a.ad_id,
                 "page_id": a.page_id,
                 "page_name": a.page_name,
+                "ad_creation_time": a.ad_creation_time,
+                "ad_age_days": a.ad_age_days,
                 "eu_total_reach": a.eu_total_reach,
-                "age_days": a.ad_age_days,
                 "matched_criteria": a.matched_criteria,
+                "ad_creative_bodies": a.ad_creative_bodies,
+                "ad_creative_link_captions": a.ad_creative_link_captions,
+                "ad_creative_link_titles": a.ad_creative_link_titles,
                 "ad_snapshot_url": a.ad_snapshot_url,
+                "lien_site": a.lien_site,
                 "date_scan": a.date_scan,
             }
             for a in ads
@@ -304,71 +307,82 @@ def get_winning_ads(
 
 def get_winning_ads_filtered(
     db,
+    page_id: str = None,
+    ad_id: str = None,
     limit: int = 100,
-    days: int = 30,
-    min_reach: int = None,
-    cms_filter: List[str] = None,
-    category_filter: str = None
+    days: int = None,
+    thematique: str = None,
+    subcategory: str = None,
+    pays: str = None
 ) -> List[Dict]:
     """
-    Recupere les winning ads avec filtres avances.
-
-    Permet de filtrer par reach minimum, CMS de la page (Shopify, WooCommerce...)
-    et categorie thematique.
+    Recupere les winning ads avec filtres de classification.
 
     Args:
         db: Instance DatabaseManager
-        limit: Nombre maximum de resultats
-        days: Fenetre temporelle en jours
-        min_reach: Reach minimum requis (filtre les petites ads)
-        cms_filter: Liste de CMS a inclure (ex: ["Shopify", "WooCommerce"])
-        category_filter: Thematique de la page (ex: "Mode", "Tech")
+        page_id: Filtrer par page (optionnel)
+        ad_id: Filtrer par ad_id (optionnel)
+        limit: Nombre max de resultats
+        days: Filtrer par periode en jours (optionnel)
+        thematique: Filtrer par categorie de la page
+        subcategory: Filtrer par sous-categorie de la page
+        pays: Filtrer par pays de la page
 
     Returns:
-        Liste de dictionnaires winning ads filtrees
-
-    Note:
-        Les filtres cms_filter et category_filter necessitent une jointure
-        avec la table PageRecherche.
+        Liste des winning ads filtrees
     """
-    cutoff = datetime.utcnow() - timedelta(days=days)
-
     with db.get_session() as session:
-        query = session.query(WinningAds).filter(
-            WinningAds.date_scan >= cutoff
-        )
-
-        if min_reach:
-            query = query.filter(WinningAds.eu_total_reach >= min_reach)
-
-        # Jointure avec PageRecherche si filtres sur la page
-        if cms_filter or category_filter:
-            query = query.join(
+        # Si des filtres de classification sont actifs, joindre avec PageRecherche
+        if thematique or subcategory or pays:
+            query = session.query(WinningAds).join(
                 PageRecherche,
                 WinningAds.page_id == PageRecherche.page_id
             )
-            if cms_filter:
-                query = query.filter(PageRecherche.cms.in_(cms_filter))
-            if category_filter:
-                query = query.filter(PageRecherche.thematique == category_filter)
 
-        ads = query.order_by(
-            desc(WinningAds.eu_total_reach)
-        ).limit(limit).all()
+            if thematique:
+                query = query.filter(PageRecherche.thematique == thematique)
+            if subcategory:
+                query = query.filter(PageRecherche.subcategory == subcategory)
+            if pays:
+                query = query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+        else:
+            query = session.query(WinningAds)
+
+        query = query.order_by(
+            WinningAds.date_scan.desc(),
+            WinningAds.eu_total_reach.desc()
+        )
+
+        if page_id:
+            query = query.filter(WinningAds.page_id == page_id)
+
+        if ad_id:
+            query = query.filter(WinningAds.ad_id == ad_id)
+
+        if days:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            query = query.filter(WinningAds.date_scan >= cutoff)
+
+        entries = query.limit(limit).all()
 
         return [
             {
-                "id": a.id,
-                "ad_id": a.ad_id,
-                "page_id": a.page_id,
-                "page_name": a.page_name,
-                "eu_total_reach": a.eu_total_reach,
-                "age_days": a.ad_age_days,
-                "matched_criteria": a.matched_criteria,
-                "ad_snapshot_url": a.ad_snapshot_url,
-                "date_scan": a.date_scan,
+                "id": e.id,
+                "ad_id": e.ad_id,
+                "page_id": e.page_id,
+                "page_name": e.page_name,
+                "ad_creation_time": e.ad_creation_time,
+                "ad_age_days": e.ad_age_days,
+                "eu_total_reach": e.eu_total_reach,
+                "matched_criteria": e.matched_criteria,
+                "ad_creative_bodies": e.ad_creative_bodies,
+                "ad_creative_link_captions": e.ad_creative_link_captions,
+                "ad_creative_link_titles": e.ad_creative_link_titles,
+                "ad_snapshot_url": e.ad_snapshot_url,
+                "lien_site": e.lien_site,
+                "date_scan": e.date_scan,
             }
-            for a in ads
+            for e in entries
         ]
 
 
@@ -446,7 +460,7 @@ def get_winning_ads_by_page(
                 "id": a.id,
                 "ad_id": a.ad_id,
                 "eu_total_reach": a.eu_total_reach,
-                "age_days": a.ad_age_days,
+                "ad_age_days": a.ad_age_days,
                 "matched_criteria": a.matched_criteria,
                 "ad_snapshot_url": a.ad_snapshot_url,
                 "date_scan": a.date_scan,

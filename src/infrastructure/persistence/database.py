@@ -448,31 +448,97 @@ def search_pages(
 def get_winning_ads_stats_filtered(
     db: DatabaseManager,
     days: int = 30,
-    cms_filter: List[str] = None,
-    category_filter: str = None,
+    thematique: str = None,
+    subcategory: str = None,
+    pays: str = None,
 ) -> Dict:
-    """Statistiques des winning ads avec filtres."""
+    """
+    Récupère les statistiques des winning ads avec filtres.
+
+    Args:
+        db: DatabaseManager
+        days: Période en jours
+        thematique: Filtrer par catégorie
+        subcategory: Filtrer par sous-catégorie
+        pays: Filtrer par pays
+
+    Returns:
+        Dict avec les statistiques
+    """
     cutoff = datetime.utcnow() - timedelta(days=days)
 
     with db.get_session() as session:
-        query = session.query(WinningAds).filter(WinningAds.date_scan >= cutoff)
+        # Base query avec ou sans jointure
+        if thematique or subcategory or pays:
+            base_query = session.query(WinningAds).join(
+                PageRecherche,
+                WinningAds.page_id == PageRecherche.page_id
+            ).filter(WinningAds.date_scan >= cutoff)
 
-        if cms_filter or category_filter:
-            query = query.join(PageRecherche, WinningAds.page_id == PageRecherche.page_id)
-            if cms_filter:
-                query = query.filter(PageRecherche.cms.in_(cms_filter))
-            if category_filter:
-                query = query.filter(PageRecherche.thematique == category_filter)
+            if thematique:
+                base_query = base_query.filter(PageRecherche.thematique == thematique)
+            if subcategory:
+                base_query = base_query.filter(PageRecherche.subcategory == subcategory)
+            if pays:
+                base_query = base_query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
 
-        total = query.count()
-        total_reach = session.query(func.sum(WinningAds.eu_total_reach)).filter(
-            WinningAds.id.in_([w.id for w in query])
-        ).scalar() or 0
+            total = base_query.count()
+
+            # Unique pages count avec les mêmes filtres
+            unique_pages_query = session.query(
+                func.count(func.distinct(WinningAds.page_id))
+            ).join(
+                PageRecherche,
+                WinningAds.page_id == PageRecherche.page_id
+            ).filter(WinningAds.date_scan >= cutoff)
+
+            if thematique:
+                unique_pages_query = unique_pages_query.filter(PageRecherche.thematique == thematique)
+            if subcategory:
+                unique_pages_query = unique_pages_query.filter(PageRecherche.subcategory == subcategory)
+            if pays:
+                unique_pages_query = unique_pages_query.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+
+            unique_pages_count = unique_pages_query.scalar() or 0
+
+            # Avg reach avec les mêmes filtres
+            avg_reach = session.query(
+                func.avg(WinningAds.eu_total_reach)
+            ).join(
+                PageRecherche,
+                WinningAds.page_id == PageRecherche.page_id
+            ).filter(WinningAds.date_scan >= cutoff)
+
+            if thematique:
+                avg_reach = avg_reach.filter(PageRecherche.thematique == thematique)
+            if subcategory:
+                avg_reach = avg_reach.filter(PageRecherche.subcategory == subcategory)
+            if pays:
+                avg_reach = avg_reach.filter(PageRecherche.pays.ilike(f"%{pays}%"))
+
+            avg_reach = avg_reach.scalar() or 0
+        else:
+            # Sans filtres - utiliser la requête simple
+            total = session.query(WinningAds).filter(
+                WinningAds.date_scan >= cutoff
+            ).count()
+
+            unique_pages_count = session.query(
+                func.count(func.distinct(WinningAds.page_id))
+            ).filter(
+                WinningAds.date_scan >= cutoff
+            ).scalar() or 0
+
+            avg_reach = session.query(
+                func.avg(WinningAds.eu_total_reach)
+            ).filter(
+                WinningAds.date_scan >= cutoff
+            ).scalar() or 0
 
         return {
             "total": total,
-            "total_reach": int(total_reach),
-            "avg_reach": int(total_reach / total) if total > 0 else 0,
+            "unique_pages": unique_pages_count,
+            "avg_reach": int(avg_reach),
         }
 
 
