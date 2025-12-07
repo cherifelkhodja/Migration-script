@@ -823,8 +823,8 @@ class MarketSpy:
         Compte les produits Shopify via l'API JSON publique /products.json.
 
         Plus fiable que les sitemaps car:
-        - API officielle Shopify
-        - Compte uniquement les produits actifs
+        - API officielle Shopify (retourne uniquement produits publies)
+        - Pagination automatique (250 produits/page)
         - Pas de probleme de parsing XML
 
         Args:
@@ -860,9 +860,9 @@ class MarketSpy:
                 if not products:
                     break
 
-                # Filtrer uniquement les produits actifs
-                active_products = [p for p in products if p.get("status") == "active"]
-                total_products += len(active_products)
+                # L'API publique /products.json retourne uniquement les produits publies
+                # Pas besoin de filtrer par status (champ admin non disponible)
+                total_products += len(products)
 
                 # Si moins de 250 produits, c'est la derniere page
                 if len(products) < 250:
@@ -882,7 +882,7 @@ class MarketSpy:
                     return {"product_count": None, "error": str(e)[:50]}
                 break
 
-        logger.info(f"Shopify JSON API: {origin} = {total_products} produits actifs")
+        logger.info(f"Shopify JSON API: {origin} = {total_products} produits")
         return {"product_count": total_products, "error": None}
 
     def analyze_batch(
