@@ -68,6 +68,7 @@ from src.infrastructure.persistence.database import (
     get_winning_ads, get_winning_ads_stats, get_winning_ads_filtered,
     get_winning_ads_stats_filtered
 )
+from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 
 
 def parse_ad_body(body_raw: str, max_length: int = 80) -> str:
@@ -110,7 +111,7 @@ def parse_ad_body(body_raw: str, max_length: int = 80) -> str:
     return body
 
 
-def render_classification_filters(db, key_prefix: str = "", columns: int = 3):
+def render_classification_filters(db, key_prefix: str = "", columns: int = 3, user_id=None):
     """Filtres de classification (thematique, subcategory, pays)."""
     from src.infrastructure.persistence.database import (
         get_taxonomy_categories, get_all_subcategories, get_all_countries
@@ -120,7 +121,7 @@ def render_classification_filters(db, key_prefix: str = "", columns: int = 3):
     cols = st.columns(columns)
 
     with cols[0]:
-        categories = get_taxonomy_categories(db)
+        categories = get_taxonomy_categories(db, user_id=user_id)
         thematique = st.selectbox(
             "🏷️ Thematique",
             options=["Toutes"] + categories,
@@ -129,7 +130,7 @@ def render_classification_filters(db, key_prefix: str = "", columns: int = 3):
         filters["thematique"] = thematique if thematique != "Toutes" else None
 
     with cols[1]:
-        subcategories = get_all_subcategories(db)
+        subcategories = get_all_subcategories(db, user_id=user_id)
         subcategory = st.selectbox(
             "📂 Sous-categorie",
             options=["Toutes"] + subcategories,
@@ -139,7 +140,7 @@ def render_classification_filters(db, key_prefix: str = "", columns: int = 3):
 
     if columns >= 3:
         with cols[2]:
-            countries = get_all_countries(db)
+            countries = get_all_countries(db, user_id=user_id)
             pays = st.selectbox(
                 "🌍 Pays",
                 options=["Tous"] + countries,
@@ -159,6 +160,10 @@ def render_winning_ads():
     if not db:
         st.warning("Base de donnees non connectee")
         return
+
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
 
     # Criteres expliques
     with st.expander("ℹ️ Criteres de detection des Winning Ads", expanded=False):
@@ -199,7 +204,7 @@ def render_winning_ads():
             key="winning_ad_id"
         )
 
-    class_filters = render_classification_filters(db, key_prefix="winning", columns=3)
+    class_filters = render_classification_filters(db, key_prefix="winning", columns=3, user_id=user_id)
 
     # Afficher les filtres actifs
     active_filters = []
@@ -261,10 +266,11 @@ def render_winning_ads():
                 db, days=period,
                 thematique=class_filters.get("thematique"),
                 subcategory=class_filters.get("subcategory"),
-                pays=class_filters.get("pays")
+                pays=class_filters.get("pays"),
+                user_id=user_id
             )
         else:
-            stats = get_winning_ads_stats(db, days=period)
+            stats = get_winning_ads_stats(db, days=period, user_id=user_id)
 
         st.markdown("---")
         st.subheader("📊 Statistiques")
@@ -350,10 +356,11 @@ def render_winning_ads():
                 ad_id=ad_id_param,
                 thematique=class_filters.get("thematique"),
                 subcategory=class_filters.get("subcategory"),
-                pays=class_filters.get("pays")
+                pays=class_filters.get("pays"),
+                user_id=user_id
             )
         else:
-            winning_ads = get_winning_ads(db, limit=actual_limit, days=period)
+            winning_ads = get_winning_ads(db, limit=actual_limit, days=period, user_id=user_id)
 
         if winning_ads:
             _render_winning_ads_list(winning_ads, group_by, period)

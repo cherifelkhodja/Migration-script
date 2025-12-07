@@ -53,6 +53,7 @@ from src.infrastructure.persistence.database import (
     get_scheduled_scans, create_scheduled_scan,
     update_scheduled_scan, delete_scheduled_scan
 )
+from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 
 
 def render_scheduled_scans():
@@ -64,6 +65,10 @@ def render_scheduled_scans():
     if not db:
         st.warning("Base de donnees non connectee")
         return
+
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
 
     info_card(
         "Comment fonctionnent les scans programmes ?",
@@ -110,7 +115,8 @@ def render_scheduled_scans():
                         scan_keywords,
                         ",".join(scan_countries),
                         ",".join(scan_languages),
-                        scan_frequency
+                        scan_frequency,
+                        user_id=user_id
                     )
                     st.success(f"Scan '{scan_name}' cree!")
                     st.rerun()
@@ -120,7 +126,7 @@ def render_scheduled_scans():
     st.markdown("---")
 
     # Liste des scans
-    scans = get_scheduled_scans(db)
+    scans = get_scheduled_scans(db, user_id=user_id)
 
     if scans:
         st.subheader(f"📋 {len(scans)} scan(s) programme(s)")
@@ -150,11 +156,11 @@ def render_scheduled_scans():
                     # Toggle actif/inactif
                     new_status = st.toggle("Actif", value=scan["is_active"], key=f"toggle_{scan_id}")
                     if new_status != scan["is_active"]:
-                        update_scheduled_scan(db, scan_id, is_active=new_status)
+                        update_scheduled_scan(db, scan_id, is_active=new_status, user_id=user_id)
                         st.rerun()
 
                     if st.button("🗑️ Supprimer", key=f"del_scan_{scan_id}"):
-                        delete_scheduled_scan(db, scan_id)
+                        delete_scheduled_scan(db, scan_id, user_id=user_id)
                         st.success("Scan supprime")
                         st.rerun()
 

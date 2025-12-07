@@ -40,6 +40,7 @@ from src.infrastructure.persistence.database import (
     get_favorites, remove_favorite, search_pages,
     get_page_tags, get_page_notes
 )
+from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 
 
 def render_favorites():
@@ -52,8 +53,12 @@ def render_favorites():
         st.warning("Base de donnees non connectee")
         return
 
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
+
     try:
-        favorite_ids = get_favorites(db)
+        favorite_ids = get_favorites(db, user_id=user_id)
 
         if favorite_ids:
             st.info(f"⭐ {len(favorite_ids)} page(s) en favoris")
@@ -61,7 +66,7 @@ def render_favorites():
             # Recuperer les details des pages favorites
             pages = []
             for fav_id in favorite_ids:
-                page_results = search_pages(db, search_term=fav_id, limit=1)
+                page_results = search_pages(db, search_term=fav_id, limit=1, user_id=user_id)
                 if page_results:
                     pages.append(page_results[0])
 
@@ -76,7 +81,7 @@ def render_favorites():
                             st.write(f"**CMS:** {page.get('cms', 'N/A')} | **Produits:** {page.get('nombre_produits', 0)}")
 
                             # Tags
-                            tags = get_page_tags(db, pid)
+                            tags = get_page_tags(db, pid, user_id=user_id)
                             if tags:
                                 tag_html = " ".join([
                                     f"<span style='background-color:{t['color']};color:white;padding:2px 8px;border-radius:10px;margin-right:5px;font-size:12px;'>{t['name']}</span>"
@@ -85,7 +90,7 @@ def render_favorites():
                                 st.markdown(tag_html, unsafe_allow_html=True)
 
                             # Notes
-                            notes = get_page_notes(db, pid)
+                            notes = get_page_notes(db, pid, user_id=user_id)
                             if notes:
                                 st.caption(f"📝 {len(notes)} note(s)")
 
@@ -95,7 +100,7 @@ def render_favorites():
 
                         with col3:
                             if st.button("❌ Retirer", key=f"unfav_{pid}"):
-                                remove_favorite(db, pid)
+                                remove_favorite(db, pid, user_id=user_id)
                                 st.success("Retire des favoris")
                                 st.rerun()
         else:

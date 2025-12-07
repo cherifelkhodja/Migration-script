@@ -7,6 +7,7 @@ from src.presentation.streamlit.shared import get_database
 from src.infrastructure.persistence.database import (
     get_all_tags, create_tag, delete_tag, get_pages_by_tag
 )
+from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 
 
 def render_tags():
@@ -19,6 +20,10 @@ def render_tags():
         st.warning("Base de donnees non connectee")
         return
 
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
+
     # Creer un nouveau tag
     col1, col2, col3 = st.columns([2, 1, 1])
     with col1:
@@ -30,7 +35,7 @@ def render_tags():
         st.write("")
         if st.button("➕ Creer", type="primary"):
             if new_tag_name:
-                result = create_tag(db, new_tag_name.strip(), new_tag_color)
+                result = create_tag(db, new_tag_name.strip(), new_tag_color, user_id=user_id)
                 if result:
                     st.success(f"Tag '{new_tag_name}' cree!")
                     st.rerun()
@@ -42,7 +47,7 @@ def render_tags():
     st.markdown("---")
 
     # Liste des tags
-    tags = get_all_tags(db)
+    tags = get_all_tags(db, user_id=user_id)
 
     if tags:
         st.subheader(f"📋 {len(tags)} tag(s)")
@@ -59,7 +64,7 @@ def render_tags():
 
             with col2:
                 # Nombre de pages avec ce tag
-                page_ids = get_pages_by_tag(db, tag_id)
+                page_ids = get_pages_by_tag(db, tag_id, user_id=user_id)
                 st.caption(f"{len(page_ids)} page(s)")
 
             with col3:
@@ -70,7 +75,7 @@ def render_tags():
 
             with col4:
                 if st.button("🗑️", key=f"del_tag_{tag_id}"):
-                    delete_tag(db, tag_id)
+                    delete_tag(db, tag_id, user_id=user_id)
                     st.success("Tag supprime")
                     st.rerun()
     else:

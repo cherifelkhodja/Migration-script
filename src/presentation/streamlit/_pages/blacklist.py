@@ -29,6 +29,7 @@ from src.presentation.streamlit.shared import get_database
 from src.infrastructure.persistence.database import (
     add_to_blacklist, remove_from_blacklist, get_blacklist
 )
+from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 
 
 def render_blacklist():
@@ -40,6 +41,10 @@ def render_blacklist():
     if not db:
         st.warning("Base de donnees non connectee")
         return
+
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
 
     # Formulaire d'ajout
     st.subheader("➕ Ajouter une page")
@@ -56,7 +61,7 @@ def render_blacklist():
 
         if submitted:
             if new_page_id:
-                if add_to_blacklist(db, new_page_id.strip(), new_page_name.strip(), new_raison.strip()):
+                if add_to_blacklist(db, new_page_id.strip(), new_page_name.strip(), new_raison.strip(), user_id=user_id):
                     st.success(f"✓ Page {new_page_id} ajoutee a la blacklist")
                     st.rerun()
                 else:
@@ -70,7 +75,7 @@ def render_blacklist():
     st.subheader("📋 Pages en blacklist")
 
     try:
-        blacklist = get_blacklist(db)
+        blacklist = get_blacklist(db, user_id=user_id)
 
         if blacklist:
             # Barre de recherche
@@ -108,7 +113,7 @@ def render_blacklist():
 
                     with col4:
                         if st.button("🗑️ Retirer", key=f"remove_bl_{entry['page_id']}", help="Retirer de la blacklist"):
-                            if remove_from_blacklist(db, entry['page_id']):
+                            if remove_from_blacklist(db, entry['page_id'], user_id=user_id):
                                 st.success("✓ Retire de la blacklist")
                                 st.rerun()
 

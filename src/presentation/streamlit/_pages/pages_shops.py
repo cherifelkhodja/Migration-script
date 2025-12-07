@@ -80,6 +80,7 @@ from src.infrastructure.persistence.database import (
     bulk_add_to_blacklist, bulk_add_to_collection, bulk_add_tag, bulk_add_to_favorites,
     update_page_classification
 )
+from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 
 
 def calculate_page_score(page: dict, winning_count: int = 0) -> int:
@@ -166,12 +167,16 @@ def render_pages_shops():
         st.warning("Base de donnees non connectee")
         return
 
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
+
     # Initialiser les pages selectionnees dans session_state
     if 'selected_pages' not in st.session_state:
         st.session_state.selected_pages = []
 
     # Filtres sauvegardes
-    saved_filters = get_saved_filters(db, filter_type="pages")
+    saved_filters = get_saved_filters(db, filter_type="pages", user_id=user_id)
 
     col_saved, col_save_btn = st.columns([4, 1])
     with col_saved:
@@ -223,18 +228,18 @@ def render_pages_shops():
     col4, col5, col6, col7 = st.columns(4)
 
     with col4:
-        thematique_options = ["Toutes", "Non classifiees"] + get_taxonomy_categories(db)
+        thematique_options = ["Toutes", "Non classifiees"] + get_taxonomy_categories(db, user_id=user_id)
         thematique_filter = st.selectbox("Thematique", thematique_options, index=0, key="pages_thematique")
 
     with col5:
         if thematique_filter not in ["Toutes", "Non classifiees"]:
-            subcategory_options = ["Toutes"] + get_all_subcategories(db, category=thematique_filter)
+            subcategory_options = ["Toutes"] + get_all_subcategories(db, category=thematique_filter, user_id=user_id)
         else:
-            subcategory_options = ["Toutes"] + get_all_subcategories(db)
+            subcategory_options = ["Toutes"] + get_all_subcategories(db, user_id=user_id)
         subcategory_filter = st.selectbox("Classification", subcategory_options, index=0, key="pages_subcategory")
 
     with col6:
-        countries = get_all_countries(db)
+        countries = get_all_countries(db, user_id=user_id)
         country_names = {
             "FR": "🇫🇷 France", "DE": "🇩🇪 Allemagne", "ES": "🇪🇸 Espagne",
             "IT": "🇮🇹 Italie", "GB": "🇬🇧 UK", "US": "🇺🇸 USA",
@@ -266,7 +271,7 @@ def render_pages_shops():
                         "cms": cms_filter,
                         "etat": etat_filter
                     }
-                    save_filter(db, new_filter_name, current_filters, "pages")
+                    save_filter(db, new_filter_name, current_filters, "pages", user_id=user_id)
                     st.success(f"Filtre '{new_filter_name}' sauvegarde!")
                     st.rerun()
 
@@ -279,7 +284,7 @@ def render_pages_shops():
                     st.write(f"📂 {sf['name']}")
                 with col2:
                     if st.button("❌", key=f"del_filter_{sf['id']}"):
-                        delete_saved_filter(db, sf['id'])
+                        delete_saved_filter(db, sf['id'], user_id=user_id)
                         st.rerun()
 
     # Mode d'affichage
@@ -308,17 +313,18 @@ def render_pages_shops():
             subcategory=subcategory_param,
             pays=pays_filter,
             page_id=page_id_filter.strip() if page_id_filter else None,
-            limit=limit
+            limit=limit,
+            user_id=user_id
         )
 
         # Filtrer les pages blacklistées
         if results:
-            blacklist_ids = get_blacklist_ids(db)
+            blacklist_ids = get_blacklist_ids(db, user_id=user_id)
             results = [p for p in results if str(p.get("page_id", "")) not in blacklist_ids]
 
         if results:
             # Enrichir avec scores et winning ads
-            winning_by_page = get_winning_ads_count_by_page(db, days=30)
+            winning_by_page = get_winning_ads_count_by_page(db, days=30, user_id=user_id)
             winning_counts = {str(k): v for k, v in winning_by_page.items()}
 
             for page in results:
@@ -341,11 +347,11 @@ def render_pages_shops():
 
             # Affichage selon le mode
             if view_mode == "Selection":
-                _render_selection_mode(db, results)
+                _render_selection_mode(db, results, user_id)
             elif view_mode == "Tableau":
                 _render_table_mode(results)
             else:
-                _render_detailed_mode(db, results)
+                _render_detailed_mode(db, results, user_id)
         else:
             st.info("Aucun resultat trouve")
 
@@ -450,7 +456,7 @@ def _render_score_help():
 """)
 
 
-def _render_selection_mode(db, results: list):
+def _render_selection_mode(db, results: list, user_id=None):
     """Mode selection avec actions groupees."""
     st.info("☑️ Cochez les pages puis appliquez une action groupee")
 
@@ -476,40 +482,40 @@ def _render_selection_mode(db, results: list):
 
         with action_cols[0]:
             if st.button("⭐ Ajouter favoris", width="stretch"):
-                count = bulk_add_to_favorites(db, st.session_state.selected_pages)
+                count = bulk_add_to_favorites(db, st.session_state.selected_pages, user_id=user_id)
                 st.success(f"{count} page(s) ajoutee(s) aux favoris")
                 st.session_state.selected_pages = []
                 st.rerun()
 
         with action_cols[1]:
             if st.button("🚫 Blacklister", width="stretch"):
-                count = bulk_add_to_blacklist(db, st.session_state.selected_pages, "Bulk blacklist")
+                count = bulk_add_to_blacklist(db, st.session_state.selected_pages, "Bulk blacklist", user_id=user_id)
                 st.success(f"{count} page(s) blacklistee(s)")
                 st.session_state.selected_pages = []
                 st.rerun()
 
         with action_cols[2]:
-            collections = get_collections(db)
+            collections = get_collections(db, user_id=user_id)
             if collections:
                 coll_names = [c["name"] for c in collections]
                 selected_coll = st.selectbox("📁 Collection", ["--"] + coll_names, key="bulk_coll")
                 if selected_coll != "--":
                     coll_id = next(c["id"] for c in collections if c["name"] == selected_coll)
                     if st.button("Ajouter", key="bulk_add_coll"):
-                        count = bulk_add_to_collection(db, coll_id, st.session_state.selected_pages)
+                        count = bulk_add_to_collection(db, coll_id, st.session_state.selected_pages, user_id=user_id)
                         st.success(f"{count} page(s) ajoutee(s)")
                         st.session_state.selected_pages = []
                         st.rerun()
 
         with action_cols[3]:
-            all_tags = get_all_tags(db)
+            all_tags = get_all_tags(db, user_id=user_id)
             if all_tags:
                 tag_names = [t["name"] for t in all_tags]
                 selected_tag = st.selectbox("🏷️ Tag", ["--"] + tag_names, key="bulk_tag")
                 if selected_tag != "--":
                     tag_id = next(t["id"] for t in all_tags if t["name"] == selected_tag)
                     if st.button("Ajouter", key="bulk_add_tag"):
-                        count = bulk_add_tag(db, tag_id, st.session_state.selected_pages)
+                        count = bulk_add_tag(db, tag_id, st.session_state.selected_pages, user_id=user_id)
                         st.success(f"Tag ajoute a {count} page(s)")
                         st.session_state.selected_pages = []
                         st.rerun()
@@ -570,7 +576,7 @@ def _render_table_mode(results: list):
     )
 
 
-def _render_detailed_mode(db, results: list):
+def _render_detailed_mode(db, results: list, user_id=None):
     """Mode detaille avec actions par page."""
     for page in results:
         score = page.get("score", 0)
@@ -599,7 +605,7 @@ def _render_detailed_mode(db, results: list):
                 conf = page.get('classification_confidence', 0)
 
                 with edit_col1:
-                    thematique_options_edit = [""] + get_taxonomy_categories(db)
+                    thematique_options_edit = [""] + get_taxonomy_categories(db, user_id=user_id)
                     current_idx = thematique_options_edit.index(current_thematique) if current_thematique in thematique_options_edit else 0
                     new_thematique = st.selectbox(
                         "Thematique",
@@ -610,9 +616,9 @@ def _render_detailed_mode(db, results: list):
 
                 with edit_col2:
                     if new_thematique:
-                        subcat_options_edit = [""] + get_all_subcategories(db, category=new_thematique)
+                        subcat_options_edit = [""] + get_all_subcategories(db, category=new_thematique, user_id=user_id)
                     else:
-                        subcat_options_edit = [""] + get_all_subcategories(db)
+                        subcat_options_edit = [""] + get_all_subcategories(db, user_id=user_id)
                     current_subcat_idx = subcat_options_edit.index(current_subcat) if current_subcat in subcat_options_edit else 0
                     new_classification = st.selectbox(
                         "Classification",
@@ -623,21 +629,21 @@ def _render_detailed_mode(db, results: list):
 
                 if new_thematique != current_thematique or new_classification != current_subcat:
                     if st.button("💾 Sauvegarder classification", key=f"save_class_{pid}"):
-                        update_page_classification(db, pid, new_thematique, new_classification, confidence=1.0)
+                        update_page_classification(db, pid, new_thematique, new_classification, confidence=1.0, user_id=user_id)
                         st.success("Classification mise a jour!")
                         st.rerun()
                 elif conf:
                     st.caption(f"Confiance: {int(conf*100)}%")
 
                 # Tags
-                page_tags = get_page_tags(db, pid)
+                page_tags = get_page_tags(db, pid, user_id=user_id)
                 if page_tags:
                     tag_html = " ".join([f"<span style='background-color:{t['color']};color:white;padding:2px 8px;border-radius:10px;margin-right:5px;font-size:11px;'>{t['name']}</span>" for t in page_tags])
                     st.markdown(tag_html, unsafe_allow_html=True)
 
                 # Notes
                 st.markdown("---")
-                notes = get_page_notes(db, pid)
+                notes = get_page_notes(db, pid, user_id=user_id)
                 if notes:
                     st.caption(f"📝 {len(notes)} note(s)")
                     for note in notes[:2]:
@@ -647,16 +653,16 @@ def _render_detailed_mode(db, results: list):
                     new_note = st.text_area("Note", key=f"note_{pid}", placeholder="Votre note...")
                     if st.button("Sauvegarder", key=f"save_note_{pid}"):
                         if new_note:
-                            add_page_note(db, pid, new_note)
+                            add_page_note(db, pid, new_note, user_id=user_id)
                             st.success("Note ajoutee!")
                             st.rerun()
 
             with col2:
                 # Favori
-                is_fav = is_favorite(db, pid)
+                is_fav = is_favorite(db, pid, user_id=user_id)
                 fav_icon = "⭐" if is_fav else "☆"
                 if st.button(f"{fav_icon} Favori", key=f"fav_{pid}"):
-                    toggle_favorite(db, pid)
+                    toggle_favorite(db, pid, user_id=user_id)
                     st.rerun()
 
                 if page.get('lien_fb_ad_library'):
@@ -665,27 +671,27 @@ def _render_detailed_mode(db, results: list):
                 st.code(pid, language=None)
 
                 # Collection
-                collections = get_collections(db)
+                collections = get_collections(db, user_id=user_id)
                 if collections:
                     with st.popover("📁 Collection"):
                         for coll in collections:
                             if st.button(f"{coll['icon']} {coll['name']}", key=f"addcoll_{pid}_{coll['id']}"):
-                                add_page_to_collection(db, coll['id'], pid)
+                                add_page_to_collection(db, coll['id'], pid, user_id=user_id)
                                 st.success(f"Ajoute a {coll['name']}")
                                 st.rerun()
 
                 # Tag
-                all_tags = get_all_tags(db)
+                all_tags = get_all_tags(db, user_id=user_id)
                 if all_tags:
                     with st.popover("🏷️ Tag"):
                         for tag in all_tags:
                             if st.button(f"{tag['name']}", key=f"addtag_{pid}_{tag['id']}"):
-                                add_tag_to_page(db, pid, tag['id'])
+                                add_tag_to_page(db, pid, tag['id'], user_id=user_id)
                                 st.success(f"Tag ajoute!")
                                 st.rerun()
 
                 if st.button("🚫 Blacklist", key=f"bl_page_{pid}"):
-                    if add_to_blacklist(db, pid, page.get('page_name', ''), "Blackliste depuis Pages/Shops"):
+                    if add_to_blacklist(db, pid, page.get('page_name', ''), "Blackliste depuis Pages/Shops", user_id=user_id):
                         st.success(f"✓ Blackliste")
                         st.rerun()
                     else:

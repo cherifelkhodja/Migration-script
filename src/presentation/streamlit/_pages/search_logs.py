@@ -5,6 +5,7 @@ import streamlit as st
 import pandas as pd
 
 from src.presentation.streamlit.shared import get_database
+from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 
 
 def render_search_logs():
@@ -17,6 +18,10 @@ def render_search_logs():
         st.error("Base de donnees non connectee")
         return
 
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
+
     # S'assurer que les migrations sont executees (ajoute les colonnes manquantes)
     from src.infrastructure.persistence.database import ensure_tables_exist
     ensure_tables_exist(db)
@@ -25,7 +30,7 @@ def render_search_logs():
     from src.infrastructure.persistence.database import get_search_logs, get_search_logs_stats, delete_search_log
 
     # Stats globales
-    stats = get_search_logs_stats(db, days=30)
+    stats = get_search_logs_stats(db, days=30, user_id=user_id)
 
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -77,7 +82,7 @@ def render_search_logs():
 
     # Recuperer les logs
     status_param = None if status_filter == "Tous" else status_filter
-    logs = get_search_logs(db, limit=limit, status=status_param)
+    logs = get_search_logs(db, limit=limit, status=status_param, user_id=user_id)
 
     if not logs:
         st.info("Aucun historique de recherche disponible.")
@@ -86,10 +91,10 @@ def render_search_logs():
     st.markdown(f"### {len(logs)} recherche(s)")
 
     for log in logs:
-        _render_single_log(db, log)
+        _render_single_log(db, log, user_id)
 
 
-def _render_single_log(db, log: dict):
+def _render_single_log(db, log: dict, user_id=None):
     """Affiche un log de recherche individuel."""
     log_id = log["id"]
     started = log["started_at"]
@@ -166,7 +171,7 @@ def _render_single_log(db, log: dict):
         # Details supplementaires
         with st.columns([3, 1])[1]:
             if st.button("🗑️ Supprimer", key=f"del_log_{log_id}"):
-                delete_search_log(db, log_id)
+                delete_search_log(db, log_id, user_id=user_id)
                 st.success("Log supprime")
                 st.rerun()
 
