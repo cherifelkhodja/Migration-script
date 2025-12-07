@@ -336,20 +336,35 @@ def _run_migrations(db: DatabaseManager):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def get_suivi_stats(db: DatabaseManager) -> Dict:
-    """Statistiques globales du suivi des pages."""
-    with db.get_session() as session:
-        total = session.query(func.count(SuiviPage.id)).scalar() or 0
-        unique_pages = session.query(func.count(func.distinct(SuiviPage.page_id))).scalar() or 0
+    """
+    Statistiques globales des pages en base.
 
-        today = datetime.utcnow().date()
-        scans_today = session.query(func.count(SuiviPage.id)).filter(
-            func.date(SuiviPage.date_scan) == today
-        ).scalar() or 0
+    Returns:
+        Dict avec:
+            - total_pages: Nombre total de pages
+            - etats: Distribution par etat (XS, S, M, L, XL, XXL, inactif)
+            - cms: Distribution par CMS (Shopify, WooCommerce, etc.)
+    """
+    with db.get_session() as session:
+        # Nombre total de pages
+        total_pages = session.query(func.count(PageRecherche.id)).scalar() or 0
+
+        # Repartition par etat
+        etats_query = session.query(
+            PageRecherche.etat,
+            func.count(PageRecherche.id)
+        ).group_by(PageRecherche.etat).all()
+
+        # Repartition par CMS
+        cms_query = session.query(
+            PageRecherche.cms,
+            func.count(PageRecherche.id)
+        ).group_by(PageRecherche.cms).all()
 
         return {
-            "total_records": total,
-            "unique_pages": unique_pages,
-            "scans_today": scans_today,
+            "total_pages": total_pages,
+            "etats": {e[0] or "inactif": e[1] for e in etats_query},
+            "cms": {c[0] or "Inconnu": c[1] for c in cms_query if c[0]},
         }
 
 
