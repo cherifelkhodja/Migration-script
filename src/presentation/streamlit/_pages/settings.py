@@ -864,3 +864,57 @@ def render_settings_maintenance_tab(db):
 
     except Exception as e:
         st.error(f"Erreur: {e}")
+
+    st.markdown("---")
+
+    # === SECTION: RESET DATABASE ===
+    st.subheader("⚠️ Reset de la base de donnees")
+    st.caption("Supprime TOUTES les donnees sauf les utilisateurs. Cette action est irreversible!")
+
+    st.error("**ATTENTION:** Cette action supprimera definitivement toutes les pages, ads, winning ads, favoris, collections, tags, blacklist, historiques de recherche, etc.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        confirm_text = st.text_input(
+            "Tapez 'RESET' pour confirmer",
+            key="reset_confirm_input",
+            placeholder="RESET"
+        )
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        reset_disabled = confirm_text != "RESET"
+
+        if st.button("🗑️ Reset Database", type="primary", disabled=reset_disabled, key="reset_db_btn"):
+            with st.spinner("Suppression en cours..."):
+                try:
+                    from src.infrastructure.persistence.models import (
+                        PageRecherche, SuiviPage, AdsRecherche, WinningAds,
+                        SearchLog, SearchQueue, APICallLog,
+                        PageSearchHistory, WinningAdSearchHistory,
+                        Tag, PageTag, PageNote, Favorite, Collection, CollectionPage,
+                        Blacklist, SavedFilter, ScheduledScan, Taxonomy
+                    )
+
+                    tables_to_clear = [
+                        PageSearchHistory, WinningAdSearchHistory,
+                        APICallLog, SearchQueue, SearchLog,
+                        WinningAds, AdsRecherche, SuiviPage,
+                        PageTag, PageNote, CollectionPage, Collection,
+                        Tag, Favorite, Blacklist, SavedFilter, ScheduledScan,
+                        Taxonomy, PageRecherche
+                    ]
+
+                    deleted_counts = {}
+                    with db.get_session() as session:
+                        for table in tables_to_clear:
+                            try:
+                                count = session.query(table).delete()
+                                deleted_counts[table.__tablename__] = count
+                            except Exception as table_error:
+                                deleted_counts[table.__tablename__] = f"Erreur: {table_error}"
+
+                    st.success("✅ Base de donnees reinitalisee (utilisateurs conserves)")
+                    st.json(deleted_counts)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erreur lors du reset: {e}")

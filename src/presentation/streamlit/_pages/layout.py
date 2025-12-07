@@ -226,6 +226,11 @@ def render_sidebar():
             st.session_state.current_page = "Settings"
             st.rerun()
 
+        # Lien vers la documentation API
+        st.markdown("---")
+        st.markdown("### Documentation")
+        st.link_button("📚 API Docs", "https://developers.facebook.com/docs/marketing-api/reference/ads_archive/", use_container_width=True)
+
         # Page Users (admin only)
         user = st.session_state.get("user")
         if user and user.get("is_admin"):
