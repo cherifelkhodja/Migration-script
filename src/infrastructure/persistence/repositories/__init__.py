@@ -179,6 +179,8 @@ from src.infrastructure.persistence.repositories.search_repository import (
     get_search_history_stats,
     update_search_log_phases,
     get_search_logs_stats,
+    get_pages_for_search,
+    get_winning_ads_for_search,
 )
 
 __all__ = [
@@ -333,4 +335,6 @@ __all__ = [
     "get_search_history_stats",
     "update_search_log_phases",
     "get_search_logs_stats",
+    "get_pages_for_search",
+    "get_winning_ads_for_search",
 ]

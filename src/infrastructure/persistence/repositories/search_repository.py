@@ -13,6 +13,8 @@ from src.infrastructure.persistence.models import (
     APICallLog,
     PageSearchHistory,
     WinningAdSearchHistory,
+    PageRecherche,
+    WinningAds,
 )
 
 
@@ -518,3 +520,76 @@ def get_search_logs_stats(db, days: int = 30) -> Dict:
             "total_web_requests": int(total_web_requests) if total_web_requests else 0,
             "total_rate_limit_hits": int(total_rate_limits) if total_rate_limits else 0,
         }
+
+
+def get_pages_for_search(db, search_log_id: int, limit: int = 100) -> List[Dict]:
+    """
+    Recupere les pages trouvees lors d'une recherche specifique.
+
+    Args:
+        db: Instance DatabaseManager
+        search_log_id: ID du log de recherche
+        limit: Nombre maximum de resultats
+
+    Returns:
+        Liste des pages avec leurs informations
+    """
+    with db.get_session() as session:
+        # Joindre PageSearchHistory avec PageRecherche
+        results = session.query(PageRecherche).join(
+            PageSearchHistory,
+            PageRecherche.page_id == PageSearchHistory.page_id
+        ).filter(
+            PageSearchHistory.search_log_id == search_log_id
+        ).limit(limit).all()
+
+        return [
+            {
+                "page_id": p.page_id,
+                "page_name": p.page_name,
+                "lien_site": p.lien_site,
+                "cms": p.cms,
+                "etat": p.etat,
+                "nombre_ads_active": p.nombre_ads_active,
+                "thematique": p.thematique,
+                "subcategory": getattr(p, 'subcategory', None),
+                "pays": p.pays,
+            }
+            for p in results
+        ]
+
+
+def get_winning_ads_for_search(db, search_log_id: int, limit: int = 100) -> List[Dict]:
+    """
+    Recupere les winning ads trouvees lors d'une recherche specifique.
+
+    Args:
+        db: Instance DatabaseManager
+        search_log_id: ID du log de recherche
+        limit: Nombre maximum de resultats
+
+    Returns:
+        Liste des winning ads avec leurs informations
+    """
+    with db.get_session() as session:
+        # Joindre WinningAdSearchHistory avec WinningAds
+        results = session.query(WinningAds).join(
+            WinningAdSearchHistory,
+            WinningAds.ad_id == WinningAdSearchHistory.ad_id
+        ).filter(
+            WinningAdSearchHistory.search_log_id == search_log_id
+        ).limit(limit).all()
+
+        return [
+            {
+                "id": a.id,
+                "ad_id": a.ad_id,
+                "page_id": a.page_id,
+                "eu_total_reach": a.eu_total_reach,
+                "age_days": a.age_days,
+                "matched_criteria": a.matched_criteria,
+                "ad_snapshot_url": a.ad_snapshot_url,
+                "date_scan": a.date_scan,
+            }
+            for a in results
+        ]
