@@ -1,5 +1,43 @@
 """
-Page Creative Analysis - Analyse des creatives et recherches en arriere-plan.
+Page Creative Analysis - Analyse des creatives publicitaires.
+
+Ce module fournit deux fonctionnalites principales :
+1. Analyse textuelle des creatives (render_creative_analysis)
+2. Suivi des recherches en arriere-plan (render_background_searches)
+
+Analyse Creative:
+-----------------
+Extrait et analyse le contenu textuel des winning ads pour identifier
+les patterns gagnants :
+
+- **Mots-cles frequents** : Termes les plus utilises dans les textes
+  publicitaires (filtres des stopwords francais)
+- **Emojis populaires** : Detection via regex Unicode pour identifier
+  les emojis qui performent
+- **CTAs detectes** : Liste predefinies de call-to-actions recherchees
+  ("acheter maintenant", "livraison gratuite", etc.)
+- **Statistiques de longueur** : Moyenne des caracteres pour textes/titres
+
+Galerie des creatifs:
+---------------------
+Affiche les winning ads avec apercu :
+- Tri par reach, age ou page
+- Limite configurable (6 a 30 ads)
+- Apercu du texte (80 caracteres)
+- Lien direct vers l'ad
+
+Recherches en arriere-plan:
+---------------------------
+Interface de monitoring temps reel des recherches lancees :
+- Auto-refresh toutes les 5 secondes (si streamlit_autorefresh installe)
+- Progression par phase (1-9)
+- Journal d'activite detaille avec durees
+- Gestion des recherches interrompues (reprise/suppression)
+
+Dependances:
+------------
+- streamlit_autorefresh (optionnel) : Pour le refresh automatique
+- background_worker : Worker de recherche asynchrone
 """
 from datetime import datetime
 from collections import Counter

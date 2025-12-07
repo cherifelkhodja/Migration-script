@@ -1,5 +1,60 @@
 """
-Page Winning Ads - Annonces performantes detectees.
+Page Winning Ads - Detection et analyse des annonces performantes.
+
+Ce module affiche les annonces considerees comme "winning" selon
+des criteres de performance reach/age.
+
+Criteres de Winning Ads:
+------------------------
+Une annonce est winning si elle valide AU MOINS UN de ces criteres :
+
+| Age max | Reach min |  Interpretation                    |
+|---------|-----------|-------------------------------------|
+| <=4j    | >15 000   | Ad tres recente, deja virale       |
+| <=5j    | >20 000   | Excellente traction initiale       |
+| <=6j    | >30 000   | Performance confirmee              |
+| <=7j    | >40 000   | Ad qui scale bien                  |
+| <=8j    | >50 000   | Performance soutenue               |
+| <=15j   | >100 000  | Ad mature performante              |
+| <=22j   | >200 000  | Gros volume sur duree              |
+| <=29j   | >400 000  | Blockbuster                        |
+
+Logique : Plus une ad est recente avec un reach eleve, plus elle
+est performante. Le ratio reach/age est l'indicateur cle.
+
+Filtres disponibles:
+--------------------
+- **Page ID** : Filtrer les winning ads d'une page specifique
+- **Ad ID** : Rechercher une annonce particuliere
+- **Thematique** : Classification Gemini
+- **Sous-categorie** : Affinage de la thematique
+- **Pays** : Filtrage geographique
+- **Periode** : 7, 14, 30, 60 ou 90 jours
+- **Limite** : 50 a 1000, ou "Toutes"
+- **Tri** : Reach, Date de scan, Age de l'ad
+
+Modes de groupement:
+--------------------
+1. **Aucun** : Liste plate triee
+2. **Par Page** : Expanders par page avec total reach
+3. **Par Age** : Tranches 0-4j, 5-7j, 8-14j, 15-21j, 22-30j, 30+j
+
+Statistiques:
+-------------
+- Total winning ads sur la periode
+- Nombre de pages avec winning
+- Reach moyen
+- Critere le plus frequent
+- Top pages (tableau)
+- Graphique repartition par critere
+
+Export CSV personnalise:
+------------------------
+Colonnes selectionnables :
+Page, Page ID, Ad ID, Reach, Age, Critere, Texte Ad, Site, CMS,
+URL Ad, Date scan, Page Facebook, Ad Library
+
+Presets : Essentiel (4 cols), Complet (toutes)
 """
 import streamlit as st
 import pandas as pd

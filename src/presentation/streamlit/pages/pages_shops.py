@@ -1,5 +1,66 @@
 """
-Page Pages/Shops - Liste des pages avec score et export.
+Page Pages/Shops - Exploration et gestion des pages Facebook.
+
+Ce module est le centre de gestion des pages detectees. Il permet
+d'explorer, filtrer, scorer et organiser toutes les pages en base.
+
+Systeme de Score (0-100 points):
+--------------------------------
+Le score de performance est calcule ainsi :
+- **Ads actives** (max 40pts) :
+  - >=150 ads : 40pts | >=80 : 35pts | >=35 : 25pts
+  - >=20 : 15pts | >=10 : 10pts | >=1 : 5pts
+- **Winning Ads** (max 30pts) :
+  - >=10 winning : 30pts | >=5 : 25pts | >=3 : 20pts | >=1 : 15pts
+- **Produits** (max 20pts) :
+  - >=100 : 20pts | >=50 : 15pts | >=20 : 10pts | >=5 : 5pts
+- **Bonus CMS** : Shopify = +10pts
+
+Indicateurs visuels : 🟢 (>=80), 🟡 (>=60), 🟠 (>=40), 🔴 (<40)
+
+Filtres disponibles:
+--------------------
+- Page ID : Recherche exacte par identifiant
+- Recherche texte : Nom ou site (fuzzy)
+- CMS : Shopify, WooCommerce, PrestaShop, Magento, Wix
+- Etat : XXL, XL, L, M, S, XS, inactif
+- Thematique/Classification : Taxonomie Gemini
+- Pays : Filtrage geographique
+- Limite : 50 a 500 resultats
+
+Filtres sauvegardes:
+--------------------
+Possibilite de sauvegarder/charger des combinaisons de filtres
+pour reutilisation rapide.
+
+Modes d'affichage:
+------------------
+1. **Tableau** : Vue compacte avec colonnes configurables
+2. **Detaille** : Expanders avec toutes les infos + actions
+3. **Selection** : Mode checkbox pour actions groupees
+
+Actions groupees (mode Selection):
+----------------------------------
+- Ajouter aux favoris
+- Blacklister
+- Ajouter a une collection
+- Appliquer un tag
+
+Actions individuelles (mode Detaille):
+--------------------------------------
+- Toggle favori
+- Lien Ads Library
+- Ajout a collection
+- Ajout de tag
+- Notes personnalisees
+- Modification de classification
+- Blacklist
+
+Export CSV:
+-----------
+Colonnes personnalisables :
+Page ID, Nom, Site, CMS, Etat, Ads, Winning, Produits, Score,
+Dernier Scan, Thematique, Sous-categorie, Ads Library, Page Facebook
 """
 from datetime import datetime
 import streamlit as st

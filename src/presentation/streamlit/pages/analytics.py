@@ -1,5 +1,30 @@
 """
-Page Analytics - Analyses avancees.
+Page Analytics - Tableaux de bord et analyses statistiques.
+
+Ce module fournit des visualisations et statistiques sur la base
+de donnees des pages publicitaires.
+
+Fonctionnalites:
+----------------
+- Distribution par etat (XS -> XXL): Repartition des pages par activite
+- Distribution par CMS: Shopify, WooCommerce, PrestaShop, etc.
+- Thematiques: Secteurs/niches les plus representes
+- Evolution temporelle: Tendances sur les 30 derniers jours
+- Export CSV: Telechargement des donnees filtrees
+
+Metriques cles:
+---------------
+- Total pages en base
+- Taux d'activite (pages actives / total)
+- Top CMS par volume
+- Evolution moyenne des ads
+
+Utilisation:
+------------
+Cette page est utile pour:
+- Comprendre la composition de sa base de donnees
+- Identifier les niches surrepresentees ou sous-representees
+- Suivre l'evolution des scans dans le temps
 """
 from datetime import datetime
 import streamlit as st

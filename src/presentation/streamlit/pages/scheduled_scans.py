@@ -1,5 +1,48 @@
 """
-Page Scans Programmes - Automatisation des recherches.
+Page Scans Programmes - Automatisation des recherches recurrentes.
+
+Ce module permet de configurer des recherches automatiques qui
+s'executeront periodiquement sans intervention manuelle.
+
+Fonctionnalites:
+----------------
+- Creation de scans programmes avec mots-cles
+- Configuration pays et langues
+- Choix de la frequence (quotidien, hebdomadaire, mensuel)
+- Activation/desactivation des scans
+- Historique d'execution (dernier run, prochain run)
+
+Configuration d'un scan:
+------------------------
+- **Nom** : Identifiant du scan (ex: "Veille mode femme")
+- **Mots-cles** : Un mot-cle par ligne
+- **Pays** : Selection multiple parmi AVAILABLE_COUNTRIES
+- **Langues** : Selection multiple parmi AVAILABLE_LANGUAGES
+- **Frequence** :
+  - daily : Tous les jours
+  - weekly : Une fois par semaine
+  - monthly : Une fois par mois
+
+Execution:
+----------
+L'execution automatique necessite un scheduler externe (cron job
+ou task scheduler) qui appellera le point d'entree de scan.
+
+Exemple crontab pour execution quotidienne a 3h :
+```
+0 3 * * * cd /app && python -m src.run_scheduled_scans
+```
+
+Statut des scans:
+-----------------
+- 🟢 Actif : Le scan sera execute a la prochaine occurrence
+- 🔴 Inactif : Le scan est desactive
+
+Actions disponibles:
+--------------------
+- Toggle actif/inactif
+- Supprimer un scan
+- Executer manuellement (en developpement)
 """
 import streamlit as st
 

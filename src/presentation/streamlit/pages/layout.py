@@ -1,5 +1,49 @@
 """
-Page Layout - Sidebar et Dashboard principal.
+Page Layout - Structure de l'application (Sidebar + Dashboard).
+
+Ce module definit la structure principale de l'interface :
+1. render_sidebar() : Navigation laterale avec toutes les pages
+2. render_dashboard() : Page d'accueil avec KPIs et graphiques
+
+Sidebar (Navigation):
+---------------------
+Organisation en sections :
+- **Main** : Dashboard, Search Ads, Historique, Recherches en cours,
+  Pages/Shops, Watchlists, Alerts
+- **Organisation** : Favoris, Collections, Tags
+- **Analyse** : Monitoring, Analytics, Winning Ads, Creative Analysis
+- **Automation** : Scans Programmes
+- **Config** : Blacklist, Settings
+
+Inclut :
+- Toggle dark mode
+- Indicateur de recherches en cours (avec compteur)
+- Statut de la base de donnees
+
+Dashboard:
+----------
+Vue d'ensemble avec :
+- **KPIs principaux** : Total pages, actives, XXL, Shopify, Winning (7j)
+- **Tendances** : Delta vs semaine precedente, pages montantes/descendantes
+- **Alertes** : Generes automatiquement par le systeme de monitoring
+- **Graphiques** : Repartition par etat et par CMS
+- **Top Performers** : Tableau des meilleures pages avec score
+
+Systeme de Score:
+-----------------
+Calcul du score de performance (0-100) :
+- Etat de la page (XXL=50pts, XL=40pts, etc.)
+- Nombre d'ads (jusqu'a 30pts bonus)
+- Winning ads (jusqu'a 20pts bonus)
+
+Grades : S (>=80), A (>=60), B (>=40), C (>=20), D (<20)
+
+Filtres de classification:
+--------------------------
+Le dashboard supporte les filtres :
+- Thematique (categorie Gemini)
+- Sous-categorie
+- Pays
 """
 import streamlit as st
 import pandas as pd

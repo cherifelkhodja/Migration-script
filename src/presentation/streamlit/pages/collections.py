@@ -1,5 +1,27 @@
 """
-Page Collections - Dossiers de pages.
+Page Collections - Organisation des pages en dossiers thematiques.
+
+Ce module permet de regrouper les pages en collections personnalisees
+pour une organisation optimale de la veille concurrentielle.
+
+Fonctionnalites:
+----------------
+- Creation de collections avec nom, icone et couleur
+- Ajout/suppression de pages dans les collections
+- Vue par collection avec statistiques agregees
+- Suppression de collections
+
+Cas d'usage:
+------------
+- Regrouper les concurrents directs d'un client
+- Creer des collections par niche (Mode, Tech, Beauty, etc.)
+- Suivre un groupe de pages performantes
+- Organiser sa veille par projet/client
+
+Structure:
+----------
+Une page peut appartenir a plusieurs collections simultanement.
+Les collections sont liees aux pages via une table de jointure.
 """
 import streamlit as st
 

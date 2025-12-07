@@ -1,5 +1,27 @@
 """
-Page Blacklist - Gestion des pages exclues.
+Page Blacklist - Gestion des pages exclues des recherches.
+
+Ce module permet d'exclure definitivement certaines pages Facebook
+des resultats de recherche.
+
+Cas d'usage:
+------------
+- Filtrer les concurrents directs qu'on ne souhaite pas suivre
+- Exclure les pages non pertinentes (grandes marques, etc.)
+- Eviter les faux positifs recurrents
+
+Fonctionnalites:
+----------------
+- Ajout manuel par Page ID avec raison optionnelle
+- Suppression individuelle de la blacklist
+- Recherche dans la liste des pages blacklistees
+- Statistiques (total, avec/sans raison)
+
+Impact sur les recherches:
+--------------------------
+Les pages blacklistees sont filtrees a la Phase 2 du pipeline
+de recherche (regroupement par page). Leurs ads sont ignorees
+et ne comptent pas dans les statistiques.
 """
 import streamlit as st
 

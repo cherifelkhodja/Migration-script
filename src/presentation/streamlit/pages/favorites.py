@@ -1,5 +1,37 @@
 """
-Page Favoris - Pages favorites.
+Page Favoris - Acces rapide aux pages marquees comme favorites.
+
+Ce module permet de gerer une liste de pages favorites pour un acces
+rapide aux pages les plus suivies ou interessantes.
+
+Fonctionnalites:
+----------------
+- Affichage des pages favorites avec leurs details
+- Tags associes a chaque page (affichage colore)
+- Notes attachees aux pages
+- Lien direct vers la Facebook Ads Library
+- Suppression des favoris en un clic
+
+Informations affichees:
+-----------------------
+Pour chaque page favorite :
+- Nom de la page et etat (XS a XXL)
+- Nombre d'ads actives
+- Site web associe
+- CMS et nombre de produits
+- Tags (badges colores)
+- Nombre de notes
+
+Cas d'usage:
+------------
+- Marquer les concurrents a surveiller regulierement
+- Creer une shortlist de pages performantes
+- Organiser sa veille quotidienne
+
+Note technique:
+---------------
+Les favoris sont stockes en base via la table dediee.
+Une page peut etre ajoutee/retiree depuis Pages/Shops.
 """
 import streamlit as st
 

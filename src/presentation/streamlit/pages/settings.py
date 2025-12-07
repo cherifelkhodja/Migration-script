@@ -1,5 +1,81 @@
 """
-Page Settings - Parametres avec navigation par onglets.
+Page Settings - Configuration complete de l'application.
+
+Ce module centralise tous les parametres de l'application
+organises en 5 onglets thematiques.
+
+Barre de statut:
+----------------
+Indicateurs rapides en haut de page :
+- Tokens Meta API (actifs/total)
+- Statut base de donnees
+- API Gemini (configure ou non)
+- Nombre de pages en blacklist
+
+Onglet 1 - API & Connexions:
+----------------------------
+**Tokens Meta API** :
+- Ajout/suppression de tokens avec rotation automatique
+- Proxy associe par token (anti-ban)
+- Stats par token : appels, erreurs, rate limits
+- Actions : verifier, activer/desactiver, debloquer, reset
+
+**Base de donnees** :
+- Statut de connexion PostgreSQL
+- Metriques : pages, etats, CMS
+
+**Statistiques API (30j)** :
+- Appels Meta API, ScraperAPI, Web Direct
+- Nombre de rate limits
+
+**Cache API** :
+- Entrees valides/expirees
+- Total hits
+- Nettoyage expire / vider tout
+
+Onglet 2 - Configuration:
+-------------------------
+**Seuils de detection** :
+- min_ads_suivi : Seuil pour table suivi_page
+- min_ads_liste : Seuil pour liste_ads_recherche
+
+**Configuration des etats** :
+- Seuils XS, S, M, L, XL, XXL
+- Apercu visuel des plages
+
+Onglet 3 - Classification:
+--------------------------
+**API Gemini** :
+- Configuration du modele (gemini-1.5-flash, etc.)
+- Test de connectivite
+
+**Taxonomie** :
+- Gestion categories/sous-categories
+- Initialisation taxonomie par defaut
+- Stats de classification
+
+**Lancement classification** :
+- Classifier les pages non classifiees par batch
+
+Onglet 4 - Blacklist:
+---------------------
+- Ajout manuel de pages
+- Liste avec raison et date
+- Suppression individuelle
+
+Onglet 5 - Maintenance:
+-----------------------
+**Migration** :
+- Ajout pays FR aux pages existantes
+- Classification Gemini en masse
+
+**Nettoyage doublons** :
+- Detection doublons ads_recherche et winning_ads
+- Suppression (garde les plus recents)
+
+**Archivage** :
+- Stats tables principales vs archives
+- Archivage donnees > 90 jours
 """
 import os
 import streamlit as st
