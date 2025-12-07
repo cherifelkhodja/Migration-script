@@ -88,6 +88,13 @@ from src.infrastructure.scrapers.web_analyzer import (
     detect_cms_from_url, analyze_website_complete,
     extract_website_from_ads, extract_currency_from_ads
 )
+# MarketSpy V2 - Optimized analyzers
+from src.infrastructure.scrapers.market_spy import (
+    MarketSpy, analyze_homepage_v2, analyze_sitemap_v2
+)
+from src.infrastructure.scrapers.gemini_batch_classifier import (
+    GeminiBatchClassifier, classify_pages_batch_v2
+)
 from src.infrastructure.persistence.database import is_winning_ad, get_etat_from_ads_count
 from src.infrastructure.config import (
     AVAILABLE_COUNTRIES, AVAILABLE_LANGUAGES,
@@ -786,19 +793,20 @@ def run_search_process(
         tracker.finalize_log(status="no_results")
         return
 
-    # PHASE 3: Extraction sites web
-    tracker.start_phase(3, "Extraction sites web", total_phases=8)
+    # PHASE 3+4 FUSIONNEES: Extraction URL + CMS + Metadata (MarketSpy V2)
+    # Une seule requete HTTP par site au lieu de 2
+    tracker.start_phase(3, "Analyse Homepage (CMS + Metadata)", total_phases=8)
 
     cached_pages = {}
     if db:
         cached_pages = get_cached_pages_info(db, list(pages_filtered.keys()), cache_days=1)
         valid_cache = sum(1 for c in cached_pages.values() if not c.get("needs_rescan"))
         if valid_cache > 0:
-            st.info(f"{valid_cache} pages en BDD (scan < 1 jour)")
+            st.info(f"📦 {valid_cache} pages en cache BDD (scan < 1 jour)")
 
+    # Etape 1: Extraire URLs depuis les ads (rapide, pas de HTTP)
     for i, (pid, data) in enumerate(pages_filtered.items()):
         cached = cached_pages.get(str(pid), {})
-
         if cached.get("lien_site"):
             data["website"] = cached["lien_site"]
             data["_from_cache"] = True
@@ -806,63 +814,71 @@ def run_search_process(
             data["website"] = extract_website_from_ads(page_ads.get(pid, []))
             data["_from_cache"] = False
 
-        if i % 10 == 0:
-            tracker.update_step("Extraction URL", i + 1, len(pages_filtered))
-
-    sites_found = sum(1 for d in pages_filtered.values() if d["website"])
-    cached_sites = sum(1 for d in pages_filtered.values() if d.get("_from_cache"))
-
-    phase3_stats = {
-        "Sites trouves": sites_found,
-        "Sites en cache": cached_sites,
-        "Nouveaux sites": sites_found - cached_sites,
-    }
-    tracker.complete_phase(f"{sites_found} sites ({cached_sites} en cache)", stats=phase3_stats)
-
-    # PHASE 4: Detection CMS (multithreaded)
-    tracker.start_phase(4, "Detection CMS (parallele)", total_phases=8)
     pages_with_sites = {pid: data for pid, data in pages_filtered.items() if data["website"]}
+    sites_from_cache = sum(1 for d in pages_with_sites.values() if d.get("_from_cache"))
 
-    pages_need_cms = []
+    # Etape 2: Identifier les pages necessitant une analyse
+    pages_need_analysis = []
+    cms_cached_count = 0
+
     for pid, data in pages_with_sites.items():
         cached = cached_pages.get(str(pid), {})
+        # Utiliser cache si CMS connu
         if cached.get("cms") and cached["cms"] not in ("Unknown", "Inconnu", ""):
             data["cms"] = cached["cms"]
             data["is_shopify"] = cached["cms"] == "Shopify"
+            data["theme"] = cached.get("template", "Unknown")
             data["_cms_cached"] = True
+            # Copier aussi les metadata du cache
+            if cached.get("site_title"):
+                data["_site_title"] = cached.get("site_title", "")
+                data["_site_description"] = cached.get("site_description", "")
+                data["_site_h1"] = cached.get("site_h1", "")
+            cms_cached_count += 1
         else:
-            pages_need_cms.append((pid, data))
+            pages_need_analysis.append((pid, data))
             data["_cms_cached"] = False
 
-    cms_cached_count = len(pages_with_sites) - len(pages_need_cms)
+    st.info(f"🔍 {len(pages_need_analysis)} sites a analyser ({cms_cached_count} CMS en cache)")
 
-    st.info(f"{len(pages_need_cms)} sites a analyser ({cms_cached_count} CMS en cache)")
-
-    def detect_cms_worker(pid_data):
-        pid, data = pid_data
-        try:
-            cms_name = detect_cms_from_url(data["website"])
-            return pid, cms_name if cms_name else "Unknown"
-        except Exception:
-            return pid, "Unknown"
-
-    if pages_need_cms:
+    # Etape 3: Analyse MarketSpy V2 en parallele (1 requete = CMS + Theme + Metadata)
+    if pages_need_analysis:
         completed = 0
+
+        def analyze_homepage_worker(pid_data):
+            pid, data = pid_data
+            try:
+                result = analyze_homepage_v2(data["website"])
+                return pid, result
+            except Exception as e:
+                return pid, {"cms": "Unknown", "error": str(e)[:50]}
+
         with ThreadPoolExecutor(max_workers=8) as executor:
-            futures = {executor.submit(detect_cms_worker, item): item[0] for item in pages_need_cms}
+            futures = {executor.submit(analyze_homepage_worker, item): item[0] for item in pages_need_analysis}
 
             for future in as_completed(futures):
-                pid, cms_name = future.result()
-                pages_with_sites[pid]["cms"] = cms_name
-                pages_with_sites[pid]["is_shopify"] = (cms_name == "Shopify")
-                completed += 1
+                pid, result = future.result()
+                data = pages_with_sites[pid]
 
+                # Mettre a jour avec les resultats MarketSpy
+                data["cms"] = result.get("cms", "Unknown")
+                data["is_shopify"] = result.get("is_shopify", False)
+                data["theme"] = result.get("theme", "Unknown")
+                data["_site_title"] = result.get("site_title", "")
+                data["_site_description"] = result.get("site_description", "")
+                data["_site_h1"] = result.get("site_h1", "")
+                if result.get("currency_from_site") and not data.get("currency"):
+                    data["currency"] = result["currency_from_site"]
+                if result.get("final_url"):
+                    data["website"] = result["final_url"]
+
+                completed += 1
                 if completed % 5 == 0:
-                    tracker.update_step("Analyse CMS", completed, len(pages_need_cms))
+                    tracker.update_step("Analyse Homepage", completed, len(pages_need_analysis))
 
     tracker.clear_detail_logs()
 
-    # Filter by CMS
+    # Etape 4: Filtrage par CMS selectionnes (AVANT Phase 5 pour economiser les requetes API)
     known_cms_list = ["Shopify", "WooCommerce", "PrestaShop", "Magento", "Wix", "Squarespace", "BigCommerce", "Webflow"]
 
     def cms_matches(cms_name):
@@ -874,12 +890,33 @@ def run_search_process(
 
     pages_with_cms = {pid: data for pid, data in pages_with_sites.items() if cms_matches(data.get("cms", "Unknown"))}
 
-    phase4_stats = {
-        "Pages analysees": len(pages_with_sites),
+    # Statistiques Phase 3+4
+    phase34_stats = {
+        "Sites avec URL": len(pages_with_sites),
+        "URLs en cache": sites_from_cache,
         "CMS en cache": cms_cached_count,
-        "Pages CMS selectionnes": len(pages_with_cms),
+        "Sites analyses": len(pages_need_analysis),
+        "Pages CMS match": len(pages_with_cms),
     }
-    tracker.complete_phase(f"{len(pages_with_cms)} pages avec CMS selectionnes", stats=phase4_stats)
+    tracker.complete_phase(f"{len(pages_with_cms)} pages {selected_cms}", stats=phase34_stats)
+
+    # Phase 4 devient un simple log (deja fait dans Phase 3)
+    tracker.start_phase(4, "Filtrage CMS", total_phases=8)
+    cms_distribution = {}
+    for data in pages_with_sites.values():
+        cms = data.get("cms", "Unknown")
+        cms_distribution[cms] = cms_distribution.get(cms, 0) + 1
+
+    phase4_stats = {
+        "Total pages": len(pages_with_sites),
+        "Retenues": len(pages_with_cms),
+        "Exclues": len(pages_with_sites) - len(pages_with_cms),
+    }
+    # Ajouter distribution CMS
+    for cms, count in sorted(cms_distribution.items(), key=lambda x: -x[1])[:5]:
+        phase4_stats[f"  {cms}"] = count
+
+    tracker.complete_phase(f"{len(pages_with_cms)} pages retenues apres filtre CMS", stats=phase4_stats)
 
     # PHASE 5: Comptage des annonces
     tracker.start_phase(5, "Comptage des annonces (batch)", total_phases=8)
@@ -927,11 +964,14 @@ def run_search_process(
         st.warning("Aucune page finale trouvee")
         return
 
-    # PHASE 6: Analyse sites web + Classification Gemini
-    tracker.start_phase(6, "Analyse sites web + Classification", total_phases=8)
+    # PHASE 6: Analyse Sitemap (Shopify only) + Classification Gemini V2
+    # Sitemap streaming avec limites budgetaires
+    # Classification batch optimisee (10 sites/appel)
+    tracker.start_phase(6, "Sitemap + Classification Gemini", total_phases=8)
     web_results = {}
 
-    pages_need_analysis = []
+    # Etape 1: Verifier le cache pour le comptage produits
+    pages_need_sitemap = []
     pages_cached = 0
 
     for pid, data in pages_final.items():
@@ -942,48 +982,66 @@ def run_search_process(
         has_thematique = bool(cached.get("thematique"))
 
         if is_recent and has_analysis and has_thematique:
+            # Utiliser les donnees du cache
             web_results[pid] = {
                 "product_count": cached.get("nombre_produits", 0),
-                "theme": cached.get("template", ""),
+                "theme": data.get("theme", cached.get("template", "")),
                 "category": cached.get("thematique", ""),
                 "currency_from_site": cached.get("devise", ""),
+                "site_title": data.get("_site_title", ""),
+                "site_description": data.get("_site_description", ""),
+                "site_h1": data.get("_site_h1", ""),
                 "_from_cache": True,
                 "_skip_classification": True
             }
             if cached.get("devise") and not data.get("currency"):
                 data["currency"] = cached["devise"]
             pages_cached += 1
-        elif data.get("website"):
-            pages_need_analysis.append((pid, data))
+        else:
+            # Preparer les donnees avec les metadata deja extraites en Phase 3
+            web_results[pid] = {
+                "product_count": "N/A",  # Sera mis a jour si Shopify
+                "theme": data.get("theme", "Unknown"),
+                "site_title": data.get("_site_title", ""),
+                "site_description": data.get("_site_description", ""),
+                "site_h1": data.get("_site_h1", ""),
+                "currency_from_site": data.get("currency", ""),
+                "_from_cache": False,
+                "_skip_classification": False
+            }
+            # Sitemap seulement pour Shopify
+            if data.get("is_shopify") and data.get("website"):
+                pages_need_sitemap.append((pid, data))
 
-    st.info(f"{len(pages_need_analysis)} sites a analyser ({pages_cached} en cache)")
+    st.info(f"📊 {len(pages_need_sitemap)} sitemaps Shopify a analyser ({pages_cached} en cache)")
 
-    def analyze_web_worker(pid_data):
-        pid, data = pid_data
-        url = data.get("website", "")
-        try:
-            result = analyze_website_complete(url, countries[0])
-            return pid, result
-        except Exception as e:
-            return pid, {"product_count": 0, "error": str(e)}
-
-    if pages_need_analysis:
+    # Etape 2: Analyse Sitemap MarketSpy V2 (Shopify uniquement)
+    if pages_need_sitemap:
         completed = 0
+
+        def analyze_sitemap_worker(pid_data):
+            pid, data = pid_data
+            try:
+                result = analyze_sitemap_v2(data["website"], countries[0] if countries else "FR")
+                return pid, result
+            except Exception as e:
+                return pid, {"product_count": "N/A", "error": str(e)[:50]}
+
         with ThreadPoolExecutor(max_workers=8) as executor:
-            futures = {executor.submit(analyze_web_worker, item): item[0] for item in pages_need_analysis}
+            futures = {executor.submit(analyze_sitemap_worker, item): item[0] for item in pages_need_sitemap}
 
             for future in as_completed(futures):
                 pid, result = future.result()
-                web_results[pid] = result
-                data = pages_final[pid]
-                if not data.get("currency") and result.get("currency_from_site"):
-                    data["currency"] = result["currency_from_site"]
+                if pid in web_results:
+                    web_results[pid]["product_count"] = result.get("product_count", "N/A")
+                    if result.get("product_titles"):
+                        web_results[pid]["product_titles"] = result["product_titles"]
+
                 completed += 1
-
                 if completed % 5 == 0:
-                    tracker.update_step("Analyse web", completed, len(pages_need_analysis))
+                    tracker.update_step("Analyse Sitemap", completed, len(pages_need_sitemap))
 
-    # Classification Gemini
+    # Etape 3: Classification Gemini V2 (batch de 10 sites)
     classified_count = 0
     gemini_key = os.getenv("GEMINI_API_KEY", "")
 
@@ -991,6 +1049,7 @@ def run_search_process(
     for pid, web_data in web_results.items():
         if web_data.get("_skip_classification"):
             continue
+        # Verifier si on a du contenu pour classifier
         has_content = web_data.get("site_title") or web_data.get("site_description") or web_data.get("site_h1")
         if has_content:
             pages_to_classify_data.append({
@@ -999,16 +1058,17 @@ def run_search_process(
                 "site_title": web_data.get("site_title", ""),
                 "site_description": web_data.get("site_description", ""),
                 "site_h1": web_data.get("site_h1", ""),
-                "site_keywords": web_data.get("site_keywords", "")
+                "product_titles": web_data.get("product_titles", [])
             })
 
     if gemini_key and pages_to_classify_data:
         tracker.update_step("Classification Gemini", 0, 1)
-        st.info(f"Classification de {len(pages_to_classify_data)} pages avec Gemini...")
+        batch_count = (len(pages_to_classify_data) + 9) // 10  # Batch de 10 max
+        st.info(f"🤖 Classification de {len(pages_to_classify_data)} pages ({batch_count} batches Gemini)")
 
         try:
-            from src.infrastructure.external_services.gemini_classifier import classify_pages_batch
-            classification_results = classify_pages_batch(db, pages_to_classify_data)
+            # Utiliser le nouveau classifieur batch optimise
+            classification_results = classify_pages_batch_v2(db, pages_to_classify_data)
 
             for pid, classification in classification_results.items():
                 if pid in web_results:
@@ -1017,18 +1077,18 @@ def run_search_process(
                     web_results[pid]["gemini_confidence"] = classification.get("confidence", 0.0)
 
             classified_count = len(classification_results)
-            st.success(f"{classified_count} pages classifiees")
+            st.success(f"✅ {classified_count} pages classifiees")
 
         except Exception as e:
-            st.warning(f"Classification Gemini: {str(e)[:100]}")
+            st.warning(f"⚠️ Classification Gemini: {str(e)[:100]}")
     elif not gemini_key and pages_to_classify_data:
-        st.warning("Cle Gemini non configuree - classification ignoree")
+        st.warning("⚠️ Cle Gemini non configuree - classification ignoree")
 
     phase6_stats = {
         "Sites totaux": len(web_results),
         "En cache": pages_cached,
-        "Analyses": len(pages_need_analysis),
-        "Classifiees": classified_count,
+        "Sitemaps analyses": len(pages_need_sitemap),
+        "Sites classifies": classified_count,
     }
     tracker.complete_phase(f"{len(web_results)} sites, {classified_count} classifiees", stats=phase6_stats)
 
