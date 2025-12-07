@@ -4,6 +4,7 @@ Billing Router - Endpoints de facturation.
 Responsabilite unique:
 ----------------------
 Exposer les endpoints checkout, webhook, subscription, portal.
+Delegue la logique metier aux Use Cases.
 
 Endpoints:
 ----------
@@ -26,21 +27,42 @@ from src.presentation.api.billing.schemas import (
 )
 from src.presentation.api.billing.stripe_service import StripeService
 from src.presentation.api.config import get_settings, APISettings
-from src.presentation.api.dependencies import (
-    get_current_user,
-    get_user_repository,
-    get_audit_repository,
-)
+from src.presentation.api.dependencies import get_current_user
 from src.domain.entities.user import User
+from src.domain.ports.user_repository import UserRepository
+from src.domain.ports.audit_repository import AuditRepository
 from src.infrastructure.persistence.auth.sqlalchemy_user_repository import (
     SqlAlchemyUserRepository,
 )
 from src.infrastructure.persistence.auth.sqlalchemy_audit_repository import (
     SqlAlchemyAuditRepository,
 )
+from src.infrastructure.persistence.database import DatabaseManager
+from src.application.use_cases.billing import (
+    HandleCheckoutCompleted,
+    HandleSubscriptionUpdated,
+    HandleSubscriptionCanceled,
+)
 
 
 router = APIRouter(prefix="/billing", tags=["Billing"])
+
+
+# ============ Dependencies ============
+
+def get_db() -> DatabaseManager:
+    """Retourne le DatabaseManager."""
+    return DatabaseManager()
+
+
+def get_user_repository(db: DatabaseManager = Depends(get_db)) -> UserRepository:
+    """Retourne le UserRepository (abstrait)."""
+    return SqlAlchemyUserRepository(db)
+
+
+def get_audit_repository(db: DatabaseManager = Depends(get_db)) -> AuditRepository:
+    """Retourne l'AuditRepository (abstrait)."""
+    return SqlAlchemyAuditRepository(db)
 
 
 def get_stripe_service(
@@ -49,6 +71,8 @@ def get_stripe_service(
     """Retourne le StripeService."""
     return StripeService(settings)
 
+
+# ============ Endpoints ============
 
 @router.post(
     "/checkout",
@@ -60,14 +84,9 @@ def create_checkout(
     data: CheckoutRequest,
     user: User = Depends(get_current_user),
     stripe_service: StripeService = Depends(get_stripe_service),
-    audit_repo: SqlAlchemyAuditRepository = Depends(get_audit_repository),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
 ):
-    """
-    Cree une session de checkout Stripe.
-
-    Returns:
-        URL de checkout et session_id.
-    """
+    """Cree une session de checkout Stripe."""
     try:
         url, session_id = stripe_service.create_checkout_session(
             user_id=user.id,
@@ -77,7 +96,6 @@ def create_checkout(
             cancel_url=data.cancel_url,
         )
 
-        # Audit
         audit_repo.log(
             user_id=user.id,
             username=user.username,
@@ -88,10 +106,7 @@ def create_checkout(
         return CheckoutResponse(checkout_url=url, session_id=session_id)
 
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.post(
@@ -103,40 +118,29 @@ def create_checkout(
 async def stripe_webhook(
     request: Request,
     stripe_service: StripeService = Depends(get_stripe_service),
-    user_repo: SqlAlchemyUserRepository = Depends(get_user_repository),
-    audit_repo: SqlAlchemyAuditRepository = Depends(get_audit_repository),
+    user_repo: UserRepository = Depends(get_user_repository),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
 ):
-    """
-    Traite les webhooks Stripe.
-
-    Events geres:
-    - checkout.session.completed
-    - customer.subscription.updated
-    - customer.subscription.deleted
-    """
+    """Traite les webhooks Stripe via Use Cases."""
     payload = await request.body()
     signature = request.headers.get("stripe-signature", "")
 
     try:
         event = stripe_service.verify_webhook(payload, signature)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e),
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
-    # Traiter selon le type d'event
     event_type = event.get("type")
-    data = event.get("data", {}).get("object", {})
+    event_data = event.get("data", {}).get("object", {})
 
     if event_type == "checkout.session.completed":
-        _handle_checkout_completed(data, user_repo, audit_repo)
+        HandleCheckoutCompleted(user_repo, audit_repo).execute(event_data)
 
     elif event_type == "customer.subscription.updated":
-        _handle_subscription_updated(data, audit_repo)
+        HandleSubscriptionUpdated(audit_repo).execute(event_data)
 
     elif event_type == "customer.subscription.deleted":
-        _handle_subscription_deleted(data, user_repo, audit_repo)
+        HandleSubscriptionCanceled(audit_repo).execute(event_data)
 
     return WebhookResponse(received=True)
 
@@ -151,13 +155,7 @@ def get_subscription(
     user: User = Depends(get_current_user),
     stripe_service: StripeService = Depends(get_stripe_service),
 ):
-    """
-    Retourne le statut d'abonnement.
-
-    Returns:
-        SubscriptionResponse avec status et plan.
-    """
-    # Si pas de stripe_customer_id, pas d'abonnement
+    """Retourne le statut d'abonnement."""
     if not hasattr(user, 'stripe_customer_id') or not user.stripe_customer_id:
         return SubscriptionResponse(status=SubscriptionStatus.NONE)
 
@@ -179,11 +177,7 @@ def create_portal(
     user: User = Depends(get_current_user),
     stripe_service: StripeService = Depends(get_stripe_service),
 ):
-    """
-    Cree une session du portail client Stripe.
-
-    Le portail permet de gerer l'abonnement et les paiements.
-    """
+    """Cree une session du portail client Stripe."""
     if not hasattr(user, 'stripe_customer_id') or not user.stripe_customer_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -196,61 +190,3 @@ def create_portal(
     )
 
     return PortalResponse(portal_url=url)
-
-
-# Handlers internes
-
-def _handle_checkout_completed(
-    data: dict,
-    user_repo: SqlAlchemyUserRepository,
-    audit_repo: SqlAlchemyAuditRepository,
-) -> None:
-    """Traite un checkout complete."""
-    user_id = data.get("metadata", {}).get("user_id")
-    customer_id = data.get("customer")
-
-    if user_id and customer_id:
-        # Sauvegarder le customer_id sur l'utilisateur
-        from uuid import UUID
-        user = user_repo.get_by_id(UUID(user_id))
-        if user:
-            # Note: necessite d'ajouter stripe_customer_id au modele User
-            audit_repo.log(
-                user_id=user.id,
-                username=user.username,
-                action="subscription_created",
-                details={"customer_id": customer_id},
-            )
-
-
-def _handle_subscription_updated(
-    data: dict,
-    audit_repo: SqlAlchemyAuditRepository,
-) -> None:
-    """Traite une mise a jour d'abonnement."""
-    user_id = data.get("metadata", {}).get("user_id")
-    if user_id:
-        from uuid import UUID
-        audit_repo.log(
-            user_id=UUID(user_id),
-            username="system",
-            action="subscription_updated",
-            details={"status": data.get("status")},
-        )
-
-
-def _handle_subscription_deleted(
-    data: dict,
-    user_repo: SqlAlchemyUserRepository,
-    audit_repo: SqlAlchemyAuditRepository,
-) -> None:
-    """Traite une annulation d'abonnement."""
-    user_id = data.get("metadata", {}).get("user_id")
-    if user_id:
-        from uuid import UUID
-        audit_repo.log(
-            user_id=UUID(user_id),
-            username="system",
-            action="subscription_canceled",
-            details={},
-        )

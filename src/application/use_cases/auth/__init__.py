@@ -4,7 +4,7 @@ Use Cases d'authentification.
 Chaque use case a une responsabilite unique:
 - LoginUseCase: Authentifier un utilisateur
 - CreateUserUseCase: Creer un nouvel utilisateur
-- ChangePasswordUseCase: Modifier le mot de passe
+- OAuthLoginUseCase: Authentifier via OAuth (Google, GitHub)
 
 Pattern Command:
 ----------------
@@ -18,6 +18,11 @@ from src.application.use_cases.auth.create_user import (
     CreateUserRequest,
     CreateUserResponse,
 )
+from src.application.use_cases.auth.oauth_login import (
+    OAuthLoginUseCase,
+    OAuthLoginRequest,
+    OAuthLoginResponse,
+)
 
 __all__ = [
     "LoginUseCase",
@@ -26,4 +31,7 @@ __all__ = [
     "CreateUserUseCase",
     "CreateUserRequest",
     "CreateUserResponse",
+    "OAuthLoginUseCase",
+    "OAuthLoginRequest",
+    "OAuthLoginResponse",
 ]

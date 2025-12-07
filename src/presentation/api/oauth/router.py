@@ -4,6 +4,7 @@ OAuth Router - Endpoints OAuth2.
 Responsabilite unique:
 ----------------------
 Exposer les endpoints OAuth (Google, GitHub).
+Delegue la logique metier aux Use Cases.
 
 Endpoints:
 ----------
@@ -14,7 +15,6 @@ Endpoints:
 """
 
 import secrets
-from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status, Depends, Query
 from fastapi.responses import RedirectResponse
@@ -23,20 +23,51 @@ from src.presentation.api.oauth.config import get_oauth_settings, OAuthSettings
 from src.presentation.api.oauth.providers import GoogleOAuth, GitHubOAuth
 from src.presentation.api.auth.jwt_service import JWTService
 from src.presentation.api.config import get_settings, APISettings
-from src.presentation.api.dependencies import get_user_repository
+from src.domain.ports.user_repository import UserRepository
+from src.domain.ports.audit_repository import AuditRepository
+from src.domain.ports.state_storage import StateStorage
 from src.infrastructure.persistence.auth.sqlalchemy_user_repository import (
     SqlAlchemyUserRepository,
 )
-from src.domain.entities.user import User
-from src.domain.value_objects.role import Role
+from src.infrastructure.persistence.auth.sqlalchemy_audit_repository import (
+    SqlAlchemyAuditRepository,
+)
+from src.infrastructure.adapters.memory_state_storage import MemoryStateStorage
+from src.infrastructure.persistence.database import DatabaseManager
+from src.application.use_cases.auth.oauth_login import (
+    OAuthLoginUseCase,
+    OAuthLoginRequest,
+)
 from src.infrastructure.logging import get_logger
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/oauth", tags=["OAuth"])
 
-# State storage (en production, utiliser Redis)
-_oauth_states: dict[str, str] = {}
+# Singleton pour le state storage (en production, injecter Redis)
+_state_storage = MemoryStateStorage()
+
+
+# ============ Dependencies ============
+
+def get_state_storage() -> StateStorage:
+    """Retourne le StateStorage."""
+    return _state_storage
+
+
+def get_db() -> DatabaseManager:
+    """Retourne le DatabaseManager."""
+    return DatabaseManager()
+
+
+def get_user_repository(db: DatabaseManager = Depends(get_db)) -> UserRepository:
+    """Retourne le UserRepository (abstrait)."""
+    return SqlAlchemyUserRepository(db)
+
+
+def get_audit_repository(db: DatabaseManager = Depends(get_db)) -> AuditRepository:
+    """Retourne l'AuditRepository (abstrait)."""
+    return SqlAlchemyAuditRepository(db)
 
 
 def get_jwt_service(
@@ -44,6 +75,14 @@ def get_jwt_service(
 ) -> JWTService:
     """Retourne le JWTService."""
     return JWTService(settings)
+
+
+def get_oauth_login_use_case(
+    user_repo: UserRepository = Depends(get_user_repository),
+    audit_repo: AuditRepository = Depends(get_audit_repository),
+) -> OAuthLoginUseCase:
+    """Retourne le OAuthLoginUseCase."""
+    return OAuthLoginUseCase(user_repo, audit_repo)
 
 
 # ============ Google ============
@@ -55,6 +94,7 @@ def get_jwt_service(
 )
 def google_login(
     oauth_settings: OAuthSettings = Depends(get_oauth_settings),
+    state_storage: StateStorage = Depends(get_state_storage),
 ):
     """Initie le flux OAuth Google."""
     if not oauth_settings.google_enabled:
@@ -63,14 +103,11 @@ def google_login(
             detail="Google OAuth non configure",
         )
 
-    # Generer state anti-CSRF
     state = secrets.token_urlsafe(32)
-    _oauth_states[state] = "google"
+    state_storage.set(f"oauth:{state}", "google", ttl_seconds=600)
 
     provider = GoogleOAuth(oauth_settings)
-    auth_url = provider.get_authorization_url(state)
-
-    return RedirectResponse(url=auth_url)
+    return RedirectResponse(url=provider.get_authorization_url(state))
 
 
 @router.get(
@@ -82,19 +119,16 @@ async def google_callback(
     code: str = Query(...),
     state: str = Query(...),
     oauth_settings: OAuthSettings = Depends(get_oauth_settings),
-    user_repo: SqlAlchemyUserRepository = Depends(get_user_repository),
+    state_storage: StateStorage = Depends(get_state_storage),
+    use_case: OAuthLoginUseCase = Depends(get_oauth_login_use_case),
     jwt_service: JWTService = Depends(get_jwt_service),
 ):
     """Traite le callback Google."""
-    # Verifier state
-    if state not in _oauth_states or _oauth_states[state] != "google":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="State invalide",
-        )
-    del _oauth_states[state]
+    stored = state_storage.get(f"oauth:{state}")
+    if stored != "google":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="State invalide")
+    state_storage.delete(f"oauth:{state}")
 
-    # Recuperer les infos utilisateur
     provider = GoogleOAuth(oauth_settings)
     user_info = await provider.get_user_info(code)
 
@@ -104,27 +138,20 @@ async def google_callback(
             detail="Impossible de recuperer les informations Google",
         )
 
-    # Trouver ou creer l'utilisateur
-    user = await _find_or_create_oauth_user(user_repo, user_info)
-
-    # Generer les tokens
-    tokens = jwt_service.create_tokens(user.id, user.role.name)
-
-    logger.info(
-        "oauth_login_success",
+    response = use_case.execute(OAuthLoginRequest(
         provider="google",
-        user_id=str(user.id),
+        provider_id=user_info.provider_id,
         email=user_info.email,
-    )
+        name=user_info.name,
+    ))
 
-    # Rediriger vers le frontend avec le token
-    # En production, rediriger vers une page qui stocke le token
-    return {
-        "message": "Authentification reussie",
-        "provider": "google",
-        "email": user_info.email,
-        **tokens,
-    }
+    if not response.success:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=response.error)
+
+    tokens = jwt_service.create_tokens(response.user.id, response.user.role.name)
+    logger.info("oauth_login", provider="google", user_id=str(response.user.id))
+
+    return {"message": "Authentification reussie", "provider": "google", **tokens}
 
 
 # ============ GitHub ============
@@ -136,6 +163,7 @@ async def google_callback(
 )
 def github_login(
     oauth_settings: OAuthSettings = Depends(get_oauth_settings),
+    state_storage: StateStorage = Depends(get_state_storage),
 ):
     """Initie le flux OAuth GitHub."""
     if not oauth_settings.github_enabled:
@@ -144,14 +172,11 @@ def github_login(
             detail="GitHub OAuth non configure",
         )
 
-    # Generer state anti-CSRF
     state = secrets.token_urlsafe(32)
-    _oauth_states[state] = "github"
+    state_storage.set(f"oauth:{state}", "github", ttl_seconds=600)
 
     provider = GitHubOAuth(oauth_settings)
-    auth_url = provider.get_authorization_url(state)
-
-    return RedirectResponse(url=auth_url)
+    return RedirectResponse(url=provider.get_authorization_url(state))
 
 
 @router.get(
@@ -163,19 +188,16 @@ async def github_callback(
     code: str = Query(...),
     state: str = Query(...),
     oauth_settings: OAuthSettings = Depends(get_oauth_settings),
-    user_repo: SqlAlchemyUserRepository = Depends(get_user_repository),
+    state_storage: StateStorage = Depends(get_state_storage),
+    use_case: OAuthLoginUseCase = Depends(get_oauth_login_use_case),
     jwt_service: JWTService = Depends(get_jwt_service),
 ):
     """Traite le callback GitHub."""
-    # Verifier state
-    if state not in _oauth_states or _oauth_states[state] != "github":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="State invalide",
-        )
-    del _oauth_states[state]
+    stored = state_storage.get(f"oauth:{state}")
+    if stored != "github":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="State invalide")
+    state_storage.delete(f"oauth:{state}")
 
-    # Recuperer les infos utilisateur
     provider = GitHubOAuth(oauth_settings)
     user_info = await provider.get_user_info(code)
 
@@ -185,66 +207,17 @@ async def github_callback(
             detail="Impossible de recuperer les informations GitHub",
         )
 
-    # Trouver ou creer l'utilisateur
-    user = await _find_or_create_oauth_user(user_repo, user_info)
-
-    # Generer les tokens
-    tokens = jwt_service.create_tokens(user.id, user.role.name)
-
-    logger.info(
-        "oauth_login_success",
+    response = use_case.execute(OAuthLoginRequest(
         provider="github",
-        user_id=str(user.id),
+        provider_id=user_info.provider_id,
         email=user_info.email,
-    )
+        name=user_info.name,
+    ))
 
-    return {
-        "message": "Authentification reussie",
-        "provider": "github",
-        "email": user_info.email,
-        **tokens,
-    }
+    if not response.success:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=response.error)
 
+    tokens = jwt_service.create_tokens(response.user.id, response.user.role.name)
+    logger.info("oauth_login", provider="github", user_id=str(response.user.id))
 
-# ============ Helpers ============
-
-async def _find_or_create_oauth_user(
-    user_repo: SqlAlchemyUserRepository,
-    user_info,
-) -> User:
-    """
-    Trouve ou cree un utilisateur OAuth.
-
-    Args:
-        user_repo: Repository utilisateurs.
-        user_info: Infos du provider OAuth.
-
-    Returns:
-        Utilisateur trouve ou cree.
-    """
-    # Chercher par email
-    existing = user_repo.get_by_email(user_info.email)
-
-    if existing:
-        return existing
-
-    # Creer un nouvel utilisateur
-    username = user_info.email.split("@")[0]
-    base_username = username
-
-    # S'assurer que le username est unique
-    counter = 1
-    while user_repo.get_by_username(username):
-        username = f"{base_username}{counter}"
-        counter += 1
-
-    # Creer sans mot de passe (OAuth only)
-    new_user = User(
-        id=uuid4(),
-        username=username,
-        email=user_info.email,
-        password_hash="",  # Pas de password pour OAuth
-        role=Role.viewer(),
-    )
-
-    return user_repo.save(new_user)
+    return {"message": "Authentification reussie", "provider": "github", **tokens}
