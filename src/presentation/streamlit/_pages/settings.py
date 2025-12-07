@@ -892,7 +892,7 @@ def render_settings_maintenance_tab(db):
                         SearchLog, SearchQueue, APICallLog,
                         PageSearchHistory, WinningAdSearchHistory,
                         Tag, PageTag, PageNote, Favorite, Collection, CollectionPage,
-                        Blacklist, SavedFilter, ScheduledScan, Taxonomy
+                        Blacklist, SavedFilter, ScheduledScan, ClassificationTaxonomy
                     )
 
                     tables_to_clear = [
@@ -901,7 +901,7 @@ def render_settings_maintenance_tab(db):
                         WinningAds, AdsRecherche, SuiviPage,
                         PageTag, PageNote, CollectionPage, Collection,
                         Tag, Favorite, Blacklist, SavedFilter, ScheduledScan,
-                        Taxonomy, PageRecherche
+                        ClassificationTaxonomy, PageRecherche
                     ]
 
                     deleted_counts = {}
