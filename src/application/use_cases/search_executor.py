@@ -9,6 +9,7 @@ import time
 import json
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Callable
+from uuid import UUID
 from collections import defaultdict, Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -166,7 +167,8 @@ def execute_background_search(
     cms_filter: List[str],
     ads_min: int = 3,
     countries: str = "FR",
-    languages: str = "fr"
+    languages: str = "fr",
+    user_id: Optional[UUID] = None
 ) -> Dict[str, Any]:
     """
     Exécute une recherche complète en arrière-plan.
@@ -179,6 +181,7 @@ def execute_background_search(
         ads_min: Nombre minimum d'ads
         countries: Pays (code)
         languages: Langues (code)
+        user_id: UUID de l'utilisateur pour multi-tenancy. Si None, donnees partagees.
 
     Returns:
         Dict avec les résultats et search_log_id
@@ -249,7 +252,8 @@ def execute_background_search(
         countries=countries,
         languages=languages,
         min_ads=ads_min,
-        selected_cms=cms_filter
+        selected_cms=cms_filter,
+        user_id=user_id
     )
 
     # Créer l'API tracker
@@ -257,7 +261,7 @@ def execute_background_search(
     set_current_tracker(api_tracker)
 
     # Récupérer la blacklist
-    blacklist_ids = get_blacklist_ids(db)
+    blacklist_ids = get_blacklist_ids(db, user_id=user_id)
     print(f"[Search #{search_id}] {len(blacklist_ids)} pages en blacklist")
 
     # ═══ PHASE 1: Recherche par mots-clés (parallèle si proxies) ═══
@@ -843,7 +847,7 @@ def execute_background_search(
                 existing_ad_ids = {a.ad_id for a in existing_ads}
 
         tracker.update_step("Sauvegarde pages", 1, 5)
-        pages_result = save_pages_recherche(db, pages_final, web_results, countries_list, languages_list, None, log_id)
+        pages_result = save_pages_recherche(db, pages_final, web_results, countries_list, languages_list, None, log_id, user_id=user_id)
         # Gérer le retour tuple (total, new, existing)
         if isinstance(pages_result, tuple):
             pages_saved, pages_new, pages_existing = pages_result
@@ -853,13 +857,13 @@ def execute_background_search(
             pages_existing = 0
 
         tracker.update_step("Sauvegarde suivi", 2, 5)
-        suivi_saved = save_suivi_page(db, pages_final, web_results, MIN_ADS_SUIVI)
+        suivi_saved = save_suivi_page(db, pages_final, web_results, MIN_ADS_SUIVI, user_id=user_id)
 
         tracker.update_step("Sauvegarde annonces", 3, 5)
-        ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries_list, MIN_ADS_LISTE)
+        ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries_list, MIN_ADS_LISTE, user_id=user_id)
 
         tracker.update_step("Sauvegarde winning ads", 4, 5)
-        winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data, log_id)
+        winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data, log_id, user_id=user_id)
 
         # ═══ Enregistrer l'historique de recherche ═══
         tracker.update_step("Historique recherche", 5, 5)
@@ -897,8 +901,10 @@ def execute_background_search(
                 })
 
         # Enregistrer l'historique
-        pages_history_count = record_pages_search_history_batch(db, log_id, pages_history_data)
-        winning_history_count = record_winning_ads_search_history_batch(db, log_id, winning_history_data)
+        page_ids_for_history = [d["page_id"] for d in pages_history_data]
+        pages_history_count = record_pages_search_history_batch(db, page_ids_for_history, log_id, user_id=user_id)
+        ad_ids_for_history = [d["ad_id"] for d in winning_history_data]
+        winning_history_count = record_winning_ads_search_history_batch(db, ad_ids_for_history, log_id, user_id=user_id)
 
         new_pages_count = sum(1 for d in pages_history_data if d.get("was_new"))
         new_winning_count = sum(1 for d in winning_history_data if d.get("was_new"))

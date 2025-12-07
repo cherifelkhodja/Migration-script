@@ -151,6 +151,7 @@ class BackgroundSearchWorker:
                 ads_min = search.ads_min
                 countries = search.countries
                 languages = search.languages
+                user_id = search.user_id  # Multi-tenancy
 
             # Marquer comme en cours
             update_search_queue_status(db, search_id, "running")
@@ -165,7 +166,8 @@ class BackgroundSearchWorker:
                 cms_filter=cms_filter,
                 ads_min=ads_min,
                 countries=countries,
-                languages=languages
+                languages=languages,
+                user_id=user_id
             )
 
             # Marquer comme termine
@@ -202,7 +204,8 @@ class BackgroundSearchWorker:
         countries: str = "FR",
         languages: str = "fr",
         user_session: str = None,
-        priority: int = 0
+        priority: int = 0,
+        user_id=None
     ) -> int:
         """
         Soumet une nouvelle recherche.
@@ -215,6 +218,7 @@ class BackgroundSearchWorker:
             languages: Langues
             user_session: ID de session utilisateur
             priority: Priorite (0 = normale)
+            user_id: UUID de l'utilisateur pour multi-tenancy
 
         Returns:
             ID de la recherche creee
@@ -230,7 +234,8 @@ class BackgroundSearchWorker:
             countries=countries,
             languages=languages,
             user_session=user_session,
-            priority=priority
+            priority=priority,
+            user_id=user_id
         )
 
         print(f"[BackgroundWorker] Recherche #{search_id} ajoutee a la queue")

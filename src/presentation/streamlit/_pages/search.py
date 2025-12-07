@@ -148,6 +148,10 @@ def render_keyword_search():
     """Recherche par mots-clés"""
     from src.presentation.streamlit.dashboard import add_to_search_history
 
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
+
     # ═══ CHAMPS ESSENTIELS (toujours visibles) ═══
     st.subheader("🎯 Recherche rapide")
 
@@ -229,7 +233,8 @@ def render_keyword_search():
                 cms_filter=selected_cms if selected_cms else ["Shopify"],
                 ads_min=min_ads,
                 countries=",".join(countries) if countries else "FR",
-                languages=",".join(languages) if languages else ""
+                languages=",".join(languages) if languages else "",
+                user_id=user_id
             )
 
             st.success(f"✅ Recherche #{search_id} ajoutée à la file d'attente!")

@@ -218,20 +218,25 @@ def create_search_queue(
     countries: str = "FR",
     languages: str = "",
     min_ads: int = 1,
+    ads_min: int = None,  # Alias for min_ads
     cms_filter: str = "",
     user_session: str = None,
+    priority: int = 0,
     user_id: Optional[UUID] = None
 ) -> int:
     """Cree une recherche en queue."""
+    # Support both min_ads and ads_min parameter names
+    actual_min_ads = ads_min if ads_min is not None else min_ads
     with db.get_session() as session:
         search = SearchQueue(
             user_id=user_id,
             keywords=keywords,
             countries=countries,
             languages=languages,
-            min_ads=min_ads,
+            min_ads=actual_min_ads,
             cms_filter=cms_filter,
             user_session=user_session,
+            priority=priority,
             status="pending",
             created_at=datetime.utcnow(),
         )
