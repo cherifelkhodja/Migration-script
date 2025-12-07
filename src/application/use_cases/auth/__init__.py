@@ -5,6 +5,8 @@ Chaque use case a une responsabilite unique:
 - LoginUseCase: Authentifier un utilisateur
 - CreateUserUseCase: Creer un nouvel utilisateur
 - OAuthLoginUseCase: Authentifier via OAuth (Google, GitHub)
+- RequestPasswordResetUseCase: Demander un reset de mot de passe
+- ResetPasswordUseCase: Executer le reset de mot de passe
 
 Pattern Command:
 ----------------
@@ -23,6 +25,16 @@ from src.application.use_cases.auth.oauth_login import (
     OAuthLoginRequest,
     OAuthLoginResponse,
 )
+from src.application.use_cases.auth.request_password_reset import (
+    RequestPasswordResetUseCase,
+    RequestPasswordResetRequest,
+    RequestPasswordResetResponse,
+)
+from src.application.use_cases.auth.reset_password import (
+    ResetPasswordUseCase,
+    ResetPasswordRequest,
+    ResetPasswordResponse,
+)
 
 __all__ = [
     "LoginUseCase",
@@ -34,4 +46,10 @@ __all__ = [
     "OAuthLoginUseCase",
     "OAuthLoginRequest",
     "OAuthLoginResponse",
+    "RequestPasswordResetUseCase",
+    "RequestPasswordResetRequest",
+    "RequestPasswordResetResponse",
+    "ResetPasswordUseCase",
+    "ResetPasswordRequest",
+    "ResetPasswordResponse",
 ]

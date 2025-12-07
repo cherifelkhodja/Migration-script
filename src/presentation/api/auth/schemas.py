@@ -72,3 +72,42 @@ class ErrorResponse(BaseModel):
 
     error: str
     detail: Optional[str] = None
+
+
+class ForgotPasswordRequest(BaseModel):
+    """
+    Requete de demande de reset de mot de passe.
+
+    Example:
+        {"email": "user@example.com"}
+    """
+
+    email: str = Field(..., min_length=5)
+
+
+class ForgotPasswordResponse(BaseModel):
+    """
+    Reponse de demande de reset.
+
+    Note: Toujours succes pour eviter enumeration d'emails.
+    """
+
+    message: str
+
+
+class ResetPasswordRequest(BaseModel):
+    """
+    Requete de reset de mot de passe.
+
+    Example:
+        {"token": "abc123...", "new_password": "NewSecureP@ss123"}
+    """
+
+    token: str = Field(..., min_length=32)
+    new_password: str = Field(..., min_length=8)
+
+
+class ResetPasswordResponse(BaseModel):
+    """Reponse de reset de mot de passe."""
+
+    message: str

@@ -49,6 +49,9 @@ class APISettings(BaseSettings):
     stripe_price_pro: str = ""
     stripe_price_enterprise: str = ""
 
+    # SendGrid
+    sendgrid_api_key: str = ""
+
 
 @lru_cache
 def get_settings() -> APISettings:

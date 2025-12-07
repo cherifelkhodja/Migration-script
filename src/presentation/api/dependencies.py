@@ -25,7 +25,14 @@ from src.infrastructure.persistence.auth.sqlalchemy_user_repository import (
 from src.infrastructure.persistence.auth.sqlalchemy_audit_repository import (
     SqlAlchemyAuditRepository,
 )
+from src.infrastructure.adapters.memory_state_storage import MemoryStateStorage
+from src.infrastructure.email.service import EmailService
 from src.domain.entities.user import User
+from src.domain.ports.state_storage import StateStorage
+
+
+# Singleton pour le state storage (en production, remplacer par Redis)
+_state_storage = MemoryStateStorage()
 
 
 # Security scheme
@@ -132,3 +139,15 @@ def require_permission(permission: str):
         return user
 
     return dependency
+
+
+def get_state_storage() -> StateStorage:
+    """Retourne le StateStorage (singleton)."""
+    return _state_storage
+
+
+def get_email_service(
+    settings: APISettings = Depends(get_settings)
+) -> EmailService:
+    """Retourne le EmailService."""
+    return EmailService(api_key=settings.sendgrid_api_key)
