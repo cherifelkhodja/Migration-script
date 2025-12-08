@@ -489,11 +489,27 @@ def _render_errors_list(log: dict):
     if not errors_list or len(errors_list) == 0:
         return
 
+    # Si errors_list est une string JSON, la parser
+    if isinstance(errors_list, str):
+        try:
+            import json
+            errors_list = json.loads(errors_list)
+        except:
+            errors_list = [{"type": "unknown", "message": errors_list}]
+
+    # Si les erreurs sont des strings simples, les convertir en dicts
+    if errors_list and isinstance(errors_list[0], str):
+        errors_list = [{"type": "unknown", "message": err} for err in errors_list]
+
     with st.expander(f"🚨 **{len(errors_list)} erreur(s) detaillee(s)**", expanded=False):
         # Grouper par type d'erreur
         errors_by_type = {}
         for err in errors_list:
-            err_type = err.get("type", "unknown")
+            if isinstance(err, dict):
+                err_type = err.get("type", "unknown")
+            else:
+                err_type = "unknown"
+                err = {"type": "unknown", "message": str(err)}
             if err_type not in errors_by_type:
                 errors_by_type[err_type] = []
             errors_by_type[err_type].append(err)
