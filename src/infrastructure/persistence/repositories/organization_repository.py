@@ -12,6 +12,7 @@ from typing import List, Dict, Optional
 from uuid import UUID
 
 from sqlalchemy import func
+from sqlalchemy.sql import false as sql_false
 
 from src.infrastructure.persistence.models import (
     Blacklist,
@@ -27,10 +28,16 @@ from src.infrastructure.persistence.models import (
 
 
 def _apply_user_filter(query, model, user_id: Optional[UUID]):
-    """Applique le filtre user_id a une query."""
+    """
+    Applique le filtre user_id a une query (isolation stricte).
+
+    Si user_id est fourni: filtre par cet utilisateur.
+    Si user_id est None: retourne un resultat vide (pas d'acces aux donnees partagees).
+    """
     if user_id is not None:
         return query.filter(model.user_id == user_id)
-    return query
+    # Isolation stricte: si pas de user_id, retourner un resultat vide
+    return query.filter(sql_false())
 
 
 # ============================================================================

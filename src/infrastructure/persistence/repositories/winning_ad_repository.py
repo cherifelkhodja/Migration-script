@@ -25,15 +25,22 @@ from uuid import UUID
 
 from sqlalchemy import func, desc, and_, or_
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.sql import false as sql_false
 
 from src.infrastructure.persistence.models import WinningAds, PageRecherche
 
 
 def _apply_user_filter(query, model, user_id: Optional[UUID]):
-    """Applique le filtre user_id a une query."""
+    """
+    Applique le filtre user_id a une query (isolation stricte).
+
+    Si user_id est fourni: filtre par cet utilisateur.
+    Si user_id est None: retourne un resultat vide (pas d'acces aux donnees partagees).
+    """
     if user_id is not None:
         return query.filter(model.user_id == user_id)
-    return query
+    # Isolation stricte: si pas de user_id, retourner un resultat vide
+    return query.filter(sql_false())
 
 
 # Criteres de qualification Winning Ad: (age_max_jours, reach_minimum)

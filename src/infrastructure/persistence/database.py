@@ -57,6 +57,7 @@ from contextlib import contextmanager
 
 from sqlalchemy import create_engine, text, func, desc, and_, or_
 from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.sql import false as sql_false
 
 # Models (re-exports pour compatibilite)
 from src.infrastructure.persistence.models import (
@@ -446,9 +447,12 @@ def search_pages(
     with db.get_session() as session:
         query = session.query(PageRecherche)
 
-        # Multi-tenancy filter
+        # Multi-tenancy filter (isolation stricte)
         if user_id is not None:
             query = query.filter(PageRecherche.user_id == user_id)
+        else:
+            # Isolation stricte: si pas de user_id, retourner un resultat vide
+            query = query.filter(sql_false())
 
         # Filter by days (created_at)
         if days:
