@@ -555,43 +555,57 @@ def update_search_log_phases(db, log_id: int, phases_completed: list) -> bool:
         return True
 
 
-def get_search_logs_stats(db, days: int = 30) -> Dict:
+def get_search_logs_stats(db, days: int = 30, user_id: Optional[UUID] = None) -> Dict:
     """
     Statistiques des logs de recherche.
 
     Args:
         db: Instance DatabaseManager
         days: Nombre de jours a considerer
+        user_id: UUID de l'utilisateur pour multi-tenancy
 
     Returns:
         Dict avec les statistiques des recherches
     """
     cutoff = datetime.utcnow() - timedelta(days=days)
 
+    def apply_user_filter(query):
+        if user_id is not None:
+            return query.filter(SearchLog.user_id == user_id)
+        return query
+
     with db.get_session() as session:
         # Total searches
-        total_searches = session.query(func.count(SearchLog.id)).filter(
-            SearchLog.started_at >= cutoff
+        total_searches = apply_user_filter(
+            session.query(func.count(SearchLog.id)).filter(
+                SearchLog.started_at >= cutoff
+            )
         ).scalar() or 0
 
         # By status
         by_status = {}
         for status in ["completed", "failed", "running", "preview"]:
-            count = session.query(func.count(SearchLog.id)).filter(
-                SearchLog.started_at >= cutoff,
-                SearchLog.status == status
+            count = apply_user_filter(
+                session.query(func.count(SearchLog.id)).filter(
+                    SearchLog.started_at >= cutoff,
+                    SearchLog.status == status
+                )
             ).scalar() or 0
             by_status[status] = count
 
         # Average duration
-        avg_duration = session.query(func.avg(SearchLog.duration_seconds)).filter(
-            SearchLog.started_at >= cutoff,
-            SearchLog.duration_seconds.isnot(None)
+        avg_duration = apply_user_filter(
+            session.query(func.avg(SearchLog.duration_seconds)).filter(
+                SearchLog.started_at >= cutoff,
+                SearchLog.duration_seconds.isnot(None)
+            )
         ).scalar() or 0
 
         # Total pages found
-        total_pages = session.query(func.sum(SearchLog.total_pages_found)).filter(
-            SearchLog.started_at >= cutoff
+        total_pages = apply_user_filter(
+            session.query(func.sum(SearchLog.total_pages_found)).filter(
+                SearchLog.started_at >= cutoff
+            )
         ).scalar() or 0
 
         # API stats (if columns exist)
@@ -601,29 +615,37 @@ def get_search_logs_stats(db, days: int = 30) -> Dict:
         total_rate_limits = 0
 
         try:
-            total_meta_api = session.query(func.sum(SearchLog.meta_api_calls)).filter(
-                SearchLog.started_at >= cutoff
+            total_meta_api = apply_user_filter(
+                session.query(func.sum(SearchLog.meta_api_calls)).filter(
+                    SearchLog.started_at >= cutoff
+                )
             ).scalar() or 0
         except Exception:
             pass
 
         try:
-            total_scraper_api = session.query(func.sum(SearchLog.scraper_api_calls)).filter(
-                SearchLog.started_at >= cutoff
+            total_scraper_api = apply_user_filter(
+                session.query(func.sum(SearchLog.scraper_api_calls)).filter(
+                    SearchLog.started_at >= cutoff
+                )
             ).scalar() or 0
         except Exception:
             pass
 
         try:
-            total_web_requests = session.query(func.sum(SearchLog.web_requests)).filter(
-                SearchLog.started_at >= cutoff
+            total_web_requests = apply_user_filter(
+                session.query(func.sum(SearchLog.web_requests)).filter(
+                    SearchLog.started_at >= cutoff
+                )
             ).scalar() or 0
         except Exception:
             pass
 
         try:
-            total_rate_limits = session.query(func.sum(SearchLog.rate_limit_hits)).filter(
-                SearchLog.started_at >= cutoff
+            total_rate_limits = apply_user_filter(
+                session.query(func.sum(SearchLog.rate_limit_hits)).filter(
+                    SearchLog.started_at >= cutoff
+                )
             ).scalar() or 0
         except Exception:
             pass
