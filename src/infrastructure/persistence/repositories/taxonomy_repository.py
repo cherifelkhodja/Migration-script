@@ -31,8 +31,11 @@ def get_taxonomy_by_category(db, category: str) -> List[ClassificationTaxonomy]:
         ).order_by(ClassificationTaxonomy.sort_order).all()
 
 
-def get_taxonomy_categories(db) -> List[str]:
-    """Recupere la liste unique des categories."""
+def get_taxonomy_categories(db, user_id=None) -> List[str]:
+    """Recupere la liste unique des categories.
+
+    Note: user_id accepte pour compatibilite mais ignore (taxonomie partagee).
+    """
     with db.get_session() as session:
         results = session.query(ClassificationTaxonomy.category).filter(
             ClassificationTaxonomy.is_active == True
