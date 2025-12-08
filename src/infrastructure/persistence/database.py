@@ -109,7 +109,7 @@ from src.infrastructure.persistence.repositories import (
     create_search_log, update_search_log, complete_search_log, get_search_logs,
     delete_search_log, save_api_calls, create_search_queue, get_search_queue,
     update_search_queue_status, update_search_queue_progress, cancel_search_queue,
-    get_pending_searches, get_queue_stats, recover_interrupted_searches,
+    get_pending_searches, get_queue_stats, get_interrupted_searches, recover_interrupted_searches,
     record_page_search_history, record_pages_search_history_batch,
     record_winning_ad_search_history, record_winning_ads_search_history_batch,
     get_search_history_stats, update_search_log_phases, get_search_logs_stats,
@@ -437,12 +437,17 @@ def search_pages(
     pays: str = None,
     page_id: str = None,
     days: int = None,
+    user_id: Optional[UUID] = None,
 ) -> List[Dict]:
     """Recherche de pages avec filtres."""
     from datetime import datetime, timedelta
 
     with db.get_session() as session:
         query = session.query(PageRecherche)
+
+        # Multi-tenancy filter
+        if user_id is not None:
+            query = query.filter(PageRecherche.user_id == user_id)
 
         # Filter by days (created_at)
         if days:

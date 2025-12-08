@@ -368,6 +368,25 @@ def get_queue_stats(db, user_id: Optional[UUID] = None) -> Dict:
         }
 
 
+def get_interrupted_searches(db) -> List:
+    """
+    Retourne les recherches interrompues (status='running' depuis longtemps).
+
+    Returns:
+        Liste des SearchQueue interrompues.
+    """
+    with db.get_session() as session:
+        threshold = datetime.utcnow() - timedelta(minutes=30)
+        interrupted = session.query(SearchQueue).filter(
+            SearchQueue.status == "running",
+            or_(
+                SearchQueue.updated_at < threshold,
+                SearchQueue.updated_at.is_(None)
+            )
+        ).all()
+        return interrupted
+
+
 def recover_interrupted_searches(db) -> int:
     """
     Recupere les recherches interrompues (status='running' mais worker arrete).
