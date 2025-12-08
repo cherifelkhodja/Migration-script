@@ -70,8 +70,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blacklist_user_page ON blacklist(user_id, 
 ALTER TABLE saved_filters ADD COLUMN IF NOT EXISTS user_id UUID;
 CREATE INDEX IF NOT EXISTS idx_saved_filter_user ON saved_filters(user_id);
 
--- scheduled_scans
-ALTER TABLE scheduled_scans ADD COLUMN IF NOT EXISTS user_id UUID;
+-- scheduled_scans (rename owner_id to user_id for consistency)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='scheduled_scans' AND column_name='owner_id') THEN
+        ALTER TABLE scheduled_scans RENAME COLUMN owner_id TO user_id;
+    ELSE
+        ALTER TABLE scheduled_scans ADD COLUMN IF NOT EXISTS user_id UUID;
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_scheduled_scan_user ON scheduled_scans(user_id);
 
 -- ============================================================================

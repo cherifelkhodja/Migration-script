@@ -163,7 +163,7 @@ class ScheduledScan(Base):
     __tablename__ = "scheduled_scans"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column('owner_id', UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy (mapped to owner_id in DB)
+    user_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Multi-tenancy
     name = Column(String(100), nullable=False)
     keywords = Column(Text)
     countries = Column(String(100), default="FR")
@@ -175,5 +175,5 @@ class ScheduledScan(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
-        Index('idx_scheduled_scan_user', 'owner_id'),
+        Index('idx_scheduled_scan_user', 'user_id'),
     )
