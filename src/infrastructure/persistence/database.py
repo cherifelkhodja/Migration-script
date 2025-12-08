@@ -52,6 +52,7 @@ DatabaseManager utilise un pool de connexions SQLAlchemy optimise:
 import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any
+from uuid import UUID
 from contextlib import contextmanager
 
 from sqlalchemy import create_engine, text, func, desc, and_, or_
