@@ -257,7 +257,7 @@ def _run_migrations(db: DatabaseManager):
         ("liste_page_recherche", "site_keywords", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS site_keywords VARCHAR(300)"),
         ("meta_tokens", "proxy_url", "ALTER TABLE meta_tokens ADD COLUMN IF NOT EXISTS proxy_url VARCHAR(255)"),
         ("search_queue", "updated_at", "ALTER TABLE search_queue ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"),
-        # Multi-tenancy owner_id columns
+        # Multi-tenancy owner_id columns (legacy - will be renamed to user_id)
         ("tags", "owner_id", "ALTER TABLE tags ADD COLUMN IF NOT EXISTS owner_id UUID"),
         ("collections", "owner_id", "ALTER TABLE collections ADD COLUMN IF NOT EXISTS owner_id UUID"),
         ("favorites", "owner_id", "ALTER TABLE favorites ADD COLUMN IF NOT EXISTS owner_id UUID"),
@@ -265,6 +265,41 @@ def _run_migrations(db: DatabaseManager):
         ("saved_filters", "owner_id", "ALTER TABLE saved_filters ADD COLUMN IF NOT EXISTS owner_id UUID"),
         ("scheduled_scans", "owner_id", "ALTER TABLE scheduled_scans ADD COLUMN IF NOT EXISTS owner_id UUID"),
         ("scheduled_scans", "languages", "ALTER TABLE scheduled_scans ADD COLUMN IF NOT EXISTS languages VARCHAR(100) DEFAULT 'fr'"),
+    ]
+
+    # Multi-tenancy: rename owner_id to user_id for consistency
+    rename_owner_to_user_sql = """
+    DO $$
+    DECLARE
+        tbl TEXT;
+        tables TEXT[] := ARRAY['tags', 'collections', 'favorites', 'blacklist', 'saved_filters', 'scheduled_scans', 'page_tags', 'page_notes', 'collection_pages'];
+    BEGIN
+        FOREACH tbl IN ARRAY tables LOOP
+            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name=tbl AND column_name='owner_id') THEN
+                EXECUTE format('ALTER TABLE %I RENAME COLUMN owner_id TO user_id', tbl);
+                RAISE NOTICE 'Renamed owner_id to user_id in %', tbl;
+            END IF;
+        END LOOP;
+    END $$;
+    """
+
+    # Multi-tenancy: add user_id columns to all tables
+    user_id_migrations = [
+        ("liste_page_recherche", "user_id", "ALTER TABLE liste_page_recherche ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("suivi_page", "user_id", "ALTER TABLE suivi_page ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("tags", "user_id", "ALTER TABLE tags ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("page_tags", "user_id", "ALTER TABLE page_tags ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("page_notes", "user_id", "ALTER TABLE page_notes ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("favorites", "user_id", "ALTER TABLE favorites ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("collections", "user_id", "ALTER TABLE collections ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("collection_pages", "user_id", "ALTER TABLE collection_pages ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("blacklist", "user_id", "ALTER TABLE blacklist ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("saved_filters", "user_id", "ALTER TABLE saved_filters ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("scheduled_scans", "user_id", "ALTER TABLE scheduled_scans ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("search_logs", "user_id", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("search_queue", "user_id", "ALTER TABLE search_queue ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("liste_ads_recherche", "user_id", "ALTER TABLE liste_ads_recherche ADD COLUMN IF NOT EXISTS user_id UUID"),
+        ("winning_ads", "user_id", "ALTER TABLE winning_ads ADD COLUMN IF NOT EXISTS user_id UUID"),
     ]
 
     index_migrations = [
@@ -302,6 +337,23 @@ def _run_migrations(db: DatabaseManager):
 
     with db.get_session() as session:
         for table, column, sql in migrations:
+            try:
+                session.execute(text(sql))
+                session.commit()
+            except Exception:
+                session.rollback()
+
+        # Rename owner_id to user_id
+        try:
+            session.execute(text(rename_owner_to_user_sql))
+            session.commit()
+            print("[Migration] Renamed owner_id to user_id where applicable")
+        except Exception as e:
+            session.rollback()
+            print(f"[Migration] owner_id rename skipped: {e}")
+
+        # Add user_id columns
+        for table, column, sql in user_id_migrations:
             try:
                 session.execute(text(sql))
                 session.commit()
