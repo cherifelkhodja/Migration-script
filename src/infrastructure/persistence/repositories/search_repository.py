@@ -641,6 +641,54 @@ def get_search_history_stats(db, days: int = 30, user_id: Optional[UUID] = None)
         }
 
 
+def get_search_log_stats(db, search_log_id: int, user_id: Optional[UUID] = None) -> Dict:
+    """
+    Statistiques pour une recherche specifique.
+
+    Retourne le nombre de pages/ads nouvelles vs existantes
+    trouvees lors de cette recherche.
+
+    Args:
+        db: Instance DatabaseManager
+        search_log_id: ID du log de recherche
+        user_id: UUID de l'utilisateur (multi-tenancy)
+
+    Returns:
+        Dict avec new_pages, existing_pages, new_winning_ads, existing_winning_ads
+    """
+    with db.get_session() as session:
+        # Stats des pages
+        pages_query = session.query(PageSearchHistory).filter(
+            PageSearchHistory.search_log_id == search_log_id
+        )
+        if user_id is not None:
+            pages_query = pages_query.filter(PageSearchHistory.user_id == user_id)
+
+        pages = pages_query.all()
+        new_pages = sum(1 for p in pages if p.was_new)
+        existing_pages = sum(1 for p in pages if not p.was_new)
+
+        # Stats des winning ads
+        winning_query = session.query(WinningAdSearchHistory).filter(
+            WinningAdSearchHistory.search_log_id == search_log_id
+        )
+        if user_id is not None:
+            winning_query = winning_query.filter(WinningAdSearchHistory.user_id == user_id)
+
+        winning_ads = winning_query.all()
+        new_winning_ads = sum(1 for w in winning_ads if w.was_new)
+        existing_winning_ads = sum(1 for w in winning_ads if not w.was_new)
+
+        return {
+            "new_pages": new_pages,
+            "existing_pages": existing_pages,
+            "total_pages": new_pages + existing_pages,
+            "new_winning_ads": new_winning_ads,
+            "existing_winning_ads": existing_winning_ads,
+            "total_winning_ads": new_winning_ads + existing_winning_ads,
+        }
+
+
 def update_search_log_phases(db, log_id: int, phases_completed: list) -> bool:
     """
     Met a jour les phases completees d'un log de recherche.

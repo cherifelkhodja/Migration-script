@@ -180,12 +180,12 @@ def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
     """Affiche les tableaux des pages, ads et winning ads pour un log."""
     from src.infrastructure.persistence.database import (
         get_pages_for_search, get_winning_ads_for_search, get_ads_for_search,
-        get_search_history_stats, PageRecherche, WinningAds, AdsRecherche
+        get_search_log_stats, PageRecherche, WinningAds, AdsRecherche
     )
     from src.infrastructure.persistence.models import PageSearchHistory, WinningAdSearchHistory
 
-    # Recuperer les stats d'historique
-    history_stats = get_search_history_stats(db, log_id)
+    # Recuperer les stats d'historique pour cette recherche specifique
+    history_stats = get_search_log_stats(db, log_id, user_id=user_id)
 
     # Tableau des pages trouvees (utilise les tables d'historique many-to-many)
     pages_from_search = get_pages_for_search(db, log_id, limit=100, user_id=user_id)

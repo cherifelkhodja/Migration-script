@@ -114,7 +114,7 @@ from src.infrastructure.persistence.repositories import (
     get_pending_searches, get_queue_stats, get_interrupted_searches, restart_search_queue, recover_interrupted_searches,
     record_page_search_history, record_pages_search_history_batch,
     record_winning_ad_search_history, record_winning_ads_search_history_batch,
-    get_search_history_stats, update_search_log_phases, get_search_logs_stats,
+    get_search_history_stats, get_search_log_stats, update_search_log_phases, get_search_logs_stats,
     get_pages_for_search, get_winning_ads_for_search, get_ads_for_search,
 )
 
