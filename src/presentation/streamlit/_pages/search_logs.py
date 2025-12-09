@@ -141,7 +141,7 @@ def _render_single_log(db, log: dict, user_id=None):
             st.metric("Winning Ads", log.get("winning_ads_count", 0))
 
         # Tableaux pages et winning ads
-        _render_pages_and_winning_ads(db, log_id)
+        _render_pages_and_winning_ads(db, log_id, user_id=user_id)
 
         # Parametres de recherche
         st.markdown("**Parametres:**")
@@ -176,7 +176,7 @@ def _render_single_log(db, log: dict, user_id=None):
                 st.rerun()
 
 
-def _render_pages_and_winning_ads(db, log_id: int):
+def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
     """Affiche les tableaux des pages et winning ads pour un log."""
     from src.infrastructure.persistence.database import (
         get_pages_for_search, get_winning_ads_for_search,
@@ -187,13 +187,14 @@ def _render_pages_and_winning_ads(db, log_id: int):
     history_stats = get_search_history_stats(db, log_id)
 
     # Tableau des pages trouvees (utilise les tables d'historique many-to-many)
-    pages_from_search = get_pages_for_search(db, log_id, limit=100)
+    pages_from_search = get_pages_for_search(db, log_id, limit=100, user_id=user_id)
 
     # FALLBACK: Si pas d'historique, utiliser last_search_log_id
-    if not pages_from_search:
+    if not pages_from_search and user_id:
         with db.get_session() as session:
             fallback_pages = session.query(PageRecherche).filter(
-                PageRecherche.last_search_log_id == log_id
+                PageRecherche.last_search_log_id == log_id,
+                PageRecherche.user_id == user_id
             ).limit(100).all()
             if fallback_pages:
                 pages_from_search = [
@@ -221,13 +222,14 @@ def _render_pages_and_winning_ads(db, log_id: int):
             _render_pages_table(pages_from_search, log_id)
 
     # Tableau des winning ads (utilise les tables d'historique many-to-many)
-    winning_from_search = get_winning_ads_for_search(db, log_id, limit=100)
+    winning_from_search = get_winning_ads_for_search(db, log_id, limit=100, user_id=user_id)
 
     # FALLBACK: Si pas d'historique, utiliser search_log_id sur winning_ads
-    if not winning_from_search:
+    if not winning_from_search and user_id:
         with db.get_session() as session:
             fallback_winning = session.query(WinningAds).filter(
-                WinningAds.search_log_id == log_id
+                WinningAds.search_log_id == log_id,
+                WinningAds.user_id == user_id
             ).limit(100).all()
             if fallback_winning:
                 winning_from_search = [

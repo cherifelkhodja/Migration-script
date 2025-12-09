@@ -708,7 +708,7 @@ def get_search_logs_stats(db, days: int = 30, user_id: Optional[UUID] = None) ->
         }
 
 
-def get_pages_for_search(db, search_log_id: int, limit: int = 100) -> List[Dict]:
+def get_pages_for_search(db, search_log_id: int, limit: int = 100, user_id: Optional[UUID] = None) -> List[Dict]:
     """
     Recupere les pages trouvees lors d'une recherche specifique.
 
@@ -716,36 +716,50 @@ def get_pages_for_search(db, search_log_id: int, limit: int = 100) -> List[Dict]
         db: Instance DatabaseManager
         search_log_id: ID du log de recherche
         limit: Nombre maximum de resultats
+        user_id: UUID de l'utilisateur (multi-tenancy)
 
     Returns:
         Liste des pages avec leurs informations
     """
+    # Isolation stricte
+    if user_id is None:
+        return []
+
     with db.get_session() as session:
         # Joindre PageSearchHistory avec PageRecherche
-        results = session.query(PageRecherche).join(
+        results = session.query(
+            PageRecherche,
+            PageSearchHistory.was_new,
+            PageSearchHistory.ads_count_at_discovery,
+            PageSearchHistory.keyword_matched
+        ).join(
             PageSearchHistory,
             PageRecherche.page_id == PageSearchHistory.page_id
         ).filter(
-            PageSearchHistory.search_log_id == search_log_id
+            PageSearchHistory.search_log_id == search_log_id,
+            PageSearchHistory.user_id == user_id
         ).limit(limit).all()
 
         return [
             {
-                "page_id": p.page_id,
-                "page_name": p.page_name,
-                "lien_site": p.lien_site,
-                "cms": p.cms,
-                "etat": p.etat,
-                "nombre_ads_active": p.nombre_ads_active,
-                "thematique": p.thematique,
-                "subcategory": getattr(p, 'subcategory', None),
-                "pays": p.pays,
+                "page_id": p.PageRecherche.page_id,
+                "page_name": p.PageRecherche.page_name,
+                "lien_site": p.PageRecherche.lien_site,
+                "cms": p.PageRecherche.cms,
+                "etat": p.PageRecherche.etat,
+                "nombre_ads_active": p.PageRecherche.nombre_ads_active,
+                "thematique": p.PageRecherche.thematique,
+                "subcategory": getattr(p.PageRecherche, 'subcategory', None),
+                "pays": p.PageRecherche.pays,
+                "was_new": p.was_new,
+                "ads_count_at_discovery": p.ads_count_at_discovery,
+                "keyword_matched": p.keyword_matched,
             }
             for p in results
         ]
 
 
-def get_winning_ads_for_search(db, search_log_id: int, limit: int = 100) -> List[Dict]:
+def get_winning_ads_for_search(db, search_log_id: int, limit: int = 100, user_id: Optional[UUID] = None) -> List[Dict]:
     """
     Recupere les winning ads trouvees lors d'une recherche specifique.
 
@@ -753,29 +767,46 @@ def get_winning_ads_for_search(db, search_log_id: int, limit: int = 100) -> List
         db: Instance DatabaseManager
         search_log_id: ID du log de recherche
         limit: Nombre maximum de resultats
+        user_id: UUID de l'utilisateur (multi-tenancy)
 
     Returns:
         Liste des winning ads avec leurs informations
     """
+    # Isolation stricte
+    if user_id is None:
+        return []
+
     with db.get_session() as session:
         # Joindre WinningAdSearchHistory avec WinningAds
-        results = session.query(WinningAds).join(
+        results = session.query(
+            WinningAds,
+            WinningAdSearchHistory.was_new,
+            WinningAdSearchHistory.reach_at_discovery,
+            WinningAdSearchHistory.age_days_at_discovery,
+            WinningAdSearchHistory.matched_criteria.label('history_criteria')
+        ).join(
             WinningAdSearchHistory,
             WinningAds.ad_id == WinningAdSearchHistory.ad_id
         ).filter(
-            WinningAdSearchHistory.search_log_id == search_log_id
+            WinningAdSearchHistory.search_log_id == search_log_id,
+            WinningAdSearchHistory.user_id == user_id
         ).limit(limit).all()
 
         return [
             {
-                "id": a.id,
-                "ad_id": a.ad_id,
-                "page_id": a.page_id,
-                "eu_total_reach": a.eu_total_reach,
-                "ad_age_days": a.ad_age_days,
-                "matched_criteria": a.matched_criteria,
-                "ad_snapshot_url": a.ad_snapshot_url,
-                "date_scan": a.date_scan,
+                "id": a.WinningAds.id,
+                "ad_id": a.WinningAds.ad_id,
+                "page_id": a.WinningAds.page_id,
+                "page_name": a.WinningAds.page_name,
+                "lien_site": a.WinningAds.lien_site,
+                "eu_total_reach": a.WinningAds.eu_total_reach,
+                "ad_age_days": a.WinningAds.ad_age_days,
+                "matched_criteria": a.WinningAds.matched_criteria,
+                "ad_snapshot_url": a.WinningAds.ad_snapshot_url,
+                "date_scan": a.WinningAds.date_scan,
+                "was_new": a.was_new,
+                "reach_at_discovery": a.reach_at_discovery,
+                "age_days_at_discovery": a.age_days_at_discovery,
             }
             for a in results
         ]
