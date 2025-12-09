@@ -726,7 +726,7 @@ def get_pages_for_search(db, search_log_id: int, limit: int = 100, user_id: Opti
         return []
 
     with db.get_session() as session:
-        # Joindre PageSearchHistory avec PageRecherche
+        # Joindre PageSearchHistory avec PageRecherche (filtrer les deux par user_id)
         results = session.query(
             PageRecherche,
             PageSearchHistory.was_new,
@@ -734,7 +734,10 @@ def get_pages_for_search(db, search_log_id: int, limit: int = 100, user_id: Opti
             PageSearchHistory.keyword_matched
         ).join(
             PageSearchHistory,
-            PageRecherche.page_id == PageSearchHistory.page_id
+            and_(
+                PageRecherche.page_id == PageSearchHistory.page_id,
+                PageRecherche.user_id == PageSearchHistory.user_id
+            )
         ).filter(
             PageSearchHistory.search_log_id == search_log_id,
             PageSearchHistory.user_id == user_id
@@ -777,7 +780,7 @@ def get_winning_ads_for_search(db, search_log_id: int, limit: int = 100, user_id
         return []
 
     with db.get_session() as session:
-        # Joindre WinningAdSearchHistory avec WinningAds
+        # Joindre WinningAdSearchHistory avec WinningAds (filtrer les deux par user_id)
         results = session.query(
             WinningAds,
             WinningAdSearchHistory.was_new,
@@ -786,7 +789,10 @@ def get_winning_ads_for_search(db, search_log_id: int, limit: int = 100, user_id
             WinningAdSearchHistory.matched_criteria.label('history_criteria')
         ).join(
             WinningAdSearchHistory,
-            WinningAds.ad_id == WinningAdSearchHistory.ad_id
+            and_(
+                WinningAds.ad_id == WinningAdSearchHistory.ad_id,
+                WinningAds.user_id == WinningAdSearchHistory.user_id
+            )
         ).filter(
             WinningAdSearchHistory.search_log_id == search_log_id,
             WinningAdSearchHistory.user_id == user_id
