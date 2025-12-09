@@ -187,10 +187,14 @@ def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
     # Recuperer les stats d'historique pour cette recherche specifique
     history_stats = get_search_log_stats(db, log_id, user_id=user_id)
 
-    # Tableau des pages trouvees (utilise les tables d'historique many-to-many)
+    # ═══════════════════════════════════════════════════════════════════
+    # TABLEAU DES PAGES
+    # ═══════════════════════════════════════════════════════════════════
+
+    # Methode principale: tables d'historique many-to-many
     pages_from_search = get_pages_for_search(db, log_id, limit=100, user_id=user_id)
 
-    # FALLBACK 1: Si pas d'historique, utiliser last_search_log_id
+    # FALLBACK 1: Si pas d'historique, utiliser last_search_log_id sur PageRecherche
     if not pages_from_search and user_id:
         with db.get_session() as session:
             fallback_pages = session.query(PageRecherche).filter(
@@ -208,61 +212,58 @@ def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
                         "nombre_ads_active": p.nombre_ads_active,
                         "thematique": p.thematique,
                         "pays": p.pays,
-                        "was_new": p.was_created_in_last_search,
+                        "was_new": getattr(p, 'was_created_in_last_search', None),
                         "ads_count_at_discovery": p.nombre_ads_active,
                         "keyword_matched": None
                     }
                     for p in fallback_pages
                 ]
 
-    # FALLBACK 2: Si toujours rien, chercher dans PageSearchHistory sans join
-    if not pages_from_search and user_id:
-        with db.get_session() as session:
-            history_entries = session.query(PageSearchHistory).filter(
-                PageSearchHistory.search_log_id == log_id,
-                PageSearchHistory.user_id == user_id
-            ).limit(100).all()
-            if history_entries:
-                # Recuperer les infos des pages separement
-                page_ids = [h.page_id for h in history_entries]
-                pages_dict = {}
-                for p in session.query(PageRecherche).filter(
-                    PageRecherche.page_id.in_(page_ids),
-                    PageRecherche.user_id == user_id
-                ).all():
-                    pages_dict[p.page_id] = p
-
-                pages_from_search = []
-                for h in history_entries:
-                    p = pages_dict.get(h.page_id)
-                    pages_from_search.append({
-                        "page_id": h.page_id,
-                        "page_name": p.page_name if p else h.page_id,
-                        "lien_site": p.lien_site if p else "",
-                        "cms": p.cms if p else "N/A",
-                        "etat": p.etat if p else "N/A",
-                        "nombre_ads_active": p.nombre_ads_active if p else 0,
-                        "thematique": p.thematique if p else "",
-                        "pays": p.pays if p else "",
-                        "was_new": h.was_new,
-                        "ads_count_at_discovery": h.ads_count_at_discovery,
-                        "keyword_matched": h.keyword_matched
-                    })
-
+    # Afficher le tableau des pages
     if pages_from_search:
         new_pages = history_stats.get("new_pages", 0)
         existing_pages = history_stats.get("existing_pages", 0)
-
         with st.expander(f"📄 **Pages trouvees ({len(pages_from_search)})** — 🆕 {new_pages} nouvelles | 📝 {existing_pages} existantes", expanded=False):
             _render_pages_table(pages_from_search, log_id)
 
-    # Tableau des ads (recuperees via les pages de la recherche)
-    ads_from_search = get_ads_for_search(db, log_id, limit=100, user_id=user_id)
+    # ═══════════════════════════════════════════════════════════════════
+    # TABLEAU DES ADS ET WINNING ADS
+    # ═══════════════════════════════════════════════════════════════════
 
-    # Tableau des winning ads (utilise les tables d'historique many-to-many)
+    # Recuperer les ads via les pages de la recherche
+    ads_from_search = []
+    if pages_from_search:
+        # Utiliser les page_ids des pages trouvees pour recuperer les ads
+        page_ids = [p.get("page_id") for p in pages_from_search if p.get("page_id")]
+        if page_ids and user_id:
+            with db.get_session() as session:
+                ads_results = session.query(AdsRecherche).filter(
+                    AdsRecherche.page_id.in_(page_ids),
+                    AdsRecherche.user_id == user_id
+                ).limit(100).all()
+                ads_from_search = [
+                    {
+                        "id": a.id,
+                        "ad_id": a.ad_id,
+                        "page_id": a.page_id,
+                        "page_name": a.page_name,
+                        "ad_creation_time": a.ad_creation_time,
+                        "ad_creative_bodies": a.ad_creative_bodies,
+                        "ad_creative_link_titles": a.ad_creative_link_titles,
+                        "ad_snapshot_url": a.ad_snapshot_url,
+                        "eu_total_reach": a.eu_total_reach,
+                        "languages": a.languages,
+                        "country": a.country,
+                        "publisher_platforms": a.publisher_platforms,
+                        "date_scan": a.date_scan,
+                    }
+                    for a in ads_results
+                ]
+
+    # Recuperer les winning ads - methode principale
     winning_from_search = get_winning_ads_for_search(db, log_id, limit=100, user_id=user_id)
 
-    # FALLBACK 1: Si pas d'historique, utiliser search_log_id sur winning_ads
+    # FALLBACK: Si pas d'historique, utiliser search_log_id sur WinningAds
     if not winning_from_search and user_id:
         with db.get_session() as session:
             fallback_winning = session.query(WinningAds).filter(
@@ -280,46 +281,12 @@ def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
                         "eu_total_reach": w.eu_total_reach,
                         "matched_criteria": w.matched_criteria,
                         "ad_snapshot_url": w.ad_snapshot_url,
-                        "was_new": w.is_new,
+                        "was_new": getattr(w, 'is_new', None),
                         "reach_at_discovery": w.eu_total_reach,
                         "age_days_at_discovery": w.ad_age_days
                     }
                     for w in fallback_winning
                 ]
-
-    # FALLBACK 2: Si toujours rien, chercher dans WinningAdSearchHistory sans join
-    if not winning_from_search and user_id:
-        with db.get_session() as session:
-            history_entries = session.query(WinningAdSearchHistory).filter(
-                WinningAdSearchHistory.search_log_id == log_id,
-                WinningAdSearchHistory.user_id == user_id
-            ).limit(100).all()
-            if history_entries:
-                # Recuperer les infos des ads separement
-                ad_ids = [h.ad_id for h in history_entries]
-                ads_dict = {}
-                for w in session.query(WinningAds).filter(
-                    WinningAds.ad_id.in_(ad_ids),
-                    WinningAds.user_id == user_id
-                ).all():
-                    ads_dict[w.ad_id] = w
-
-                winning_from_search = []
-                for h in history_entries:
-                    w = ads_dict.get(h.ad_id)
-                    winning_from_search.append({
-                        "ad_id": h.ad_id,
-                        "page_id": w.page_id if w else "",
-                        "page_name": w.page_name if w else h.ad_id,
-                        "lien_site": w.lien_site if w else "",
-                        "ad_age_days": w.ad_age_days if w else h.age_days_at_discovery,
-                        "eu_total_reach": w.eu_total_reach if w else h.reach_at_discovery,
-                        "matched_criteria": h.matched_criteria or (w.matched_criteria if w else ""),
-                        "ad_snapshot_url": w.ad_snapshot_url if w else "",
-                        "was_new": h.was_new,
-                        "reach_at_discovery": h.reach_at_discovery,
-                        "age_days_at_discovery": h.age_days_at_discovery
-                    })
 
     # Afficher le tableau combine des ads et winning ads
     total_ads = len(ads_from_search)
