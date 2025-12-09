@@ -36,6 +36,13 @@ Une page peut etre ajoutee/retiree depuis Pages/Shops.
 import streamlit as st
 
 from src.presentation.streamlit.shared import get_database
+
+# Design System imports
+from src.presentation.streamlit.ui import (
+    apply_theme, ICONS,
+    page_header, section_header,
+    alert, empty_state, format_number,
+)
 from src.infrastructure.persistence.database import (
     get_favorites, remove_favorite, search_pages,
     get_page_tags, get_page_notes
@@ -45,12 +52,20 @@ from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenant
 
 def render_favorites():
     """Page Favoris - Pages favorites."""
-    st.title("⭐ Favoris")
-    st.markdown("Vos pages favorites pour un acces rapide")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Favoris",
+        subtitle="Vos pages favorites pour un acces rapide",
+        icon=ICONS.get("star", "⭐"),
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.warning("Base de donnees non connectee")
+        alert("Base de donnees non connectee", variant="warning")
         return
 
     # Multi-tenancy: recuperer l'utilisateur courant
@@ -104,7 +119,11 @@ def render_favorites():
                                 st.success("Retire des favoris")
                                 st.rerun()
         else:
-            st.info("Aucune page en favoris. Ajoutez des pages depuis la page Pages/Shops.")
+            empty_state(
+                title="Aucune page en favoris",
+                description="Ajoutez des pages depuis la page Pages/Shops.",
+                icon="⭐"
+            )
 
     except Exception as e:
         st.error(f"Erreur: {e}")

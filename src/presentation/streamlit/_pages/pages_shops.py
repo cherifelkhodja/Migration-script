@@ -67,6 +67,19 @@ import streamlit as st
 import pandas as pd
 
 from src.presentation.streamlit.shared import get_database
+
+# Design System imports
+from src.presentation.streamlit.ui import (
+    # Theme
+    apply_theme, COLORS, STATE_COLORS, ICONS,
+    # Atoms
+    format_number, state_badge, score_badge, get_score_grade,
+    # Molecules
+    info_card, section_header, filter_bar, active_filters_display,
+    empty_state, alert, export_button,
+    # Layouts
+    page_header, kpi_row, two_column_layout,
+)
 from src.presentation.streamlit.components import export_to_csv
 from src.infrastructure.persistence.database import (
     search_pages, get_winning_ads_count_by_page,
@@ -159,12 +172,20 @@ def format_state_for_df(etat: str) -> str:
 
 def render_pages_shops():
     """Page Pages/Shops - Liste des pages avec score et export"""
-    st.title("🏪 Pages / Shops")
-    st.markdown("Explorer toutes les pages et boutiques")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Pages / Shops",
+        subtitle="Explorer toutes les pages et boutiques",
+        icon=ICONS.get("shop", "🏪"),
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.warning("Base de donnees non connectee")
+        alert("Base de donnees non connectee", variant="warning")
         return
 
     # Multi-tenancy: recuperer l'utilisateur courant
@@ -192,7 +213,7 @@ def render_pages_shops():
                 break
 
     # Filtres
-    st.markdown("#### 🔍 Filtres")
+    section_header("Filtres", icon="🔍")
 
     # Ligne 0: Filtre par ID
     col_id1, col_id2 = st.columns([3, 1])
@@ -353,7 +374,11 @@ def render_pages_shops():
             else:
                 _render_detailed_mode(db, results, user_id)
         else:
-            st.info("Aucun resultat trouve")
+            empty_state(
+                title="Aucun resultat trouve",
+                description="Modifiez vos filtres ou lancez une nouvelle recherche.",
+                icon="🔍"
+            )
 
     except Exception as e:
         st.error(f"Erreur: {e}")

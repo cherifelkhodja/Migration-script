@@ -1,58 +1,64 @@
 """
 Page Layout - Structure de l'application (Sidebar + Dashboard).
 
-Ce module definit la structure principale de l'interface :
-1. render_sidebar() : Navigation laterale avec toutes les pages
+Ce module définit la structure principale de l'interface utilisant
+le nouveau Design System :
+1. render_sidebar() : Navigation latérale hiérarchisée
 2. render_dashboard() : Page d'accueil avec KPIs et graphiques
+
+Architecture:
+    Utilise le Design System (src.presentation.streamlit.ui) pour
+    garantir la cohérence visuelle dans toute l'application.
 
 Sidebar (Navigation):
 ---------------------
-Organisation en sections :
-- **Main** : Dashboard, Search Ads, Historique, Recherches en cours,
-  Pages/Shops, Watchlists, Alerts
-- **Organisation** : Favoris, Collections, Tags
-- **Analyse** : Monitoring, Analytics, Winning Ads, Creative Analysis
-- **Automation** : Scans Programmes
-- **Config** : Blacklist, Settings
-
-Inclut :
-- Toggle dark mode
-- Indicateur de recherches en cours (avec compteur)
-- Statut de la base de donnees
+Organisation en sections hiérarchiques :
+- **PRINCIPAL** : Accueil, Recherche, Historique, En cours
+- **EXPLORER** : Pages/Shops, Winning Ads, Analytics
+- **ORGANISER** : Favoris, Collections, Tags
+- **SURVEILLER** : Monitoring, Watchlists, Alertes, Scans
+- **ANALYSER** : Créatives
+- **CONFIGURATION** : Paramètres, Blacklist
 
 Dashboard:
 ----------
 Vue d'ensemble avec :
 - **KPIs principaux** : Total pages, actives, XXL, Shopify, Winning (7j)
-- **Tendances** : Delta vs semaine precedente, pages montantes/descendantes
-- **Alertes** : Generes automatiquement par le systeme de monitoring
-- **Graphiques** : Repartition par etat et par CMS
+- **Tendances** : Delta vs semaine précédente
+- **Alertes** : Générées automatiquement
+- **Graphiques** : Répartition par état et par CMS
 - **Top Performers** : Tableau des meilleures pages avec score
-
-Systeme de Score:
------------------
-Calcul du score de performance (0-100) :
-- Etat de la page (XXL=50pts, XL=40pts, etc.)
-- Nombre d'ads (jusqu'a 30pts bonus)
-- Winning ads (jusqu'a 20pts bonus)
-
-Grades : S (>=80), A (>=60), B (>=40), C (>=20), D (<20)
-
-Filtres de classification:
---------------------------
-Le dashboard supporte les filtres :
-- Thematique (categorie Gemini)
-- Sous-categorie
-- Pays
 """
+
 import streamlit as st
 import pandas as pd
 
-from src.presentation.streamlit.shared import get_database
+# Design System imports
+from src.presentation.streamlit.ui import (
+    # Theme
+    apply_theme, COLORS, STATE_COLORS, ICONS,
+
+    # Atoms
+    state_indicator, format_number,
+
+    # Molecules
+    info_card, section_header, filter_bar, active_filters_display,
+    stats_row, empty_state, export_button, alert,
+
+    # Layouts
+    page_header, kpi_row, two_column_layout,
+
+    # Organisms
+    render_navigation,
+)
+
+# Composants graphiques existants (à migrer progressivement)
 from src.presentation.streamlit.components import (
-    CHART_COLORS, info_card, chart_header,
+    CHART_COLORS, chart_header,
     create_horizontal_bar_chart, create_donut_chart, export_to_csv
 )
+
+from src.presentation.streamlit.shared import get_database
 from src.infrastructure.persistence.database import (
     get_suivi_stats, get_suivi_stats_filtered,
     get_winning_ads_stats, get_winning_ads_count_by_page,
@@ -61,22 +67,24 @@ from src.infrastructure.persistence.database import (
 from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# FONCTIONS UTILITAIRES
+# ═══════════════════════════════════════════════════════════════════════════════
+
 def format_state_for_df(etat: str) -> str:
-    """Formate l'etat pour l'affichage."""
-    state_colors = {
-        "XXL": "XXL (150+)",
-        "XL": "XL (80-149)",
-        "L": "L (35-79)",
-        "M": "M (20-34)",
-        "S": "S (10-19)",
-        "XS": "XS (1-9)",
-        "inactif": "Inactif"
-    }
-    return state_colors.get(etat, etat)
+    """Formate l'état pour l'affichage avec indicateur."""
+    return state_indicator(etat)
 
 
 def calculate_page_score(page: dict, winning_count: int = 0) -> int:
-    """Calcule un score pour une page."""
+    """
+    Calcule un score de performance pour une page (0-100).
+
+    Critères:
+    - État de la page : XXL=50pts, XL=40pts, L=30pts, M=20pts, S=10pts, XS=5pts
+    - Nombre d'ads : jusqu'à 30pts bonus (1pt par 10 ads)
+    - Winning ads : jusqu'à 20pts bonus (5pts par winning)
+    """
     score = 0
     ads = page.get("nombre_ads_active", 0) or 0
     etat = page.get("etat", "")
@@ -86,11 +94,11 @@ def calculate_page_score(page: dict, winning_count: int = 0) -> int:
     score += min(ads // 10, 30)
     score += min(winning_count * 5, 20)
 
-    return score
+    return min(score, 100)
 
 
 def get_score_color(score: int) -> str:
-    """Retourne un emoji couleur selon le score."""
+    """Retourne le grade selon le score (S/A/B/C/D)."""
     if score >= 80:
         return "S"
     elif score >= 60:
@@ -102,191 +110,87 @@ def get_score_color(score: int) -> str:
     return "D"
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SIDEBAR
+# ═══════════════════════════════════════════════════════════════════════════════
+
 def render_sidebar():
-    """Affiche la sidebar avec navigation"""
-    with st.sidebar:
-        # Header avec dark mode toggle
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.markdown("## 📊 Meta Ads")
-        with col2:
-            dark_mode = st.toggle("🌙", value=st.session_state.get('dark_mode', False), key="dark_toggle", help="Mode sombre")
-            if dark_mode != st.session_state.get('dark_mode', False):
-                st.session_state.dark_mode = dark_mode
-                st.rerun()
+    """
+    Affiche la sidebar avec navigation hiérarchisée.
 
-        st.markdown("---")
+    Utilise le nouveau Design System pour une navigation structurée
+    et cohérente.
+    """
+    db = get_database()
+    user = st.session_state.get("user")
+    current_page = st.session_state.get("current_page", "Dashboard")
 
-        # Main Navigation
-        st.markdown("### Main")
+    def on_page_change(page_id: str):
+        st.session_state.current_page = page_id
 
-        if st.button("🏠 Dashboard", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Dashboard" else "secondary"):
-            st.session_state.current_page = "Dashboard"
-            st.rerun()
+    render_navigation(
+        current_page=current_page,
+        user=user,
+        db=db,
+        on_page_change=on_page_change,
+        show_dark_mode=True,
+        show_db_status=True,
+    )
 
-        if st.button("🔍 Search Ads", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Search Ads" else "secondary"):
-            st.session_state.current_page = "Search Ads"
-            st.rerun()
 
-        if st.button("📜 Historique", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Historique" else "secondary"):
-            st.session_state.current_page = "Historique"
-            st.rerun()
-
-        # Indicateur de recherches en arriere-plan
-        try:
-            from src.infrastructure.workers.background_worker import get_worker
-            worker = get_worker()
-            active = worker.get_active_searches()
-            count = len(active) if active else 0
-            btn_label = f"⏳ Recherches en cours ({count})"
-            btn_type = "primary" if st.session_state.current_page == "Background Searches" else "secondary"
-
-            if st.button(btn_label, use_container_width=True, type=btn_type):
-                st.session_state.current_page = "Background Searches"
-                st.rerun()
-        except Exception:
-            pass
-
-        if st.button("🏪 Pages / Shops", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Pages / Shops" else "secondary"):
-            st.session_state.current_page = "Pages / Shops"
-            st.rerun()
-
-        if st.button("📋 Watchlists", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Watchlists" else "secondary"):
-            st.session_state.current_page = "Watchlists"
-            st.rerun()
-
-        if st.button("🔔 Alerts", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Alerts" else "secondary"):
-            st.session_state.current_page = "Alerts"
-            st.rerun()
-
-        st.markdown("---")
-        st.markdown("### Organisation")
-
-        if st.button("⭐ Favoris", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Favoris" else "secondary"):
-            st.session_state.current_page = "Favoris"
-            st.rerun()
-
-        if st.button("📁 Collections", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Collections" else "secondary"):
-            st.session_state.current_page = "Collections"
-            st.rerun()
-
-        if st.button("🏷️ Tags", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Tags" else "secondary"):
-            st.session_state.current_page = "Tags"
-            st.rerun()
-
-        st.markdown("---")
-        st.markdown("### Analyse")
-
-        if st.button("📈 Monitoring", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Monitoring" else "secondary"):
-            st.session_state.current_page = "Monitoring"
-            st.rerun()
-
-        if st.button("📊 Analytics", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Analytics" else "secondary"):
-            st.session_state.current_page = "Analytics"
-            st.rerun()
-
-        if st.button("🏆 Winning Ads", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Winning Ads" else "secondary"):
-            st.session_state.current_page = "Winning Ads"
-            st.rerun()
-
-        if st.button("🎨 Creative Analysis", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Creative Analysis" else "secondary"):
-            st.session_state.current_page = "Creative Analysis"
-            st.rerun()
-
-        st.markdown("---")
-        st.markdown("### Automation")
-
-        if st.button("🕐 Scans Programmés", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Scheduled Scans" else "secondary"):
-            st.session_state.current_page = "Scheduled Scans"
-            st.rerun()
-
-        st.markdown("---")
-        st.markdown("### Config")
-
-        if st.button("🚫 Blacklist", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Blacklist" else "secondary"):
-            st.session_state.current_page = "Blacklist"
-            st.rerun()
-
-        if st.button("⚙️ Settings", use_container_width=True,
-                     type="primary" if st.session_state.current_page == "Settings" else "secondary"):
-            st.session_state.current_page = "Settings"
-            st.rerun()
-
-        # Liens vers la documentation
-        st.markdown("---")
-        st.markdown("### Documentation")
-        st.link_button("📚 API Swagger", "/docs", use_container_width=True)
-        st.link_button("📖 API ReDoc", "/redoc", use_container_width=True)
-
-        # Page Users (admin only)
-        user = st.session_state.get("user")
-        if user and user.get("is_admin"):
-            if st.button("👥 Users", width="stretch",
-                         type="primary" if st.session_state.current_page == "Users" else "secondary"):
-                st.session_state.current_page = "Users"
-                st.rerun()
-
-        # Database status
-        st.markdown("---")
-        db = get_database()
-        if db:
-            st.success("🟢 DB OK")
-        else:
-            st.error("🔴 DB offline")
-
+# ═══════════════════════════════════════════════════════════════════════════════
+# DASHBOARD
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def render_dashboard():
-    """Page Dashboard - Vue d'ensemble"""
-    from src.presentation.streamlit.dashboard import render_classification_filters
+    """
+    Page Dashboard - Vue d'ensemble avec KPIs et graphiques.
+
+    Affiche:
+    - KPIs principaux avec tendances
+    - Alertes automatiques
+    - Graphiques de répartition
+    - Top performers avec score
+    """
     from src.presentation.streamlit._pages.monitoring import detect_trends, generate_alerts
 
-    st.title("🏠 Dashboard")
-    st.markdown("Vue d'ensemble de vos données")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header
+    page_header(
+        title="Dashboard",
+        subtitle="Vue d'ensemble de vos données",
+        icon=ICONS["home"],
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.warning("Base de donnees non connectee")
+        alert("Base de données non connectée", variant="warning")
         return
 
-    # Multi-tenancy: recuperer l'utilisateur courant
+    # Multi-tenancy
     tenant_ctx = StreamlitTenantContext()
     user_id = tenant_ctx.user_uuid
 
-    # Filtres de classification
-    st.markdown("#### 🔍 Filtres")
-    filters = render_classification_filters(db, key_prefix="dashboard", columns=3)
-
-    # Afficher les filtres actifs
-    active_filters = []
-    if filters.get("thematique"):
-        active_filters.append(f"🏷️ {filters['thematique']}")
-    if filters.get("subcategory"):
-        active_filters.append(f"📂 {filters['subcategory']}")
-    if filters.get("pays"):
-        active_filters.append(f"🌍 {filters['pays']}")
-
-    if active_filters:
-        st.caption(f"Filtres actifs: {' - '.join(active_filters)}")
+    # Section Filtres
+    section_header("Filtres", icon="🔍")
+    filters = filter_bar(
+        db=db,
+        key_prefix="dashboard",
+        show_thematique=True,
+        show_subcategory=True,
+        show_pays=True,
+        columns=3,
+        user_id=user_id
+    )
+    active_filters_display(filters)
 
     st.markdown("---")
 
     try:
-        # Utiliser les stats filtrees si des filtres sont actifs
+        # Récupérer les statistiques
         if any(filters.values()):
             stats = get_suivi_stats_filtered(
                 db,
@@ -300,118 +204,122 @@ def render_dashboard():
 
         winning_stats = get_winning_ads_stats(db, days=7, user_id=user_id)
         winning_by_page = get_winning_ads_count_by_page(db, days=30, user_id=user_id)
-
-        # Recuperer les tendances (7 jours vs 7 jours precedents)
         trends = get_dashboard_trends(db, days=7, user_id=user_id)
 
-        # KPIs principaux avec trends
-        col1, col2, col3, col4, col5 = st.columns(5)
-
+        # Extraire les données
         total_pages = stats.get("total_pages", 0)
         etats = stats.get("etats", {})
         cms_stats = stats.get("cms", {})
-
         actives = sum(v for k, v in etats.items() if k != "inactif")
         shopify_count = cms_stats.get("Shopify", 0)
         xxl_count = etats.get("XXL", 0)
         winning_total = winning_stats.get("total", 0)
 
-        # Formater les deltas pour affichage
+        # Deltas
         pages_delta = trends.get("pages", {}).get("delta", 0)
         winning_delta = trends.get("winning_ads", {}).get("delta", 0)
         rising = trends.get("evolution", {}).get("rising", 0)
         falling = trends.get("evolution", {}).get("falling", 0)
 
-        col1.metric(
-            "📄 Total Pages",
-            total_pages,
-            delta=f"+{pages_delta} (7j)" if pages_delta > 0 else f"{pages_delta} (7j)" if pages_delta < 0 else None,
-            delta_color="normal"
-        )
-        col2.metric(
-            "✅ Actives",
-            actives,
-            delta=f"📈 {rising} montantes" if rising > 0 else None,
-            delta_color="normal"
-        )
-        col3.metric("🚀 XXL (>=150)", xxl_count)
-        col4.metric("🛒 Shopify", shopify_count)
-        col5.metric(
-            "🏆 Winning (7j)",
-            winning_total,
-            delta=f"+{winning_delta} vs sem. préc." if winning_delta > 0 else f"{winning_delta} vs sem. préc." if winning_delta < 0 else None,
-            delta_color="normal" if winning_delta >= 0 else "inverse"
-        )
+        # KPIs principaux
+        kpis = [
+            {
+                "label": "Total Pages",
+                "value": format_number(total_pages),
+                "delta": f"+{pages_delta} (7j)" if pages_delta > 0 else (f"{pages_delta} (7j)" if pages_delta < 0 else None),
+                "icon": "📄"
+            },
+            {
+                "label": "Actives",
+                "value": format_number(actives),
+                "delta": f"📈 {rising} montantes" if rising > 0 else None,
+                "icon": "✅"
+            },
+            {
+                "label": "XXL (>=150)",
+                "value": format_number(xxl_count),
+                "icon": "🚀"
+            },
+            {
+                "label": "Shopify",
+                "value": format_number(shopify_count),
+                "icon": "🛒"
+            },
+            {
+                "label": "Winning (7j)",
+                "value": format_number(winning_total),
+                "delta": f"+{winning_delta} vs sem." if winning_delta > 0 else (f"{winning_delta} vs sem." if winning_delta < 0 else None),
+                "icon": "🏆"
+            },
+        ]
+        kpi_row(kpis, columns=5)
 
-        # Encart Tendances (7 jours)
+        # Section Tendances (collapsible)
         if rising > 0 or falling > 0 or pages_delta != 0 or winning_delta != 0:
             with st.expander("📈 Tendances (7 derniers jours)", expanded=False):
-                trend_cols = st.columns(4)
-                with trend_cols[0]:
-                    st.metric(
-                        "Nouvelles pages",
-                        trends.get("pages", {}).get("current", 0),
-                        delta=f"+{pages_delta}" if pages_delta > 0 else str(pages_delta) if pages_delta < 0 else "stable"
-                    )
-                with trend_cols[1]:
-                    st.metric(
-                        "Winning ads",
-                        trends.get("winning_ads", {}).get("current", 0),
-                        delta=f"+{winning_delta}" if winning_delta > 0 else str(winning_delta) if winning_delta < 0 else "stable"
-                    )
-                with trend_cols[2]:
-                    searches_delta = trends.get("searches", {}).get("delta", 0)
-                    st.metric(
-                        "Recherches",
-                        trends.get("searches", {}).get("current", 0),
-                        delta=f"+{searches_delta}" if searches_delta > 0 else str(searches_delta) if searches_delta < 0 else "stable"
-                    )
-                with trend_cols[3]:
-                    net_evolution = rising - falling
-                    st.metric(
-                        "Balance evolution",
-                        f"📈 {rising} / 📉 {falling}",
-                        delta=f"+{net_evolution} net" if net_evolution > 0 else f"{net_evolution} net" if net_evolution < 0 else "equilibre",
-                        delta_color="normal" if net_evolution >= 0 else "inverse"
-                    )
+                trend_stats = [
+                    {
+                        "label": "Nouvelles pages",
+                        "value": trends.get("pages", {}).get("current", 0),
+                        "delta": f"+{pages_delta}" if pages_delta > 0 else (str(pages_delta) if pages_delta < 0 else "stable")
+                    },
+                    {
+                        "label": "Winning ads",
+                        "value": trends.get("winning_ads", {}).get("current", 0),
+                        "delta": f"+{winning_delta}" if winning_delta > 0 else (str(winning_delta) if winning_delta < 0 else "stable")
+                    },
+                    {
+                        "label": "Recherches",
+                        "value": trends.get("searches", {}).get("current", 0),
+                        "delta": None
+                    },
+                    {
+                        "label": "Balance évolution",
+                        "value": f"📈 {rising} / 📉 {falling}",
+                        "delta": f"+{rising - falling} net" if rising != falling else "équilibré"
+                    },
+                ]
+                stats_row(trend_stats, columns=4)
 
-        # Quick Alerts
+        # Alertes
         alerts = generate_alerts(db, user_id=user_id)
         if alerts:
             st.markdown("---")
-            st.subheader("🔔 Alertes")
+            section_header("Alertes", icon="🔔")
             alert_cols = st.columns(min(len(alerts), 4))
-            for i, alert in enumerate(alerts[:4]):
+            for i, alert_data in enumerate(alerts[:4]):
                 with alert_cols[i]:
-                    if alert["type"] == "success":
-                        st.success(f"{alert['icon']} **{alert['title']}**\n\n{alert['message']}")
-                    elif alert["type"] == "warning":
-                        st.warning(f"{alert['icon']} **{alert['title']}**\n\n{alert['message']}")
+                    variant = alert_data.get("type", "info")
+                    if variant == "success":
+                        st.success(f"{alert_data['icon']} **{alert_data['title']}**\n\n{alert_data['message']}")
+                    elif variant == "warning":
+                        st.warning(f"{alert_data['icon']} **{alert_data['title']}**\n\n{alert_data['message']}")
                     else:
-                        st.info(f"{alert['icon']} **{alert['title']}**\n\n{alert['message']}")
+                        st.info(f"{alert_data['icon']} **{alert_data['title']}**\n\n{alert_data['message']}")
 
         st.markdown("---")
 
-        # Info card pour debutants
+        # Info card pour débutants
         info_card(
-            "Comment lire ces graphiques ?",
-            """
-            <b>Etats des pages</b> : Classement base sur le nombre d'annonces actives.<br>
-            • <b>XXL</b> (>=150 ads) = Pages tres actives, probablement rentables<br>
+            title="Comment lire ces graphiques ?",
+            content="""
+            <b>États des pages</b> : Classement basé sur le nombre d'annonces actives.<br>
+            • <b>XXL</b> (>=150 ads) = Pages très actives, probablement rentables<br>
             • <b>XL</b> (80-149) = Pages performantes<br>
-            • <b>L</b> (35-79) = Bonne activite<br>
-            • <b>M/S/XS</b> = Activite moderee a faible<br><br>
-            <b>CMS</b> : La technologie utilisee par le site (Shopify est le plus courant en e-commerce).
+            • <b>L</b> (35-79) = Bonne activité<br>
+            • <b>M/S/XS</b> = Activité modérée à faible<br><br>
+            <b>CMS</b> : La technologie utilisée par le site (Shopify est le plus courant en e-commerce).
             """,
-            "📚"
+            icon="📚",
+            expanded=False
         )
 
-        # Graphiques ameliores
-        col1, col2 = st.columns(2)
+        # Graphiques
+        col1, col2 = two_column_layout(left_width=1, right_width=1)
 
         with col1:
             chart_header(
-                "📊 Repartition par Etat",
+                "📊 Répartition par État",
                 "Classement des pages selon leur nombre d'annonces actives",
                 "XXL = >=150 ads, XL = 80-149, L = 35-79, M = 20-34, S = 10-19, XS = 1-9"
             )
@@ -427,14 +335,14 @@ def render_dashboard():
                         value_suffix=" pages",
                         height=280
                     )
-                    st.plotly_chart(fig, key="dash_etats", width="stretch")
+                    st.plotly_chart(fig, key="dash_etats", use_container_width=True)
             else:
-                st.info("Aucune donnee disponible")
+                empty_state("Aucune donnée disponible", icon="📊")
 
         with col2:
             chart_header(
-                "🛒 Repartition par CMS",
-                "Technologie e-commerce utilisee par les sites",
+                "🛒 Répartition par CMS",
+                "Technologie e-commerce utilisée par les sites",
                 "Shopify est la plateforme la plus populaire pour le dropshipping"
             )
             if cms_stats:
@@ -446,13 +354,17 @@ def render_dashboard():
                     values=values,
                     height=280
                 )
-                st.plotly_chart(fig, key="dash_cms", width="stretch")
+                st.plotly_chart(fig, key="dash_cms", use_container_width=True)
             else:
-                st.info("Aucune donnee disponible")
+                empty_state("Aucune donnée disponible", icon="🛒")
 
-        # Top performers avec score
+        # Top performers
         st.markdown("---")
-        st.subheader("🌟 Top Performers (avec Score)")
+        section_header(
+            title="Top Performers",
+            subtitle="Pages avec les meilleurs scores de performance",
+            icon="🌟"
+        )
 
         top_pages = search_pages(db, limit=15, user_id=user_id)
         if top_pages:
@@ -466,49 +378,53 @@ def render_dashboard():
             # Trier par score
             top_pages = sorted(top_pages, key=lambda x: x["score"], reverse=True)[:10]
 
-            # Formater etats avec badges
+            # Formater états avec indicateurs
             for p in top_pages:
                 p["etat_display"] = format_state_for_df(p.get("etat", ""))
 
             df = pd.DataFrame(top_pages)
             cols_to_show = ["page_name", "cms", "etat_display", "nombre_ads_active", "winning_count", "score_display"]
-            col_names = ["Nom", "CMS", "Etat", "Ads", "🏆 Winning", "Score"]
+            col_names = ["Nom", "CMS", "État", "Ads", "🏆 Winning", "Score"]
             df_display = df[[c for c in cols_to_show if c in df.columns]]
             df_display.columns = col_names[:len(df_display.columns)]
-            st.dataframe(df_display, width="stretch", hide_index=True)
 
-            # Export button
-            csv_data = export_to_csv(top_pages)
-            st.download_button(
-                "📥 Exporter en CSV",
-                csv_data,
-                "top_performers.csv",
-                "text/csv",
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+            # Export
+            export_button(
+                data=top_pages,
+                filename="top_performers.csv",
+                label="Exporter en CSV",
+                icon="📥",
                 key="export_top"
             )
         else:
-            st.info("Aucune page en base. Lancez une recherche pour commencer.")
+            empty_state(
+                title="Aucune page en base",
+                description="Lancez une recherche pour commencer à collecter des données.",
+                icon="🔍",
+            )
 
-        # Tendances
+        # Tendances détaillées
         st.markdown("---")
-        col1, col2 = st.columns(2)
+        col1, col2 = two_column_layout()
 
         with col1:
-            st.subheader("📈 En forte croissance (7j)")
+            section_header("En forte croissance (7j)", icon="📈")
             trend_data = detect_trends(db, days=7, user_id=user_id)
             if trend_data["rising"]:
                 for t in trend_data["rising"][:5]:
                     st.write(f"🚀 **{t['nom_site']}** +{t['pct_ads']:.0f}% ({t['ads_actuel']} ads)")
             else:
-                st.caption("Aucune tendance detectee")
+                st.caption("Aucune tendance détectée")
 
         with col2:
-            st.subheader("📉 En declin")
+            section_header("En déclin", icon="📉")
             if trend_data.get("falling"):
                 for t in trend_data["falling"][:5]:
                     st.write(f"⚠️ **{t['nom_site']}** {t['pct_ads']:.0f}% ({t['ads_actuel']} ads)")
             else:
-                st.caption("Aucune page en declin")
+                st.caption("Aucune page en déclin")
 
     except Exception as e:
-        st.error(f"Erreur: {e}")
+        st.error(f"Erreur lors du chargement du dashboard: {e}")

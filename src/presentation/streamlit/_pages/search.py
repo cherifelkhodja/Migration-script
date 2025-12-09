@@ -78,6 +78,18 @@ import streamlit as st
 import pandas as pd
 
 from src.presentation.streamlit.shared import get_database
+
+# Design System imports
+from src.presentation.streamlit.ui import (
+    # Theme
+    apply_theme, COLORS, ICONS,
+    # Atoms
+    format_number,
+    # Molecules
+    section_header, alert, empty_state,
+    # Layouts
+    page_header, kpi_row,
+)
 from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 from src.infrastructure.persistence.database import (
     get_blacklist_ids, add_to_blacklist,
@@ -111,17 +123,26 @@ def render_search_ads():
     """Page Search Ads - Recherche d'annonces"""
     from src.presentation.streamlit.dashboard import get_search_history, render_search_history_selector
 
-    st.title("🔍 Search Ads")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Search Ads",
+        subtitle="Rechercher et analyser des annonces Meta",
+        icon=ICONS.get("search", "🔍"),
+        show_divider=False
+    )
 
     # Verifier si on a des resultats en apercu a afficher
     if st.session_state.get("show_preview_results", False):
         render_preview_results()
         return
 
-    # Header avec historique
+    # Historique de recherche
     col_title, col_history = st.columns([2, 1])
     with col_title:
-        st.markdown("Rechercher et analyser des annonces Meta")
+        pass  # Subtitle already in header
     with col_history:
         # Selecteur d'historique
         history = get_search_history()
@@ -153,7 +174,7 @@ def render_keyword_search():
     user_id = tenant_ctx.user_uuid
 
     # ═══ CHAMPS ESSENTIELS (toujours visibles) ═══
-    st.subheader("🎯 Recherche rapide")
+    section_header("Recherche rapide", icon="🎯")
 
     col1, col2 = st.columns([2, 1])
 
@@ -252,7 +273,7 @@ def render_page_id_search():
     """Recherche par Page IDs (optimisée par batch de 10)"""
 
     # ═══ CHAMPS ESSENTIELS ═══
-    st.subheader("🆔 Recherche par Page IDs")
+    section_header("Recherche par Page IDs", icon="🆔")
 
     col1, col2 = st.columns([2, 1])
 
@@ -328,8 +349,8 @@ def format_state_for_df(etat: str) -> str:
 
 def render_preview_results():
     """Affiche les résultats en mode aperçu"""
-    st.subheader("📋 Aperçu des résultats")
-    st.warning("⚠️ Mode aperçu activé - Les données ne sont pas encore enregistrées")
+    section_header("Apercu des resultats", icon="📋")
+    alert("Mode apercu active - Les donnees ne sont pas encore enregistrees", variant="warning")
 
     db = get_database()
     tenant_ctx = StreamlitTenantContext()
@@ -340,7 +361,11 @@ def render_preview_results():
     countries = st.session_state.get("countries", ["FR"])
 
     if not pages_final:
-        st.info("Aucun résultat à afficher")
+        empty_state(
+            title="Aucun resultat a afficher",
+            description="Lancez une nouvelle recherche pour voir des resultats.",
+            icon="📋"
+        )
         if st.button("🔙 Nouvelle recherche"):
             st.session_state.show_preview_results = False
             st.rerun()
@@ -355,15 +380,17 @@ def render_preview_results():
     # Récupérer les ads
     page_ads = st.session_state.get("page_ads", {})
 
-    # Statistiques globales
+    # Statistiques globales avec Design System
     total_winning = len(winning_ads_data)
     total_ads = sum(d.get('ads_active_total', 0) for d in pages_final.values())
 
-    col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-    col_stat1.metric("📊 Pages", len(pages_final))
-    col_stat2.metric("📢 Ads totales", total_ads)
-    col_stat3.metric("🏆 Winning Ads", total_winning)
-    col_stat4.metric("📈 Pages avec Winning", len(winning_by_page))
+    preview_kpis = [
+        {"label": "Pages", "value": format_number(len(pages_final)), "icon": "📊"},
+        {"label": "Ads totales", "value": format_number(total_ads), "icon": "📢"},
+        {"label": "Winning Ads", "value": format_number(total_winning), "icon": "🏆"},
+        {"label": "Pages avec Winning", "value": format_number(len(winning_by_page)), "icon": "📈"},
+    ]
+    kpi_row(preview_kpis, columns=4)
 
     # ═══ 4 ONGLETS POUR LES DIFFÉRENTES DONNÉES ═══
     tab_pages, tab_ads, tab_winning, tab_pages_winning = st.tabs([

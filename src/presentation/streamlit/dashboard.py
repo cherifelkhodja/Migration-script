@@ -1,8 +1,19 @@
 """
 Dashboard Streamlit pour Meta Ads Analyzer.
 
-Design moderne avec navigation latérale.
+Design moderne avec navigation latérale utilisant le Design System Craft.
 Module principal de l'interface utilisateur.
+
+Architecture:
+    Ce module est le point d'entrée de l'application Streamlit.
+    Il utilise le Design System (ui/) pour garantir la cohérence visuelle.
+
+Design System:
+    - ui/theme.py : Tokens de design centralisés
+    - ui/atoms.py : Composants atomiques
+    - ui/molecules.py : Molécules réutilisables
+    - ui/layouts.py : Layouts de pages
+    - ui/organisms.py : Composants complexes (navigation)
 """
 import warnings
 warnings.filterwarnings("ignore", message="urllib3 v2 only supports OpenSSL")
@@ -28,22 +39,40 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-# Import des composants UI
+# ═══════════════════════════════════════════════════════════════════════════════
+# DESIGN SYSTEM IMPORTS
+# ═══════════════════════════════════════════════════════════════════════════════
+from src.presentation.streamlit.ui import (
+    # Theme
+    apply_theme, COLORS, STATE_COLORS, CMS_COLORS, ICONS,
+    CHART_COLORS, CHART_LAYOUT,
+
+    # Atoms
+    format_number, format_percentage, format_time_elapsed, truncate_text,
+    state_indicator,
+
+    # Molecules
+    filter_bar, active_filters_display,
+
+    # Layouts
+    page_layout,
+)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMPOSANTS UI LEGACY (migration progressive)
+# ═══════════════════════════════════════════════════════════════════════════════
 from src.presentation.streamlit.components import (
     # Charts
-    CHART_COLORS, CHART_LAYOUT,
     info_card, chart_header,
     create_horizontal_bar_chart, create_donut_chart,
     create_trend_chart, create_gauge_chart,
     create_metric_card, create_comparison_bars,
     # Badges
-    STATE_COLORS, CMS_COLORS,
     get_state_badge, get_cms_badge, format_state_for_df,
     apply_custom_css,
     # Utils
     calculate_page_score, get_score_color, get_score_level,
-    export_to_csv, df_to_csv, format_number, format_percentage,
-    format_time_elapsed, truncate_text, get_delta_indicator,
+    export_to_csv, df_to_csv, get_delta_indicator,
 )
 
 # Import des pages extraites (underscore prefix hides from Streamlit multipage)
@@ -983,8 +1012,12 @@ def main():
         # Ne pas bloquer l'app si le worker échoue
         print(f"[Worker] Erreur initialisation: {e}")
 
-    apply_dark_mode()  # Appliquer le thème sombre si activé
-    apply_custom_css()  # Appliquer les styles personnalisés
+    # Appliquer le Design System (thème + CSS)
+    apply_theme()
+
+    # Appliquer aussi le CSS legacy pour compatibilité
+    apply_custom_css()
+
     render_sidebar()
 
     # Bouton de deconnexion dans la sidebar

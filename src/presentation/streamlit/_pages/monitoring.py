@@ -46,6 +46,14 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from src.presentation.streamlit.shared import get_database
+
+# Design System imports
+from src.presentation.streamlit.ui import (
+    apply_theme, ICONS,
+    page_header, section_header,
+    alert, empty_state, format_number,
+    kpi_row,
+)
 from src.presentation.streamlit.components import (
     CHART_COLORS, chart_header, create_trend_chart
 )
@@ -76,12 +84,20 @@ def render_watchlists():
         render_classification_filters, render_date_filter
     )
 
-    st.title("📋 Watchlists")
-    st.markdown("Gérer vos listes de surveillance")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Watchlists",
+        subtitle="Gerer vos listes de surveillance",
+        icon=ICONS.get("list", "📋"),
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.warning("Base de donnees non connectee")
+        alert("Base de donnees non connectee", variant="warning")
         return
 
     # Multi-tenancy: recuperer l'utilisateur courant
@@ -324,12 +340,20 @@ def render_alerts():
     from src.presentation.streamlit.dashboard import render_classification_filters
     # detect_trends and generate_alerts are defined in this file (monitoring.py)
 
-    st.title("🔔 Alerts")
-    st.markdown("Alertes et changements détectés automatiquement")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Alerts",
+        subtitle="Alertes et changements detectes automatiquement",
+        icon=ICONS.get("bell", "🔔"),
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.warning("Base de donnees non connectee")
+        alert("Base de donnees non connectee", variant="warning")
         return
 
     # Multi-tenancy: recuperer l'utilisateur courant
@@ -445,12 +469,20 @@ def render_alerts():
 
 def render_monitoring():
     """Page Monitoring - Suivi historique et evolution"""
-    st.title("📈 Monitoring")
-    st.markdown("Suivi de l'évolution des pages depuis le dernier scan")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Monitoring",
+        subtitle="Suivi de l'evolution des pages depuis le dernier scan",
+        icon=ICONS.get("chart", "📈"),
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.warning("Base de donnees non connectee")
+        alert("Base de donnees non connectee", variant="warning")
         return
 
     # Multi-tenancy: recuperer l'utilisateur courant

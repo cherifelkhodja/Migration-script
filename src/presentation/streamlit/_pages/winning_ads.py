@@ -60,8 +60,21 @@ import streamlit as st
 import pandas as pd
 
 from src.presentation.streamlit.shared import get_database
+
+# Design System imports
+from src.presentation.streamlit.ui import (
+    # Theme
+    apply_theme, COLORS, ICONS,
+    # Atoms
+    format_number, state_indicator,
+    # Molecules
+    info_card, section_header, filter_bar, active_filters_display,
+    empty_state, alert, export_button,
+    # Layouts
+    page_header, kpi_row, two_column_layout,
+)
 from src.presentation.streamlit.components import (
-    CHART_COLORS, info_card, chart_header,
+    CHART_COLORS, chart_header,
     create_horizontal_bar_chart, export_to_csv
 )
 from src.infrastructure.persistence.database import (
@@ -153,12 +166,20 @@ def render_classification_filters(db, key_prefix: str = "", columns: int = 3, us
 
 def render_winning_ads():
     """Page Winning Ads - Annonces performantes detectees"""
-    st.title("🏆 Winning Ads")
-    st.markdown("Annonces performantes basees sur reach + age")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Winning Ads",
+        subtitle="Annonces performantes basees sur reach + age",
+        icon=ICONS.get("trophy", "🏆"),
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.warning("Base de donnees non connectee")
+        alert("Base de donnees non connectee", variant="warning")
         return
 
     # Multi-tenancy: recuperer l'utilisateur courant
@@ -185,7 +206,7 @@ def render_winning_ads():
         """)
 
     # Filtres de classification
-    st.markdown("#### 🔍 Filtres")
+    section_header("Filtres", icon="🔍")
 
     # Filtre par ID (Page ID ou Ad ID)
     col_id1, col_id2 = st.columns(2)
@@ -273,18 +294,20 @@ def render_winning_ads():
             stats = get_winning_ads_stats(db, days=period, user_id=user_id)
 
         st.markdown("---")
-        st.subheader("📊 Statistiques")
-
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("🏆 Total Winning Ads", stats.get("total", 0))
-        col2.metric("📄 Pages avec Winning", stats.get("unique_pages", 0))
-        col3.metric("📈 Reach moyen", f"{stats.get('avg_reach', 0):,}".replace(",", " "))
+        section_header("Statistiques", icon="📊")
 
         # Criteres les plus frequents
         by_criteria = stats.get("by_criteria", {})
-        if by_criteria:
-            top_criteria = max(by_criteria.items(), key=lambda x: x[1]) if by_criteria else ("N/A", 0)
-            col4.metric("🎯 Critere top", top_criteria[0])
+        top_criteria = max(by_criteria.items(), key=lambda x: x[1]) if by_criteria else ("N/A", 0)
+
+        # KPIs avec Design System
+        kpis = [
+            {"label": "Total Winning Ads", "value": format_number(stats.get("total", 0)), "icon": "🏆"},
+            {"label": "Pages avec Winning", "value": format_number(stats.get("unique_pages", 0)), "icon": "📄"},
+            {"label": "Reach moyen", "value": format_number(stats.get("avg_reach", 0)), "icon": "📈"},
+            {"label": "Critere top", "value": top_criteria[0] if by_criteria else "N/A", "icon": "🎯"},
+        ]
+        kpi_row(kpis, columns=4)
 
         # Graphique par critere
         if by_criteria:
@@ -302,7 +325,7 @@ def render_winning_ads():
                 "🎯"
             )
 
-            col1, col2 = st.columns(2)
+            col1, col2 = two_column_layout()
 
             with col1:
                 chart_header(
@@ -365,7 +388,11 @@ def render_winning_ads():
         if winning_ads:
             _render_winning_ads_list(winning_ads, group_by, period)
         else:
-            st.info("Aucune winning ad trouvee pour cette periode. Lancez une recherche pour en detecter.")
+            empty_state(
+                title="Aucune winning ad trouvee",
+                description="Lancez une recherche pour detecter des annonces performantes.",
+                icon="🏆"
+            )
 
     except Exception as e:
         st.error(f"Erreur: {e}")
