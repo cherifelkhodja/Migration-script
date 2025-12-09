@@ -540,12 +540,28 @@ def render_preview_results():
                 try:
                     thresholds = st.session_state.get("state_thresholds", None)
                     languages = st.session_state.get("languages", ["fr"])
-                    pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds, user_id=user_id)
+                    search_log_id = st.session_state.get("search_log_id")  # Recuperer le log_id
+                    pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds, search_log_id, user_id=user_id)
                     det = st.session_state.get("detection_thresholds", {})
                     suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI), user_id=user_id)
                     ads_saved = save_ads_recherche(db, pages_final, st.session_state.get("page_ads", {}), countries, det.get("min_ads_liste", MIN_ADS_LISTE), user_id=user_id)
                     winning_ads_data = st.session_state.get("winning_ads_data", [])
-                    winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data, user_id=user_id)
+                    winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data, search_log_id, user_id=user_id)
+
+                    # Mettre a jour le search_log avec les IDs JSON pour l'historique
+                    if search_log_id:
+                        import json
+                        from src.infrastructure.persistence.database import update_search_log
+                        page_ids_list = [str(pid) for pid in pages_final.keys()]
+                        winning_ad_ids_list = [str(data.get("ad", {}).get("id", "")) for data in winning_ads_data if data.get("ad", {}).get("id")]
+                        update_search_log(
+                            db, search_log_id,
+                            status="completed",
+                            page_ids=json.dumps(page_ids_list),
+                            winning_ad_ids=json.dumps(winning_ad_ids_list),
+                            pages_saved=pages_saved,
+                            winning_ads_count=len(winning_ads_data)
+                        )
 
                     msg = f"✅ Sauvegardé : {pages_saved} pages, {suivi_saved} suivi, {ads_saved} ads, {winning_saved} winning"
                     if winning_updated > 0:
@@ -1151,6 +1167,7 @@ def run_search_process(
     st.session_state.countries = countries
     st.session_state.languages = languages
     st.session_state.preview_mode = preview_mode
+    st.session_state.search_log_id = log_id  # Pour la sauvegarde depuis l'apercu
 
     if preview_mode:
         tracker.show_summary()
@@ -1171,7 +1188,7 @@ def run_search_process(
             try:
                 tracker.update_step("Sauvegarde pages", 1, 4)
                 thresholds = st.session_state.get("state_thresholds", None)
-                pages_result = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds, user_id=user_id)
+                pages_result = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds, log_id, user_id=user_id)
                 if isinstance(pages_result, tuple):
                     pages_saved, pages_new, pages_existing = pages_result
                 else:
@@ -1187,7 +1204,22 @@ def run_search_process(
                 ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, det.get("min_ads_liste", MIN_ADS_LISTE), user_id=user_id)
 
                 tracker.update_step("Sauvegarde winning ads", 4, 4)
-                winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data, user_id=user_id)
+                winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data, log_id, user_id=user_id)
+
+                # Mettre a jour le search_log avec les IDs JSON pour l'historique
+                if log_id:
+                    import json
+                    from src.infrastructure.persistence.database import update_search_log
+                    page_ids_list = [str(pid) for pid in pages_final.keys()]
+                    winning_ad_ids_list = [str(data.get("ad", {}).get("id", "")) for data in winning_ads_data if data.get("ad", {}).get("id")]
+                    update_search_log(
+                        db, log_id,
+                        status="completed",
+                        page_ids=json.dumps(page_ids_list),
+                        winning_ad_ids=json.dumps(winning_ad_ids_list),
+                        pages_saved=pages_saved,
+                        winning_ads_count=len(winning_ads_data)
+                    )
 
                 msg = f"{pages_saved} pages, {ads_saved} ads, {winning_saved} winning ({winning_new} 🆕)"
 
@@ -1222,9 +1254,13 @@ def run_search_process(
 
 def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mode=False):
     """Execute la recherche par Page IDs (optimisee par batch de 10)"""
+    import json
     from src.presentation.streamlit.dashboard import add_to_search_history
     from src.infrastructure.external_services.meta_api import init_token_rotator
-    from src.infrastructure.persistence.database import get_active_meta_tokens_with_proxies, ensure_tables_exist
+    from src.infrastructure.persistence.database import (
+        get_active_meta_tokens_with_proxies, ensure_tables_exist,
+        create_search_log, update_search_log
+    )
 
     db = get_database()
     tenant_ctx = StreamlitTenantContext()
@@ -1262,6 +1298,22 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
         st.success(f"Rotation automatique activee ({rotator.token_count} tokens)")
 
     client = MetaAdsClient(rotator.get_current_token())
+
+    # Creer le log de recherche
+    log_id = None
+    if db:
+        try:
+            log_id = create_search_log(
+                db,
+                keywords=page_ids,  # Les page_ids comme "keywords" pour ce type de recherche
+                countries=countries,
+                languages=languages,
+                min_ads=1,
+                selected_cms=selected_cms if selected_cms else [],
+                user_id=user_id
+            )
+        except Exception as e:
+            st.warning(f"⚠️ Log non cree: {str(e)[:100]}")
 
     # Recuperer la blacklist
     blacklist_ids = set()
@@ -1497,6 +1549,7 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
     st.session_state.countries = countries
     st.session_state.languages = languages
     st.session_state.preview_mode = preview_mode
+    st.session_state.search_log_id = log_id  # Pour la sauvegarde depuis l'apercu
 
     if preview_mode:
         st.success(f"Recherche terminee ! {len(pages_final)} pages trouvees")
@@ -1508,11 +1561,24 @@ def run_page_id_search(page_ids, countries, languages, selected_cms, preview_mod
         if db:
             try:
                 thresholds = st.session_state.get("state_thresholds", None)
-                pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds, user_id=user_id)
+                pages_saved = save_pages_recherche(db, pages_final, web_results, countries, languages, thresholds, log_id, user_id=user_id)
                 det = st.session_state.get("detection_thresholds", {})
                 suivi_saved = save_suivi_page(db, pages_final, web_results, det.get("min_ads_suivi", MIN_ADS_SUIVI), user_id=user_id)
                 ads_saved = save_ads_recherche(db, pages_final, dict(page_ads), countries, det.get("min_ads_liste", MIN_ADS_LISTE), user_id=user_id)
-                winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data, user_id=user_id)
+                winning_saved, winning_new, winning_updated = save_winning_ads(db, winning_ads_data, log_id, user_id=user_id)
+
+                # Mettre a jour le search_log avec les IDs JSON pour l'historique
+                if log_id:
+                    page_ids_list = [str(pid) for pid in pages_final.keys()]
+                    winning_ad_ids_list = [str(data.get("ad", {}).get("id", "")) for data in winning_ads_data if data.get("ad", {}).get("id")]
+                    update_search_log(
+                        db, log_id,
+                        status="completed",
+                        page_ids=json.dumps(page_ids_list),
+                        winning_ad_ids=json.dumps(winning_ad_ids_list),
+                        pages_saved=pages_saved,
+                        winning_ads_count=len(winning_ads_data)
+                    )
 
                 col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Pages", pages_saved)
