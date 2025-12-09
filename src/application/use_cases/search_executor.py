@@ -659,6 +659,12 @@ def execute_background_search(
     cached_page_ids = [pid for pid, w in web_results.items() if w.get("_from_cache")]
     pages_to_analyze_ids = [pid for pid, data in pages_need_analysis]
 
+    # Mise à jour initiale avec info cache
+    cache_info = f"Cache: {pages_cached} pages"
+    if pages_need_analysis:
+        cache_info += f" | À analyser: {len(pages_need_analysis)} sites"
+    tracker.update_step("Préparation", pages_cached, len(pages_final), cache_info)
+
     # Log détaillé avec IDs
     print(f"[Search #{search_id}] Phase 6 - Cache:")
     print(f"   ✅ {pages_cached} pages en cache valide:")
@@ -683,6 +689,9 @@ def execute_background_search(
 
     if pages_need_analysis:
         completed = 0
+        total_to_analyze = len(pages_need_analysis)
+        tracker.update_step("Analyse web", 0, total_to_analyze, f"Démarrage analyse de {total_to_analyze} sites...")
+
         with ThreadPoolExecutor(max_workers=8) as executor:
             futures = {executor.submit(analyze_web_worker, item): item[0] for item in pages_need_analysis}
             for future in as_completed(futures):
@@ -692,8 +701,8 @@ def execute_background_search(
                 if not data.get("currency") and result.get("currency_from_site"):
                     data["currency"] = result["currency_from_site"]
                 completed += 1
-                if completed % 5 == 0:
-                    tracker.update_step("Analyse web", completed, len(pages_need_analysis))
+                # Mise à jour à chaque page pour un meilleur feedback
+                tracker.update_step("Analyse web", completed, total_to_analyze, f"Site {completed}/{total_to_analyze}")
 
     # ═══ Classification Gemini (pages nouvellement analysées) ═══
     classified_count = 0
@@ -742,7 +751,8 @@ def execute_background_search(
         print(f"   ⚠️ Clé Gemini: NON CONFIGURÉE")
 
     if gemini_key and pages_to_classify_data:
-        tracker.update_step("Classification Gemini", 0, 1)
+        total_to_classify = len(pages_to_classify_data)
+        tracker.update_step("Classification Gemini", 0, total_to_classify, f"Classification de {total_to_classify} pages...")
         try:
             try:
                 from src.infrastructure.external_services.gemini_classifier import classify_pages_batch
@@ -751,16 +761,20 @@ def execute_background_search(
 
             classification_results = classify_pages_batch(db, pages_to_classify_data)
 
+            classified_idx = 0
             for pid, classification in classification_results.items():
                 if pid in web_results:
                     web_results[pid]["gemini_category"] = classification.get("category", "")
                     web_results[pid]["gemini_subcategory"] = classification.get("subcategory", "")
                     web_results[pid]["gemini_confidence"] = classification.get("confidence", 0.0)
+                classified_idx += 1
 
             classified_count = len(classification_results)
+            tracker.update_step("Classification Gemini", classified_count, total_to_classify, f"{classified_count} pages classifiées")
             print(f"[Search #{search_id}] ✅ {classified_count} pages classifiées")
 
         except Exception as e:
+            tracker.update_step("Classification Gemini", 0, 1, f"Erreur: {str(e)[:50]}")
             print(f"[Search #{search_id}] ❌ Erreur classification: {e}")
 
     phase6_stats = {
