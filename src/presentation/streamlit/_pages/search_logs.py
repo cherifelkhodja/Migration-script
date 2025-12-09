@@ -195,12 +195,22 @@ def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
     pages_from_search = get_pages_for_search(db, log_id, limit=100, user_id=user_id)
 
     # FALLBACK 1: Si pas d'historique, utiliser last_search_log_id sur PageRecherche
-    if not pages_from_search and user_id:
+    if not pages_from_search:
         with db.get_session() as session:
-            fallback_pages = session.query(PageRecherche).filter(
-                PageRecherche.last_search_log_id == log_id,
-                PageRecherche.user_id == user_id
-            ).limit(100).all()
+            # Essayer d'abord avec user_id
+            query = session.query(PageRecherche).filter(
+                PageRecherche.last_search_log_id == log_id
+            )
+            if user_id:
+                query = query.filter(PageRecherche.user_id == user_id)
+            fallback_pages = query.limit(100).all()
+
+            # Si pas de resultats avec user_id, essayer sans
+            if not fallback_pages and user_id:
+                fallback_pages = session.query(PageRecherche).filter(
+                    PageRecherche.last_search_log_id == log_id
+                ).limit(100).all()
+
             if fallback_pages:
                 pages_from_search = [
                     {
@@ -239,12 +249,22 @@ def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
     if pages_from_search:
         # Utiliser les page_ids des pages trouvees pour recuperer les ads
         page_ids = [p.get("page_id") for p in pages_from_search if p.get("page_id")]
-        if page_ids and user_id:
+        if page_ids:
             with db.get_session() as session:
-                ads_results = session.query(AdsRecherche).filter(
-                    AdsRecherche.page_id.in_(page_ids),
-                    AdsRecherche.user_id == user_id
-                ).limit(100).all()
+                # Essayer d'abord avec user_id
+                query = session.query(AdsRecherche).filter(
+                    AdsRecherche.page_id.in_(page_ids)
+                )
+                if user_id:
+                    query = query.filter(AdsRecherche.user_id == user_id)
+                ads_results = query.limit(100).all()
+
+                # Si pas de resultats avec user_id, essayer sans
+                if not ads_results and user_id:
+                    ads_results = session.query(AdsRecherche).filter(
+                        AdsRecherche.page_id.in_(page_ids)
+                    ).limit(100).all()
+
                 ads_from_search = [
                     {
                         "id": a.id,
@@ -268,12 +288,22 @@ def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
     winning_from_search = get_winning_ads_for_search(db, log_id, limit=100, user_id=user_id)
 
     # FALLBACK: Si pas d'historique, utiliser search_log_id sur WinningAds
-    if not winning_from_search and user_id:
+    if not winning_from_search:
         with db.get_session() as session:
-            fallback_winning = session.query(WinningAds).filter(
-                WinningAds.search_log_id == log_id,
-                WinningAds.user_id == user_id
-            ).limit(100).all()
+            # Essayer d'abord avec user_id
+            query = session.query(WinningAds).filter(
+                WinningAds.search_log_id == log_id
+            )
+            if user_id:
+                query = query.filter(WinningAds.user_id == user_id)
+            fallback_winning = query.limit(100).all()
+
+            # Si pas de resultats avec user_id, essayer sans
+            if not fallback_winning and user_id:
+                fallback_winning = session.query(WinningAds).filter(
+                    WinningAds.search_log_id == log_id
+                ).limit(100).all()
+
             if fallback_winning:
                 winning_from_search = [
                     {
