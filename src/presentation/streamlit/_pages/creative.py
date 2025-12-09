@@ -51,6 +51,7 @@ from src.presentation.streamlit.components import (
     CHART_COLORS, info_card, chart_header, create_horizontal_bar_chart
 )
 from src.infrastructure.persistence.database import get_winning_ads
+from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 
 
 def render_creative_analysis():
@@ -62,6 +63,10 @@ def render_creative_analysis():
     if not db:
         st.warning("Base de donnees non connectee")
         return
+
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
 
     info_card(
         "Comment utiliser cette analyse ?",
@@ -77,7 +82,7 @@ def render_creative_analysis():
 
     try:
         # Recuperer les winning ads pour analyse
-        winning_ads = get_winning_ads(db, limit=500, days=30)
+        winning_ads = get_winning_ads(db, limit=500, days=30, user_id=user_id)
 
         if not winning_ads:
             st.warning("Pas assez de donnees. Lancez des recherches pour collecter des annonces.")
