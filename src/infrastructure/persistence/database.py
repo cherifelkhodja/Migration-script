@@ -267,6 +267,9 @@ def _run_migrations(db: DatabaseManager):
         ("saved_filters", "owner_id", "ALTER TABLE saved_filters ADD COLUMN IF NOT EXISTS owner_id UUID"),
         ("scheduled_scans", "owner_id", "ALTER TABLE scheduled_scans ADD COLUMN IF NOT EXISTS owner_id UUID"),
         ("scheduled_scans", "languages", "ALTER TABLE scheduled_scans ADD COLUMN IF NOT EXISTS languages VARCHAR(100) DEFAULT 'fr'"),
+        # JSON arrays for search history display
+        ("search_logs", "page_ids", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS page_ids TEXT"),
+        ("search_logs", "winning_ad_ids", "ALTER TABLE search_logs ADD COLUMN IF NOT EXISTS winning_ad_ids TEXT"),
     ]
 
     # Multi-tenancy: rename owner_id to user_id for consistency
