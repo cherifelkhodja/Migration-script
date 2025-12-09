@@ -115,7 +115,7 @@ from src.infrastructure.persistence.repositories import (
     record_page_search_history, record_pages_search_history_batch,
     record_winning_ad_search_history, record_winning_ads_search_history_batch,
     get_search_history_stats, update_search_log_phases, get_search_logs_stats,
-    get_pages_for_search, get_winning_ads_for_search,
+    get_pages_for_search, get_winning_ads_for_search, get_ads_for_search,
 )
 
 

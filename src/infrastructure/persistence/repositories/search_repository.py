@@ -23,6 +23,7 @@ from src.infrastructure.persistence.models import (
     WinningAdSearchHistory,
     PageRecherche,
     WinningAds,
+    AdsRecherche,
 )
 
 
@@ -813,6 +814,59 @@ def get_winning_ads_for_search(db, search_log_id: int, limit: int = 100, user_id
                 "was_new": a.was_new,
                 "reach_at_discovery": a.reach_at_discovery,
                 "age_days_at_discovery": a.age_days_at_discovery,
+            }
+            for a in results
+        ]
+
+
+def get_ads_for_search(db, search_log_id: int, limit: int = 100, user_id: Optional[UUID] = None) -> List[Dict]:
+    """
+    Recupere les ads trouvees lors d'une recherche specifique.
+
+    Les ads sont recuperees via les pages associees a la recherche
+    (pages enregistrees dans PageSearchHistory).
+
+    Args:
+        db: Instance DatabaseManager
+        search_log_id: ID du log de recherche
+        limit: Nombre maximum de resultats
+        user_id: UUID de l'utilisateur (multi-tenancy)
+
+    Returns:
+        Liste des ads avec leurs informations
+    """
+    # Isolation stricte
+    if user_id is None:
+        return []
+
+    with db.get_session() as session:
+        # D'abord, recuperer les page_ids de cette recherche
+        page_ids_query = session.query(PageSearchHistory.page_id).filter(
+            PageSearchHistory.search_log_id == search_log_id,
+            PageSearchHistory.user_id == user_id
+        ).subquery()
+
+        # Ensuite, recuperer les ads de ces pages
+        results = session.query(AdsRecherche).filter(
+            AdsRecherche.page_id.in_(page_ids_query),
+            AdsRecherche.user_id == user_id
+        ).limit(limit).all()
+
+        return [
+            {
+                "id": a.id,
+                "ad_id": a.ad_id,
+                "page_id": a.page_id,
+                "page_name": a.page_name,
+                "ad_creation_time": a.ad_creation_time,
+                "ad_creative_bodies": a.ad_creative_bodies,
+                "ad_creative_link_titles": a.ad_creative_link_titles,
+                "ad_snapshot_url": a.ad_snapshot_url,
+                "eu_total_reach": a.eu_total_reach,
+                "languages": a.languages,
+                "country": a.country,
+                "publisher_platforms": a.publisher_platforms,
+                "date_scan": a.date_scan,
             }
             for a in results
         ]

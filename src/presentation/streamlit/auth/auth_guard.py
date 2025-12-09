@@ -82,6 +82,8 @@ def restore_session_from_cookie() -> bool:
     Restaure la session depuis le cookie si disponible.
 
     A appeler au debut de l'application.
+    Le CookieManager de Streamlit necessite parfois un cycle de rendu
+    pour charger les cookies. Cette fonction gere ce cas avec un rerun automatique.
 
     Returns:
         True si la session a ete restauree.
@@ -94,10 +96,30 @@ def restore_session_from_cookie() -> bool:
     if not cookie_manager:
         return False
 
+    # Le CookieManager peut ne pas etre pret au premier rendu
+    # On utilise un compteur pour limiter les tentatives de rerun
+    restore_attempts_key = "_cookie_restore_attempts"
+    max_attempts = 2
+
     # Lire le cookie de session
     token = cookie_manager.get(COOKIE_NAME)
+
+    # Si pas de token et on n'a pas encore tente de rerun
     if not token:
+        current_attempts = st.session_state.get(restore_attempts_key, 0)
+        if current_attempts < max_attempts:
+            # Marquer qu'on a tente une restauration
+            st.session_state[restore_attempts_key] = current_attempts + 1
+            # Petit delai pour laisser le CookieManager charger
+            import time
+            time.sleep(0.1)
+            # Forcer un rerun pour recharger les cookies
+            st.rerun()
         return False
+
+    # Token trouve - reinitialiser le compteur
+    if restore_attempts_key in st.session_state:
+        del st.session_state[restore_attempts_key]
 
     # Verifier le token
     payload = _verify_session_token(token)

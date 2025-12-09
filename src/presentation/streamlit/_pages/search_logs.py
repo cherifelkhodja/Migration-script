@@ -177,10 +177,10 @@ def _render_single_log(db, log: dict, user_id=None):
 
 
 def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
-    """Affiche les tableaux des pages et winning ads pour un log."""
+    """Affiche les tableaux des pages, ads et winning ads pour un log."""
     from src.infrastructure.persistence.database import (
-        get_pages_for_search, get_winning_ads_for_search,
-        get_search_history_stats, PageRecherche, WinningAds
+        get_pages_for_search, get_winning_ads_for_search, get_ads_for_search,
+        get_search_history_stats, PageRecherche, WinningAds, AdsRecherche
     )
     from src.infrastructure.persistence.models import PageSearchHistory, WinningAdSearchHistory
 
@@ -256,6 +256,9 @@ def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
         with st.expander(f"📄 **Pages trouvees ({len(pages_from_search)})** — 🆕 {new_pages} nouvelles | 📝 {existing_pages} existantes", expanded=False):
             _render_pages_table(pages_from_search, log_id)
 
+    # Tableau des ads (recuperees via les pages de la recherche)
+    ads_from_search = get_ads_for_search(db, log_id, limit=100, user_id=user_id)
+
     # Tableau des winning ads (utilise les tables d'historique many-to-many)
     winning_from_search = get_winning_ads_for_search(db, log_id, limit=100, user_id=user_id)
 
@@ -318,12 +321,16 @@ def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
                         "age_days_at_discovery": h.age_days_at_discovery
                     })
 
-    if winning_from_search:
+    # Afficher le tableau combine des ads et winning ads
+    total_ads = len(ads_from_search)
+    total_winning = len(winning_from_search)
+
+    if ads_from_search or winning_from_search:
         new_winning = history_stats.get("new_winning_ads", 0)
         existing_winning = history_stats.get("existing_winning_ads", 0)
 
-        with st.expander(f"🏆 **Winning Ads ({len(winning_from_search)})** — 🆕 {new_winning} nouvelles | 📝 {existing_winning} existantes", expanded=False):
-            _render_winning_table(winning_from_search, log_id)
+        with st.expander(f"📢 **Ads & Winning Ads ({total_ads} ads, {total_winning} winning)** — 🏆 {new_winning} nouvelles winning | 📝 {existing_winning} existantes", expanded=False):
+            _render_combined_ads_table(ads_from_search, winning_from_search, log_id)
 
 
 def _render_pages_table(pages_from_search: list, log_id: int):
@@ -417,6 +424,108 @@ def _render_winning_table(winning_from_search: list, log_id: int):
     if winning_df_data:
         df_winning = pd.DataFrame(winning_df_data)
         st.dataframe(df_winning, hide_index=True, use_container_width=True)
+
+
+def _render_combined_ads_table(ads_from_search: list, winning_from_search: list, log_id: int):
+    """Affiche un tableau combine des ads et winning ads pour un log."""
+    # Selecteur de colonnes
+    all_columns = ["Type", "Page", "Reach", "Age", "Critere", "Site", "Platforms", "Snapshot"]
+    default_cols = ["Type", "Page", "Reach", "Age", "Site", "Snapshot"]
+
+    selected_cols = st.multiselect(
+        "Colonnes a afficher",
+        options=all_columns,
+        default=default_cols,
+        key=f"combined_ads_cols_{log_id}"
+    )
+
+    # Combiner les donnees
+    combined_data = []
+
+    # Ajouter les winning ads (en premier, avec un marqueur special)
+    for a in winning_from_search:
+        row = {}
+        if "Type" in selected_cols:
+            row["Type"] = "🏆 Winning"
+        if "Page" in selected_cols:
+            row["Page"] = (a.get("page_name") or "")[:25]
+        if "Reach" in selected_cols:
+            reach = a.get("eu_total_reach")
+            if isinstance(reach, int):
+                row["Reach"] = f"{reach:,}".replace(",", " ")
+            elif reach:
+                row["Reach"] = str(reach)
+            else:
+                row["Reach"] = "-"
+        if "Age" in selected_cols:
+            age = a.get("ad_age_days")
+            row["Age"] = f"{age}j" if age is not None else "-"
+        if "Critere" in selected_cols:
+            row["Critere"] = a.get("matched_criteria", "-")
+        if "Site" in selected_cols:
+            row["Site"] = (a.get("lien_site") or "")[:30]
+        if "Platforms" in selected_cols:
+            row["Platforms"] = "-"
+        if "Snapshot" in selected_cols:
+            snapshot_url = a.get("ad_snapshot_url", "")
+            row["Snapshot"] = "🔗" if snapshot_url else "-"
+
+        if row:
+            combined_data.append(row)
+
+    # Ajouter les ads normales
+    for a in ads_from_search:
+        # Eviter les doublons si l'ad est aussi une winning ad
+        ad_id = a.get("ad_id")
+        is_winning = any(w.get("ad_id") == ad_id for w in winning_from_search)
+        if is_winning:
+            continue  # Deja affichee comme winning ad
+
+        row = {}
+        if "Type" in selected_cols:
+            row["Type"] = "📢 Ad"
+        if "Page" in selected_cols:
+            row["Page"] = (a.get("page_name") or "")[:25]
+        if "Reach" in selected_cols:
+            reach = a.get("eu_total_reach")
+            if isinstance(reach, int):
+                row["Reach"] = f"{reach:,}".replace(",", " ")
+            elif reach:
+                row["Reach"] = str(reach)
+            else:
+                row["Reach"] = "-"
+        if "Age" in selected_cols:
+            # Calculer l'age si ad_creation_time est disponible
+            creation_time = a.get("ad_creation_time")
+            if creation_time:
+                from datetime import datetime
+                if isinstance(creation_time, datetime):
+                    age_days = (datetime.utcnow() - creation_time).days
+                    row["Age"] = f"{age_days}j"
+                else:
+                    row["Age"] = "-"
+            else:
+                row["Age"] = "-"
+        if "Critere" in selected_cols:
+            row["Critere"] = "-"
+        if "Site" in selected_cols:
+            row["Site"] = "-"
+        if "Platforms" in selected_cols:
+            platforms = a.get("publisher_platforms", "")
+            row["Platforms"] = platforms[:20] if platforms else "-"
+        if "Snapshot" in selected_cols:
+            snapshot_url = a.get("ad_snapshot_url", "")
+            row["Snapshot"] = "🔗" if snapshot_url else "-"
+
+        if row:
+            combined_data.append(row)
+
+    # Afficher le tableau
+    if combined_data:
+        df_combined = pd.DataFrame(combined_data)
+        st.dataframe(df_combined, hide_index=True, use_container_width=True)
+    else:
+        st.info("Aucune ad trouvee pour cette recherche.")
 
 
 def _render_phases(log: dict):
