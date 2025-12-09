@@ -214,13 +214,15 @@ def save_winning_ads(
                 ).first()
 
             if existing:
-                # Update uniquement si le reach a augmente (ad toujours performante)
+                # Toujours mettre a jour search_log_id et date_scan pour le fallback
+                existing.date_scan = scan_time
+                if search_log_id:
+                    existing.search_log_id = search_log_id
+                    existing.is_new = False  # Plus une decouverte
+
+                # Update le reach uniquement s'il a augmente
                 if reach > (existing.eu_total_reach or 0):
                     existing.eu_total_reach = reach
-                    existing.date_scan = scan_time
-                    if search_log_id:
-                        existing.search_log_id = search_log_id
-                        existing.is_new = False  # Plus une decouverte
                     updated_count += 1
             else:
                 # Nouvelle winning ad: insertion complete
