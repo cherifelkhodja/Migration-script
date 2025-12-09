@@ -21,10 +21,15 @@ from src.presentation.streamlit._pages.monitoring import (
 from src.presentation.streamlit._pages.creative import (
     render_creative_analysis, render_background_searches
 )
-from src.presentation.streamlit._pages.search import (
-    render_search_ads, render_keyword_search, render_page_id_search,
-    render_preview_results, run_search_process, run_page_id_search
+# Search module (split into submodules)
+from src.presentation.streamlit._pages.search import render_search_ads
+from src.presentation.streamlit._pages.search_keyword import (
+    render_keyword_search, run_search_process
 )
+from src.presentation.streamlit._pages.search_page_id import (
+    render_page_id_search, run_page_id_search
+)
+from src.presentation.streamlit._pages.search_results import render_preview_results
 from src.presentation.streamlit._pages.layout import (
     render_sidebar, render_dashboard
 )
