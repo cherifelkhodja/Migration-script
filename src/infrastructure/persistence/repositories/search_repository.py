@@ -453,9 +453,12 @@ def record_page_search_history(
     db,
     page_id: str,
     search_log_id: int,
-    user_id: Optional[UUID] = None
+    user_id: Optional[UUID] = None,
+    was_new: bool = True,
+    ads_count_at_discovery: int = 0,
+    keyword_matched: str = None
 ) -> bool:
-    """Enregistre l'historique de recherche d'une page."""
+    """Enregistre l'historique de recherche d'une page avec ses metadonnees."""
     with db.get_session() as session:
         query = session.query(PageSearchHistory).filter(
             PageSearchHistory.page_id == str(page_id),
@@ -470,6 +473,9 @@ def record_page_search_history(
                 page_id=str(page_id),
                 search_log_id=search_log_id,
                 found_at=datetime.utcnow(),
+                was_new=was_new,
+                ads_count_at_discovery=ads_count_at_discovery,
+                keyword_matched=keyword_matched,
             )
             session.add(history)
 
@@ -478,14 +484,40 @@ def record_page_search_history(
 
 def record_pages_search_history_batch(
     db,
-    page_ids: List[str],
+    pages_data: List[Dict],
     search_log_id: int,
     user_id: Optional[UUID] = None
 ) -> int:
-    """Enregistre l'historique pour plusieurs pages."""
+    """
+    Enregistre l'historique pour plusieurs pages avec leurs metadonnees.
+
+    Args:
+        db: Instance DatabaseManager
+        pages_data: Liste de dicts avec les cles:
+            - page_id (str): ID de la page
+            - was_new (bool): True si nouvelle page, False si existante
+            - ads_count (int): Nombre d'ads au moment de la decouverte
+            - keyword (str): Mot-cle qui a matche
+        search_log_id: ID du log de recherche
+        user_id: UUID de l'utilisateur (multi-tenancy)
+
+    Returns:
+        Nombre de pages enregistrees
+    """
     count = 0
-    for page_id in page_ids:
-        if record_page_search_history(db, page_id, search_log_id, user_id=user_id):
+    for data in pages_data:
+        page_id = data.get("page_id")
+        if not page_id:
+            continue
+        if record_page_search_history(
+            db,
+            page_id,
+            search_log_id,
+            user_id=user_id,
+            was_new=data.get("was_new", True),
+            ads_count_at_discovery=data.get("ads_count", 0),
+            keyword_matched=data.get("keyword")
+        ):
             count += 1
     return count
 
@@ -494,9 +526,13 @@ def record_winning_ad_search_history(
     db,
     ad_id: str,
     search_log_id: int,
-    user_id: Optional[UUID] = None
+    user_id: Optional[UUID] = None,
+    was_new: bool = True,
+    reach_at_discovery: int = 0,
+    age_days_at_discovery: int = 0,
+    matched_criteria: str = None
 ) -> bool:
-    """Enregistre l'historique de recherche d'une winning ad."""
+    """Enregistre l'historique de recherche d'une winning ad avec ses metadonnees."""
     with db.get_session() as session:
         query = session.query(WinningAdSearchHistory).filter(
             WinningAdSearchHistory.ad_id == str(ad_id),
@@ -511,6 +547,10 @@ def record_winning_ad_search_history(
                 ad_id=str(ad_id),
                 search_log_id=search_log_id,
                 found_at=datetime.utcnow(),
+                was_new=was_new,
+                reach_at_discovery=reach_at_discovery,
+                age_days_at_discovery=age_days_at_discovery,
+                matched_criteria=matched_criteria,
             )
             session.add(history)
 
@@ -519,14 +559,42 @@ def record_winning_ad_search_history(
 
 def record_winning_ads_search_history_batch(
     db,
-    ad_ids: List[str],
+    winning_ads_data: List[Dict],
     search_log_id: int,
     user_id: Optional[UUID] = None
 ) -> int:
-    """Enregistre l'historique pour plusieurs winning ads."""
+    """
+    Enregistre l'historique pour plusieurs winning ads avec leurs metadonnees.
+
+    Args:
+        db: Instance DatabaseManager
+        winning_ads_data: Liste de dicts avec les cles:
+            - ad_id (str): ID de l'annonce
+            - was_new (bool): True si nouvelle ad, False si existante
+            - reach (int): Reach au moment de la decouverte
+            - age_days (int): Age en jours au moment de la decouverte
+            - matched_criteria (str): Criteres qui ont matche
+        search_log_id: ID du log de recherche
+        user_id: UUID de l'utilisateur (multi-tenancy)
+
+    Returns:
+        Nombre de winning ads enregistrees
+    """
     count = 0
-    for ad_id in ad_ids:
-        if record_winning_ad_search_history(db, ad_id, search_log_id, user_id=user_id):
+    for data in winning_ads_data:
+        ad_id = data.get("ad_id")
+        if not ad_id:
+            continue
+        if record_winning_ad_search_history(
+            db,
+            ad_id,
+            search_log_id,
+            user_id=user_id,
+            was_new=data.get("was_new", True),
+            reach_at_discovery=data.get("reach", 0),
+            age_days_at_discovery=data.get("age_days", 0),
+            matched_criteria=data.get("matched_criteria")
+        ):
             count += 1
     return count
 
