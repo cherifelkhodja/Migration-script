@@ -39,6 +39,7 @@ from src.presentation.streamlit.components import (
 from src.infrastructure.persistence.database import (
     get_suivi_stats, search_pages, get_page_evolution_history
 )
+from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 
 
 def render_csv_download(df: pd.DataFrame, filename: str, label: str = "📥 Exporter CSV"):
@@ -62,8 +63,12 @@ def render_analytics():
         st.warning("Base de donnees non connectee")
         return
 
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
+
     try:
-        stats = get_suivi_stats(db)
+        stats = get_suivi_stats(db, user_id=user_id)
 
         # Info card
         info_card(
@@ -152,7 +157,7 @@ def render_analytics():
             "Identifiez les marches les plus competitifs"
         )
 
-        all_pages = search_pages(db, limit=500)
+        all_pages = search_pages(db, limit=500, user_id=user_id)
         if all_pages:
             themes = {}
             for p in all_pages:
@@ -177,16 +182,16 @@ def render_analytics():
             st.info("Aucune donnee disponible")
 
         # Graphiques d'evolution
-        _render_evolution_charts(db)
+        _render_evolution_charts(db, user_id)
 
         # Evolution d'une page specifique
-        _render_page_evolution(db)
+        _render_page_evolution(db, user_id)
 
     except Exception as e:
         st.error(f"Erreur: {e}")
 
 
-def _render_evolution_charts(db):
+def _render_evolution_charts(db, user_id=None):
     """Affiche les graphiques d'evolution temporelle."""
     st.markdown("---")
     chart_header(
@@ -201,12 +206,16 @@ def _render_evolution_charts(db):
 
     with db.get_session() as session:
         # Donnees agregees par jour
-        daily_stats = session.query(
+        query = session.query(
             func.date(SuiviPage.date_scan).label('date'),
             func.count(func.distinct(SuiviPage.page_id)).label('pages_scanned'),
             func.avg(SuiviPage.nombre_ads_active).label('avg_ads'),
             func.sum(SuiviPage.nombre_ads_active).label('total_ads')
-        ).group_by(
+        )
+        # Multi-tenancy filter
+        if user_id is not None:
+            query = query.filter(SuiviPage.user_id == user_id)
+        daily_stats = query.group_by(
             func.date(SuiviPage.date_scan)
         ).order_by(
             func.date(SuiviPage.date_scan)
@@ -268,7 +277,7 @@ def _render_evolution_charts(db):
         st.info("Pas assez de donnees pour afficher l'evolution")
 
 
-def _render_page_evolution(db):
+def _render_page_evolution(db, user_id=None):
     """Affiche l'evolution d'une page specifique."""
     st.markdown("---")
     st.markdown("##### 🔍 Evolution d'une page specifique")
@@ -276,7 +285,7 @@ def _render_page_evolution(db):
     page_id_input = st.text_input("Entrez un Page ID", placeholder="Ex: 123456789", key="evolution_page_id")
 
     if page_id_input:
-        page_history = get_page_evolution_history(db, page_id_input, limit=30)
+        page_history = get_page_evolution_history(db, page_id_input, limit=30, user_id=user_id)
 
         if page_history:
             df_page = pd.DataFrame(page_history)

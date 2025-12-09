@@ -528,6 +528,7 @@ def get_winning_ads_stats_filtered(
     thematique: str = None,
     subcategory: str = None,
     pays: str = None,
+    user_id: Optional[UUID] = None,
 ) -> Dict:
     """
     Récupère les statistiques des winning ads avec filtres.
@@ -538,14 +539,27 @@ def get_winning_ads_stats_filtered(
         thematique: Filtrer par catégorie
         subcategory: Filtrer par sous-catégorie
         pays: Filtrer par pays
+        user_id: UUID de l'utilisateur (multi-tenancy)
 
     Returns:
         Dict avec les statistiques incluant by_page et by_criteria
     """
+    # Isolation stricte: si pas d'utilisateur, retourner un resultat vide
+    if user_id is None:
+        return {
+            "total": 0,
+            "unique_pages": 0,
+            "avg_reach": 0,
+            "by_page": [],
+            "by_criteria": {},
+        }
+
     cutoff = datetime.utcnow() - timedelta(days=days)
 
     def apply_filters(query):
-        """Applique les filtres de classification à une query."""
+        """Applique les filtres de classification et user_id à une query."""
+        # Multi-tenancy filter
+        query = query.filter(WinningAds.user_id == user_id)
         if thematique:
             query = query.filter(PageRecherche.thematique == thematique)
         if subcategory:
@@ -615,21 +629,24 @@ def get_winning_ads_stats_filtered(
             ).all()
 
         else:
-            # Sans filtres - utiliser les requêtes simples
+            # Sans filtres de classification - utiliser les requêtes simples avec user_id
             total = session.query(WinningAds).filter(
-                WinningAds.date_scan >= cutoff
+                WinningAds.date_scan >= cutoff,
+                WinningAds.user_id == user_id
             ).count()
 
             unique_pages_count = session.query(
                 func.count(func.distinct(WinningAds.page_id))
             ).filter(
-                WinningAds.date_scan >= cutoff
+                WinningAds.date_scan >= cutoff,
+                WinningAds.user_id == user_id
             ).scalar() or 0
 
             avg_reach = session.query(
                 func.avg(WinningAds.eu_total_reach)
             ).filter(
-                WinningAds.date_scan >= cutoff
+                WinningAds.date_scan >= cutoff,
+                WinningAds.user_id == user_id
             ).scalar() or 0
 
             # Top 10 pages
@@ -638,7 +655,8 @@ def get_winning_ads_stats_filtered(
                 WinningAds.page_name,
                 func.count(WinningAds.id).label('count')
             ).filter(
-                WinningAds.date_scan >= cutoff
+                WinningAds.date_scan >= cutoff,
+                WinningAds.user_id == user_id
             ).group_by(
                 WinningAds.page_id, WinningAds.page_name
             ).order_by(
@@ -650,7 +668,8 @@ def get_winning_ads_stats_filtered(
                 WinningAds.matched_criteria,
                 func.count(WinningAds.id).label('count')
             ).filter(
-                WinningAds.date_scan >= cutoff
+                WinningAds.date_scan >= cutoff,
+                WinningAds.user_id == user_id
             ).group_by(
                 WinningAds.matched_criteria
             ).all()

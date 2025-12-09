@@ -58,6 +58,7 @@ from src.infrastructure.persistence.database import (
     get_winning_ads_stats, get_winning_ads_count_by_page,
     get_dashboard_trends, search_pages
 )
+from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 
 
 def format_state_for_df(etat: str) -> str:
@@ -262,6 +263,10 @@ def render_dashboard():
         st.warning("Base de donnees non connectee")
         return
 
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
+
     # Filtres de classification
     st.markdown("#### 🔍 Filtres")
     filters = render_classification_filters(db, key_prefix="dashboard", columns=3)
@@ -287,16 +292,17 @@ def render_dashboard():
                 db,
                 thematique=filters.get("thematique"),
                 subcategory=filters.get("subcategory"),
-                pays=filters.get("pays")
+                pays=filters.get("pays"),
+                user_id=user_id
             )
         else:
-            stats = get_suivi_stats(db)
+            stats = get_suivi_stats(db, user_id=user_id)
 
-        winning_stats = get_winning_ads_stats(db, days=7)
-        winning_by_page = get_winning_ads_count_by_page(db, days=30)
+        winning_stats = get_winning_ads_stats(db, days=7, user_id=user_id)
+        winning_by_page = get_winning_ads_count_by_page(db, days=30, user_id=user_id)
 
         # Recuperer les tendances (7 jours vs 7 jours precedents)
-        trends = get_dashboard_trends(db, days=7)
+        trends = get_dashboard_trends(db, days=7, user_id=user_id)
 
         # KPIs principaux avec trends
         col1, col2, col3, col4, col5 = st.columns(5)
@@ -370,7 +376,7 @@ def render_dashboard():
                     )
 
         # Quick Alerts
-        alerts = generate_alerts(db)
+        alerts = generate_alerts(db, user_id=user_id)
         if alerts:
             st.markdown("---")
             st.subheader("🔔 Alertes")
@@ -448,7 +454,7 @@ def render_dashboard():
         st.markdown("---")
         st.subheader("🌟 Top Performers (avec Score)")
 
-        top_pages = search_pages(db, limit=15)
+        top_pages = search_pages(db, limit=15, user_id=user_id)
         if top_pages:
             # Calculer les scores
             for page in top_pages:
@@ -489,7 +495,7 @@ def render_dashboard():
 
         with col1:
             st.subheader("📈 En forte croissance (7j)")
-            trend_data = detect_trends(db, days=7)
+            trend_data = detect_trends(db, days=7, user_id=user_id)
             if trend_data["rising"]:
                 for t in trend_data["rising"][:5]:
                     st.write(f"🚀 **{t['nom_site']}** +{t['pct_ads']:.0f}% ({t['ads_actuel']} ads)")

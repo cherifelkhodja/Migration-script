@@ -56,6 +56,7 @@ from src.infrastructure.persistence.database import (
     get_winning_ads_stats, get_winning_ads_stats_filtered,
     DatabaseManager, get_etat_from_ads_count
 )
+from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 
 
 def render_csv_download(df: pd.DataFrame, filename: str, label: str = "📥 Exporter CSV"):
@@ -82,6 +83,10 @@ def render_watchlists():
     if not db:
         st.warning("Base de donnees non connectee")
         return
+
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
 
     # Filtres de classification + date
     st.markdown("#### 🔍 Filtres")
@@ -121,14 +126,16 @@ def render_watchlists():
                 thematique=filters.get("thematique"),
                 subcategory=filters.get("subcategory"),
                 pays=filters.get("pays"),
-                days=days_filter if days_filter > 0 else None
+                days=days_filter if days_filter > 0 else None,
+                user_id=user_id
             )
             top_pages.extend(search_pages(
                 db, etat="XL", limit=20,
                 thematique=filters.get("thematique"),
                 subcategory=filters.get("subcategory"),
                 pays=filters.get("pays"),
-                days=days_filter if days_filter > 0 else None
+                days=days_filter if days_filter > 0 else None,
+                user_id=user_id
             ))
 
             if top_pages:
@@ -161,7 +168,7 @@ def render_watchlists():
 
         try:
             # Recuperer les meilleures winning ads (utilise le filtre de jours)
-            winning_ads = get_winning_ads(db, limit=50, days=days_filter if days_filter > 0 else 30)
+            winning_ads = get_winning_ads(db, limit=50, days=days_filter if days_filter > 0 else 30, user_id=user_id)
 
             if winning_ads:
                 # Creer un DataFrame pour l'affichage
@@ -239,7 +246,7 @@ def render_watchlists():
 
         try:
             # Recuperer le nombre de winning ads par page (utilise le filtre de jours)
-            winning_by_page = get_winning_ads_count_by_page(db, days=days_filter if days_filter > 0 else 30)
+            winning_by_page = get_winning_ads_count_by_page(db, days=days_filter if days_filter > 0 else 30, user_id=user_id)
 
             if winning_by_page:
                 # Trier par nombre decroissant
@@ -249,7 +256,7 @@ def render_watchlists():
                 pages_data = []
                 for page_id, count in sorted_pages:
                     # Chercher les infos de la page
-                    page_info = search_pages(db, page_id=page_id, limit=1)
+                    page_info = search_pages(db, page_id=page_id, limit=1, user_id=user_id)
                     if page_info:
                         p = page_info[0]
                         # Formater la date
@@ -269,7 +276,7 @@ def render_watchlists():
                         })
                     else:
                         # Si page pas trouvee, recuperer le nom depuis les winning ads
-                        winning = get_winning_ads(db, page_id=page_id, limit=1)
+                        winning = get_winning_ads(db, page_id=page_id, limit=1, user_id=user_id)
                         page_name = winning[0].get("page_name", page_id) if winning else page_id
                         pages_data.append({
                             "Page": page_name,
@@ -325,6 +332,10 @@ def render_alerts():
         st.warning("Base de donnees non connectee")
         return
 
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
+
     # Filtres de classification
     st.markdown("#### 🔍 Filtres")
     filters = render_classification_filters(db, key_prefix="alerts", columns=3)
@@ -348,7 +359,8 @@ def render_alerts():
             db,
             thematique=filters.get("thematique"),
             subcategory=filters.get("subcategory"),
-            pays=filters.get("pays")
+            pays=filters.get("pays"),
+            user_id=user_id
         )
 
         if alerts:
@@ -409,7 +421,7 @@ def render_alerts():
 
         with col1:
             if st.button("📈 Rechercher pages en croissance", use_container_width=True):
-                trends = detect_trends(db, days=7)
+                trends = detect_trends(db, days=7, user_id=user_id)
                 if trends["rising"]:
                     st.success(f"📈 {len(trends['rising'])} page(s) en forte croissance")
                     for t in trends["rising"]:
@@ -419,7 +431,7 @@ def render_alerts():
 
         with col2:
             if st.button("📉 Rechercher pages en déclin", use_container_width=True):
-                trends = detect_trends(db, days=7)
+                trends = detect_trends(db, days=7, user_id=user_id)
                 if trends["falling"]:
                     st.warning(f"📉 {len(trends['falling'])} page(s) en déclin")
                     for t in trends["falling"]:
@@ -441,6 +453,10 @@ def render_monitoring():
         st.warning("Base de donnees non connectee")
         return
 
+    # Multi-tenancy: recuperer l'utilisateur courant
+    tenant_ctx = StreamlitTenantContext()
+    user_id = tenant_ctx.user_uuid
+
     # Selecteur de periode
     col1, col2 = st.columns([1, 3])
     with col1:
@@ -455,7 +471,7 @@ def render_monitoring():
     st.subheader("📊 Évolution depuis le dernier scan")
 
     try:
-        evolution = get_evolution_stats(db, period_days=period)
+        evolution = get_evolution_stats(db, period_days=period, user_id=user_id)
 
         if evolution:
             st.info(f"📈 {len(evolution)} pages avec évolution sur les {period} derniers jours")
@@ -522,7 +538,7 @@ def render_monitoring():
 
     if page_id:
         try:
-            history = get_page_evolution_history(db, page_id=page_id, limit=50)
+            history = get_page_evolution_history(db, page_id=page_id, limit=50, user_id=user_id)
 
             if history and len(history) > 0:
                 st.success(f"📊 {len(history)} scans trouves")
@@ -592,16 +608,16 @@ def render_monitoring():
             comparison_data = []
 
             for pid in pages_to_compare:
-                page_results = search_pages(db, search_term=pid, limit=1)
+                page_results = search_pages(db, search_term=pid, limit=1, user_id=user_id)
                 if page_results:
                     page = page_results[0]
                     # Recuperer l'historique
-                    history = get_page_evolution_history(db, page_id=pid, limit=10)
+                    history = get_page_evolution_history(db, page_id=pid, limit=10, user_id=user_id)
                     avg_ads = sum(h["nombre_ads_active"] for h in history) / len(history) if history else 0
                     trend = "📈" if history and len(history) > 1 and history[0]["delta_ads"] > 0 else "📉" if history and len(history) > 1 and history[0]["delta_ads"] < 0 else "➡️"
 
                     # Winning ads count
-                    winning = get_winning_ads(db, page_id=pid, limit=100)
+                    winning = get_winning_ads(db, page_id=pid, limit=100, user_id=user_id)
                     winning_count = len(winning) if winning else 0
 
                     comparison_data.append({
@@ -652,14 +668,19 @@ def render_monitoring():
             st.warning("Entrez au moins 2 Page IDs pour comparer")
 
 
-def detect_trends(db: DatabaseManager, days: int = 7) -> dict:
+def detect_trends(db: DatabaseManager, days: int = 7, user_id=None) -> dict:
     """
     Detecte les tendances (pages en forte croissance/decroissance)
+
+    Args:
+        db: DatabaseManager
+        days: Nombre de jours pour la periode d'analyse
+        user_id: UUID de l'utilisateur (multi-tenancy)
 
     Returns:
         Dict avec 'rising' et 'falling' lists
     """
-    evolution = get_evolution_stats(db, period_days=days)
+    evolution = get_evolution_stats(db, period_days=days, user_id=user_id)
 
     rising = []
     falling = []
@@ -694,7 +715,8 @@ def generate_alerts(
     db: DatabaseManager,
     thematique: str = None,
     subcategory: str = None,
-    pays: str = None
+    pays: str = None,
+    user_id=None
 ) -> list:
     """
     Genere des alertes basees sur les donnees
@@ -704,6 +726,7 @@ def generate_alerts(
         thematique: Filtre par categorie
         subcategory: Filtre par sous-categorie
         pays: Filtre par pays
+        user_id: UUID de l'utilisateur (multi-tenancy)
 
     Returns:
         Liste d'alertes avec type, message, data
@@ -717,7 +740,8 @@ def generate_alerts(
         # Alerte: Nouvelles pages XXL
         xxl_pages = search_pages(
             db, etat="XXL", limit=50,
-            thematique=thematique, subcategory=subcategory, pays=pays
+            thematique=thematique, subcategory=subcategory, pays=pays,
+            user_id=user_id
         )
         recent_xxl = [p for p in xxl_pages if p.get("dernier_scan") and
                       (datetime.utcnow() - p["dernier_scan"]).days <= 1]
@@ -731,12 +755,13 @@ def generate_alerts(
             })
 
         # Alerte: Tendances a la hausse
-        trends = detect_trends(db, days=7)
+        trends = detect_trends(db, days=7, user_id=user_id)
         # Filter trends if classification filters are active
         if thematique or subcategory or pays:
             filtered_pages = search_pages(
                 db, limit=1000,
-                thematique=thematique, subcategory=subcategory, pays=pays
+                thematique=thematique, subcategory=subcategory, pays=pays,
+                user_id=user_id
             )
             filtered_ids = {p["page_id"] for p in filtered_pages}
 
@@ -766,10 +791,11 @@ def generate_alerts(
         if thematique or subcategory or pays:
             winning_stats = get_winning_ads_stats_filtered(
                 db, days=1,
-                thematique=thematique, subcategory=subcategory, pays=pays
+                thematique=thematique, subcategory=subcategory, pays=pays,
+                user_id=user_id
             )
         else:
-            winning_stats = get_winning_ads_stats(db, days=1)
+            winning_stats = get_winning_ads_stats(db, days=1, user_id=user_id)
 
         if winning_stats.get("total", 0) > 0:
             alerts.append({
@@ -785,14 +811,21 @@ def generate_alerts(
         state_order = {"inactif": 0, "XS": 1, "S": 2, "M": 3, "L": 4, "XL": 5, "XXL": 6}
 
         with db.get_session() as session:
-            recent_scans = session.query(
+            query = session.query(
                 SuiviPage.page_id,
                 SuiviPage.nom_site,
                 SuiviPage.nombre_ads_active,
                 SuiviPage.date_scan
             ).filter(
                 SuiviPage.date_scan >= datetime.utcnow() - timedelta(days=7)
-            ).order_by(
+            )
+            # Multi-tenancy filter
+            if user_id is not None:
+                query = query.filter(SuiviPage.user_id == user_id)
+            else:
+                # Isolation stricte: pas de donnees si pas d'utilisateur
+                query = query.filter(False)
+            recent_scans = query.order_by(
                 SuiviPage.page_id,
                 desc(SuiviPage.date_scan)
             ).all()
