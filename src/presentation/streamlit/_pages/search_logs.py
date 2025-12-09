@@ -180,6 +180,7 @@ def _render_pages_and_winning_ads(db, log: dict, user_id=None):
     """Affiche les tableaux des pages et winning ads pour un log.
 
     Utilise les page_ids et winning_ad_ids stockes en JSON dans le SearchLog.
+    Pour les anciennes recherches sans JSON, utilise un fallback via search_log_id.
     """
     from src.infrastructure.persistence.models import PageRecherche, WinningAds
 
@@ -193,6 +194,7 @@ def _render_pages_and_winning_ads(db, log: dict, user_id=None):
     # TABLEAU DES PAGES
     # ═══════════════════════════════════════════════════════════════════
     pages_from_search = []
+    fallback_page_ids = []
 
     if page_ids:
         with db.get_session() as session:
@@ -222,6 +224,45 @@ def _render_pages_and_winning_ads(db, log: dict, user_id=None):
                 }
                 for p in pages_results
             ]
+    else:
+        # FALLBACK pour anciennes recherches: recuperer les page_ids via winning_ads.search_log_id
+        with db.get_session() as session:
+            # D'abord recuperer les page_ids des winning ads de cette recherche
+            query = session.query(WinningAds.page_id).filter(
+                WinningAds.search_log_id == log_id
+            ).distinct()
+            if user_id:
+                query = query.filter(WinningAds.user_id == user_id)
+            fallback_page_ids = [r.page_id for r in query.all()]
+
+            if fallback_page_ids:
+                # Recuperer les details des pages
+                query = session.query(PageRecherche).filter(
+                    PageRecherche.page_id.in_(fallback_page_ids)
+                )
+                if user_id:
+                    query = query.filter(PageRecherche.user_id == user_id)
+                pages_results = query.all()
+
+                # Si pas de resultats avec user_id, essayer sans
+                if not pages_results and user_id:
+                    pages_results = session.query(PageRecherche).filter(
+                        PageRecherche.page_id.in_(fallback_page_ids)
+                    ).all()
+
+                pages_from_search = [
+                    {
+                        "page_id": p.page_id,
+                        "page_name": p.page_name,
+                        "lien_site": p.lien_site,
+                        "cms": p.cms,
+                        "etat": p.etat,
+                        "nombre_ads_active": p.nombre_ads_active,
+                        "thematique": p.thematique,
+                        "pays": p.pays,
+                    }
+                    for p in pages_results
+                ]
 
     # Afficher le tableau des pages
     pages_count = len(pages_from_search)
@@ -232,8 +273,8 @@ def _render_pages_and_winning_ads(db, log: dict, user_id=None):
         if pages_from_search:
             _render_pages_table(pages_from_search, log_id)
         else:
-            if page_ids:
-                st.warning(f"Les {len(page_ids)} pages de cette recherche n'existent plus en base.")
+            if page_ids or fallback_page_ids:
+                st.warning(f"Les pages de cette recherche n'existent plus en base.")
             else:
                 st.info("Aucune page enregistree pour cette recherche (recherche anterieure a la mise a jour).")
 
@@ -243,6 +284,7 @@ def _render_pages_and_winning_ads(db, log: dict, user_id=None):
     winning_from_search = []
 
     if winning_ad_ids:
+        # Methode principale: utiliser les IDs JSON
         with db.get_session() as session:
             query = session.query(WinningAds).filter(
                 WinningAds.ad_id.in_(winning_ad_ids)
@@ -255,6 +297,35 @@ def _render_pages_and_winning_ads(db, log: dict, user_id=None):
             if not winning_results and user_id:
                 winning_results = session.query(WinningAds).filter(
                     WinningAds.ad_id.in_(winning_ad_ids)
+                ).all()
+
+            winning_from_search = [
+                {
+                    "ad_id": w.ad_id,
+                    "page_id": w.page_id,
+                    "page_name": w.page_name,
+                    "lien_site": w.lien_site,
+                    "ad_age_days": w.ad_age_days,
+                    "eu_total_reach": w.eu_total_reach,
+                    "matched_criteria": w.matched_criteria,
+                    "ad_snapshot_url": w.ad_snapshot_url,
+                }
+                for w in winning_results
+            ]
+    else:
+        # FALLBACK pour anciennes recherches: utiliser search_log_id
+        with db.get_session() as session:
+            query = session.query(WinningAds).filter(
+                WinningAds.search_log_id == log_id
+            )
+            if user_id:
+                query = query.filter(WinningAds.user_id == user_id)
+            winning_results = query.all()
+
+            # Si pas de resultats avec user_id, essayer sans
+            if not winning_results and user_id:
+                winning_results = session.query(WinningAds).filter(
+                    WinningAds.search_log_id == log_id
                 ).all()
 
             winning_from_search = [
