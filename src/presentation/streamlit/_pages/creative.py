@@ -47,8 +47,15 @@ import json
 import streamlit as st
 
 from src.presentation.streamlit.shared import get_database
+
+# Design System imports
+from src.presentation.streamlit.ui import (
+    apply_theme, ICONS,
+    page_header, section_header,
+    alert, empty_state, kpi_row, format_number, info_card,
+)
 from src.presentation.streamlit.components import (
-    CHART_COLORS, info_card, chart_header, create_horizontal_bar_chart
+    CHART_COLORS, chart_header, create_horizontal_bar_chart
 )
 from src.infrastructure.persistence.database import get_winning_ads
 from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
@@ -56,12 +63,20 @@ from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenant
 
 def render_creative_analysis():
     """Page Creative Analysis - Analyse des créatives publicitaires"""
-    st.title("🎨 Creative Analysis")
-    st.markdown("Analysez les tendances créatives des annonces")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Creative Analysis",
+        subtitle="Analysez les tendances creatives des annonces",
+        icon=ICONS.get("palette", "🎨"),
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.warning("Base de donnees non connectee")
+        alert("Base de donnees non connectee", variant="warning")
         return
 
     # Multi-tenancy: recuperer l'utilisateur courant
@@ -85,7 +100,11 @@ def render_creative_analysis():
         winning_ads = get_winning_ads(db, limit=500, days=30, user_id=user_id)
 
         if not winning_ads:
-            st.warning("Pas assez de donnees. Lancez des recherches pour collecter des annonces.")
+            empty_state(
+                title="Pas assez de donnees",
+                description="Lancez des recherches pour collecter des annonces.",
+                icon="🎨"
+            )
             return
 
         st.success(f"Analyse basee sur {len(winning_ads)} winning ads")
@@ -117,16 +136,17 @@ def render_creative_analysis():
             found_emojis = emoji_pattern.findall(body + " " + title)
             emojis.extend(found_emojis)
 
-        # Statistiques
-        col1, col2, col3, col4 = st.columns(4)
-
+        # Statistiques avec KPI row
         avg_body_len = sum(len(b) for b in all_bodies) / len(all_bodies) if all_bodies else 0
         avg_title_len = sum(len(t) for t in all_titles) / len(all_titles) if all_titles else 0
 
-        col1.metric("Longueur moyenne texte", f"{avg_body_len:.0f} car.")
-        col2.metric("Longueur moyenne titre", f"{avg_title_len:.0f} car.")
-        col3.metric("Total emojis trouves", len(emojis))
-        col4.metric("Ads analysees", len(winning_ads))
+        kpis = [
+            {"label": "Longueur moy. texte", "value": f"{avg_body_len:.0f} car.", "icon": "📝"},
+            {"label": "Longueur moy. titre", "value": f"{avg_title_len:.0f} car.", "icon": "📌"},
+            {"label": "Total emojis", "value": format_number(len(emojis)), "icon": "😀"},
+            {"label": "Ads analysees", "value": format_number(len(winning_ads)), "icon": "📊"},
+        ]
+        kpi_row(kpis, columns=4)
 
         st.markdown("---")
 

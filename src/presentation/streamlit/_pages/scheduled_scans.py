@@ -47,7 +47,13 @@ Actions disponibles:
 import streamlit as st
 
 from src.presentation.streamlit.shared import get_database
-from src.presentation.streamlit.components import info_card
+
+# Design System imports
+from src.presentation.streamlit.ui import (
+    apply_theme, ICONS,
+    page_header, section_header,
+    alert, empty_state, info_card,
+)
 from src.infrastructure.config import AVAILABLE_COUNTRIES, AVAILABLE_LANGUAGES
 from src.infrastructure.persistence.database import (
     get_scheduled_scans, create_scheduled_scan,
@@ -58,12 +64,20 @@ from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenant
 
 def render_scheduled_scans():
     """Page Scans Programmes - Automatisation des recherches."""
-    st.title("🕐 Scans Programmes")
-    st.markdown("Automatisez vos recherches recurrentes")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Scans Programmes",
+        subtitle="Automatisez vos recherches recurrentes",
+        icon=ICONS.get("clock", "🕐"),
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.warning("Base de donnees non connectee")
+        alert("Base de donnees non connectee", variant="warning")
         return
 
     # Multi-tenancy: recuperer l'utilisateur courant
@@ -167,4 +181,8 @@ def render_scheduled_scans():
                     if st.button("▶️ Executer", key=f"run_scan_{scan_id}"):
                         st.info("Fonctionnalite en cours de developpement")
     else:
-        st.info("Aucun scan programme. Creez-en un pour automatiser vos recherches.")
+        empty_state(
+            title="Aucun scan programme",
+            description="Creez-en un pour automatiser vos recherches.",
+            icon="🕐"
+        )

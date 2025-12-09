@@ -82,6 +82,13 @@ import streamlit as st
 import pandas as pd
 
 from src.presentation.streamlit.shared import get_database
+
+# Design System imports
+from src.presentation.streamlit.ui import (
+    apply_theme, ICONS,
+    page_header, section_header,
+    alert, empty_state, kpi_row, format_number,
+)
 from src.infrastructure.config import (
     MIN_ADS_SUIVI, MIN_ADS_LISTE, DEFAULT_STATE_THRESHOLDS
 )
@@ -93,7 +100,16 @@ from src.infrastructure.persistence.repositories import recalculate_all_page_sta
 
 def render_settings():
     """Page Settings - Parametres avec navigation par onglets"""
-    st.title("⚙️ Settings")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Settings",
+        subtitle="Configuration de l'application",
+        icon=ICONS.get("settings", "⚙️"),
+        show_divider=False
+    )
 
     db = get_database()
 

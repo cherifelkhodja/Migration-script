@@ -26,6 +26,13 @@ et ne comptent pas dans les statistiques.
 import streamlit as st
 
 from src.presentation.streamlit.shared import get_database
+
+# Design System imports
+from src.presentation.streamlit.ui import (
+    apply_theme, ICONS,
+    page_header, section_header,
+    alert, empty_state, kpi_row, format_number,
+)
 from src.infrastructure.persistence.database import (
     add_to_blacklist, remove_from_blacklist, get_blacklist
 )
@@ -34,12 +41,20 @@ from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenant
 
 def render_blacklist():
     """Page Blacklist - Gestion des pages blacklistees."""
-    st.title("🚫 Blacklist")
-    st.markdown("Gerer les pages exclues des recherches")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Blacklist",
+        subtitle="Gerer les pages exclues des recherches",
+        icon=ICONS.get("ban", "🚫"),
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.warning("Base de donnees non connectee")
+        alert("Base de donnees non connectee", variant="warning")
         return
 
     # Multi-tenancy: recuperer l'utilisateur courant
@@ -47,7 +62,7 @@ def render_blacklist():
     user_id = tenant_ctx.user_uuid
 
     # Formulaire d'ajout
-    st.subheader("➕ Ajouter une page")
+    section_header("Ajouter une page", icon="➕")
     with st.form("add_blacklist_form"):
         col1, col2 = st.columns(2)
         with col1:
@@ -72,7 +87,7 @@ def render_blacklist():
     st.markdown("---")
 
     # Liste des pages blacklistees
-    st.subheader("📋 Pages en blacklist")
+    section_header("Pages en blacklist", icon="📋")
 
     try:
         blacklist = get_blacklist(db, user_id=user_id)
@@ -119,7 +134,11 @@ def render_blacklist():
 
                     st.markdown("---")
         else:
-            st.info("Aucune page en blacklist")
+            empty_state(
+                title="Aucune page en blacklist",
+                description="Ajoutez une page ci-dessus pour l'exclure des recherches.",
+                icon="🚫"
+            )
 
         # Statistiques
         if blacklist:

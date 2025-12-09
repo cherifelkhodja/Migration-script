@@ -4,6 +4,13 @@ Page Tags - Gestion des tags.
 import streamlit as st
 
 from src.presentation.streamlit.shared import get_database
+
+# Design System imports
+from src.presentation.streamlit.ui import (
+    apply_theme, ICONS,
+    page_header, section_header,
+    alert, empty_state,
+)
 from src.infrastructure.persistence.database import (
     get_all_tags, create_tag, delete_tag, get_pages_by_tag
 )
@@ -12,12 +19,20 @@ from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenant
 
 def render_tags():
     """Page Tags - Gestion des tags."""
-    st.title("🏷️ Tags")
-    st.markdown("Creez et gerez vos tags personnalises")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Tags",
+        subtitle="Creez et gerez vos tags personnalises",
+        icon=ICONS.get("tag", "🏷️"),
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.warning("Base de donnees non connectee")
+        alert("Base de donnees non connectee", variant="warning")
         return
 
     # Multi-tenancy: recuperer l'utilisateur courant
@@ -79,4 +94,8 @@ def render_tags():
                     st.success("Tag supprime")
                     st.rerun()
     else:
-        st.info("Aucun tag cree. Creez votre premier tag ci-dessus.")
+        empty_state(
+            title="Aucun tag cree",
+            description="Creez votre premier tag ci-dessus.",
+            icon="🏷️"
+        )

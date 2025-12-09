@@ -26,6 +26,13 @@ Les collections sont liees aux pages via une table de jointure.
 import streamlit as st
 
 from src.presentation.streamlit.shared import get_database
+
+# Design System imports
+from src.presentation.streamlit.ui import (
+    apply_theme, ICONS,
+    page_header, section_header,
+    alert, empty_state,
+)
 from src.infrastructure.persistence.database import (
     get_collections, create_collection, delete_collection,
     get_collection_pages, remove_page_from_collection, search_pages
@@ -35,12 +42,20 @@ from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenant
 
 def render_collections():
     """Page Collections - Dossiers de pages."""
-    st.title("📁 Collections")
-    st.markdown("Organisez vos pages en dossiers thematiques")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Collections",
+        subtitle="Organisez vos pages en dossiers thematiques",
+        icon=ICONS.get("folder", "📁"),
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.warning("Base de donnees non connectee")
+        alert("Base de donnees non connectee", variant="warning")
         return
 
     # Multi-tenancy: recuperer l'utilisateur courant
@@ -104,4 +119,8 @@ def render_collections():
                         st.success("Collection supprimee")
                         st.rerun()
     else:
-        st.info("Aucune collection. Creez-en une pour organiser vos pages.")
+        empty_state(
+            title="Aucune collection",
+            description="Creez-en une pour organiser vos pages.",
+            icon="📁"
+        )

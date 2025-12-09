@@ -32,8 +32,16 @@ import pandas as pd
 import plotly.express as px
 
 from src.presentation.streamlit.shared import get_database
+
+# Design System imports
+from src.presentation.streamlit.ui import (
+    apply_theme, ICONS,
+    page_header, section_header,
+    alert, empty_state, format_number,
+    kpi_row, two_column_layout, info_card,
+)
 from src.presentation.streamlit.components import (
-    CHART_COLORS, info_card, chart_header,
+    CHART_COLORS, chart_header,
     create_horizontal_bar_chart, export_to_csv
 )
 from src.infrastructure.persistence.database import (
@@ -55,12 +63,20 @@ def render_csv_download(df: pd.DataFrame, filename: str, label: str = "📥 Expo
 
 def render_analytics():
     """Page Analytics - Analyses avancees"""
-    st.title("📊 Analytics")
-    st.markdown("Analyses et statistiques avancees")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Analytics",
+        subtitle="Analyses et statistiques avancees",
+        icon=ICONS.get("chart", "📊"),
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.warning("Base de donnees non connectee")
+        alert("Base de donnees non connectee", variant="warning")
         return
 
     # Multi-tenancy: recuperer l'utilisateur courant
@@ -82,21 +98,20 @@ def render_analytics():
             "📚"
         )
 
-        # Stats generales
-        col1, col2, col3, col4 = st.columns(4)
-
+        # Stats generales avec KPI row
         etats = stats.get("etats", {})
         cms_stats = stats.get("cms", {})
         total_pages = stats.get("total_pages", 0)
         actives = sum(v for k, v in etats.items() if k != "inactif")
-
-        col1.metric("📄 Total Pages", f"{total_pages:,}")
-        col2.metric("✅ Pages Actives", f"{actives:,}")
-        col3.metric("🛒 CMS Differents", len(cms_stats))
-
-        # Taux d'activite
         taux_actif = (actives / total_pages * 100) if total_pages > 0 else 0
-        col4.metric("📈 Taux d'activite", f"{taux_actif:.1f}%")
+
+        kpis = [
+            {"label": "Total Pages", "value": format_number(total_pages), "icon": "📄"},
+            {"label": "Pages Actives", "value": format_number(actives), "icon": "✅"},
+            {"label": "CMS Differents", "value": str(len(cms_stats)), "icon": "🛒"},
+            {"label": "Taux d'activite", "value": f"{taux_actif:.1f}%", "icon": "📈"},
+        ]
+        kpi_row(kpis, columns=4)
 
         st.markdown("---")
 

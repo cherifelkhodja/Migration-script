@@ -75,6 +75,13 @@ from src.presentation.streamlit.components import (
     export_to_csv, df_to_csv, get_delta_indicator,
 )
 
+# Filtres refactorises - importer depuis le module centralise
+from src.presentation.streamlit.components.filters import (
+    render_classification_filters,
+    render_date_filter,
+    COUNTRY_NAMES as FILTER_COUNTRY_NAMES,
+)
+
 # Import des pages extraites (underscore prefix hides from Streamlit multipage)
 from src.presentation.streamlit._pages import (
     render_blacklist,
@@ -383,160 +390,11 @@ def render_search_history_selector(key_prefix: str = ""):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# COMPOSANT FILTRES RÉUTILISABLE (Thématique, Classification, Pays)
+# COMPOSANT FILTRES RÉUTILISABLE (importé depuis components/filters.py)
 # ═══════════════════════════════════════════════════════════════════════════════
-
-def render_classification_filters(
-    db,
-    key_prefix: str = "",
-    show_thematique: bool = True,
-    show_subcategory: bool = True,
-    show_pays: bool = True,
-    columns: int = 3
-) -> dict:
-    """
-    Affiche les filtres de classification réutilisables.
-
-    Args:
-        db: DatabaseManager
-        key_prefix: Préfixe pour les clés Streamlit (éviter conflits)
-        show_thematique: Afficher le filtre thématique
-        show_subcategory: Afficher le filtre classification
-        show_pays: Afficher le filtre pays
-        columns: Nombre de colonnes pour l'affichage
-
-    Returns:
-        Dict avec les valeurs sélectionnées:
-        {
-            "thematique": str or None,
-            "subcategory": str or None,
-            "pays": str or None
-        }
-    """
-    result = {
-        "thematique": None,
-        "subcategory": None,
-        "pays": None
-    }
-
-    # Déterminer les colonnes actives
-    active_filters = []
-    if show_thematique:
-        active_filters.append("thematique")
-    if show_subcategory:
-        active_filters.append("subcategory")
-    if show_pays:
-        active_filters.append("pays")
-
-    if not active_filters:
-        return result
-
-    # Créer les colonnes
-    cols = st.columns(min(len(active_filters), columns))
-    col_idx = 0
-
-    # Récupérer les options
-    categories = get_taxonomy_categories(db) if show_thematique else []
-    countries = get_all_countries(db) if show_pays else []
-
-    # Filtre Thématique (catégorie principale)
-    selected_thematique = "Toutes"
-    if show_thematique:
-        with cols[col_idx % len(cols)]:
-            thematique_options = ["Toutes"] + categories
-            selected_thematique = st.selectbox(
-                "Thématique",
-                thematique_options,
-                index=0,
-                key=f"{key_prefix}_thematique"
-            )
-            if selected_thematique != "Toutes":
-                result["thematique"] = selected_thematique
-        col_idx += 1
-
-    # Filtre Classification (dépend de la thématique sélectionnée)
-    if show_subcategory:
-        with cols[col_idx % len(cols)]:
-            # Filtrer les classifications selon la thématique choisie
-            if selected_thematique != "Toutes":
-                subcategories = get_all_subcategories(db, category=selected_thematique)
-            else:
-                subcategories = get_all_subcategories(db)
-
-            subcategory_options = ["Toutes"] + subcategories
-            selected_subcategory = st.selectbox(
-                "Classification",
-                subcategory_options,
-                index=0,
-                key=f"{key_prefix}_subcategory"
-            )
-            if selected_subcategory != "Toutes":
-                result["subcategory"] = selected_subcategory
-        col_idx += 1
-
-    # Filtre Pays
-    if show_pays:
-        with cols[col_idx % len(cols)]:
-            # Noms lisibles pour les pays
-            country_names = {
-                "FR": "🇫🇷 France",
-                "DE": "🇩🇪 Allemagne",
-                "ES": "🇪🇸 Espagne",
-                "IT": "🇮🇹 Italie",
-                "GB": "🇬🇧 Royaume-Uni",
-                "US": "🇺🇸 États-Unis",
-                "BE": "🇧🇪 Belgique",
-                "CH": "🇨🇭 Suisse",
-                "NL": "🇳🇱 Pays-Bas",
-                "PT": "🇵🇹 Portugal",
-                "AT": "🇦🇹 Autriche",
-                "CA": "🇨🇦 Canada",
-                "AU": "🇦🇺 Australie",
-                "LU": "🇱🇺 Luxembourg",
-                "PL": "🇵🇱 Pologne",
-            }
-            pays_display = ["Tous"] + [country_names.get(c, c) for c in countries]
-            pays_values = [None] + countries
-
-            selected_pays_idx = st.selectbox(
-                "🌍 Pays",
-                range(len(pays_display)),
-                format_func=lambda i: pays_display[i],
-                index=0,
-                key=f"{key_prefix}_pays"
-            )
-            if selected_pays_idx > 0:
-                result["pays"] = pays_values[selected_pays_idx]
-
-    return result
-
-
-def render_date_filter(key_prefix: str = "") -> int:
-    """
-    Affiche un filtre de période réutilisable.
-
-    Args:
-        key_prefix: Préfixe pour les clés Streamlit
-
-    Returns:
-        Nombre de jours (0 = tous, sinon 1, 7, 30, 90)
-    """
-    options = {
-        "Toutes les données": 0,
-        "Dernières 24h": 1,
-        "7 derniers jours": 7,
-        "30 derniers jours": 30,
-        "90 derniers jours": 90
-    }
-
-    selected = st.selectbox(
-        "📅 Période",
-        options=list(options.keys()),
-        index=2,  # Par défaut: 30 derniers jours
-        key=f"{key_prefix}_date_filter"
-    )
-
-    return options[selected]
+# Note: render_classification_filters et render_date_filter sont maintenant
+# importés depuis src.presentation.streamlit.components.filters pour éviter
+# la duplication de code. Voir la section des imports ci-dessus.
 
 
 def apply_classification_filters(query, filters: dict, model_class):

@@ -5,17 +5,32 @@ import streamlit as st
 import pandas as pd
 
 from src.presentation.streamlit.shared import get_database
+
+# Design System imports
+from src.presentation.streamlit.ui import (
+    apply_theme, ICONS,
+    page_header, section_header,
+    alert, empty_state, kpi_row, format_number,
+)
 from src.infrastructure.adapters.streamlit_tenant_context import StreamlitTenantContext
 
 
 def render_search_logs():
     """Page Historique des Recherches - Logs detailles de toutes les recherches"""
-    st.title("📜 Historique des Recherches")
-    st.markdown("Consultez l'historique complet de vos recherches avec les metriques detaillees.")
+    # Appliquer le thème
+    apply_theme()
+
+    # Header avec Design System
+    page_header(
+        title="Historique des Recherches",
+        subtitle="Consultez l'historique complet de vos recherches avec les metriques detaillees",
+        icon=ICONS.get("history", "📜"),
+        show_divider=True
+    )
 
     db = get_database()
     if not db:
-        st.error("Base de donnees non connectee")
+        alert("Base de donnees non connectee", variant="error")
         return
 
     # Multi-tenancy: recuperer l'utilisateur courant
@@ -29,23 +44,20 @@ def render_search_logs():
     # Import des fonctions de log
     from src.infrastructure.persistence.database import get_search_logs, get_search_logs_stats, delete_search_log
 
-    # Stats globales
+    # Stats globales avec KPI row
     stats = get_search_logs_stats(db, days=30, user_id=user_id)
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Recherches (30j)", stats.get("total_searches", 0))
-    with col2:
-        completed = stats.get("by_status", {}).get("completed", 0)
-        st.metric("Completees", completed)
-    with col3:
-        avg_duration = stats.get("avg_duration_seconds", 0)
-        if avg_duration > 60:
-            st.metric("Duree moyenne", f"{avg_duration/60:.1f}m")
-        else:
-            st.metric("Duree moyenne", f"{avg_duration:.1f}s")
-    with col4:
-        st.metric("Total pages trouvees", stats.get("total_pages_found", 0))
+    completed = stats.get("by_status", {}).get("completed", 0)
+    avg_duration = stats.get("avg_duration_seconds", 0)
+    duration_str = f"{avg_duration/60:.1f}m" if avg_duration > 60 else f"{avg_duration:.1f}s"
+
+    kpis = [
+        {"label": "Recherches (30j)", "value": format_number(stats.get("total_searches", 0)), "icon": "🔍"},
+        {"label": "Completees", "value": format_number(completed), "icon": "✅"},
+        {"label": "Duree moyenne", "value": duration_str, "icon": "⏱️"},
+        {"label": "Pages trouvees", "value": format_number(stats.get("total_pages_found", 0)), "icon": "📄"},
+    ]
+    kpi_row(kpis, columns=4)
 
     # Stats API globales
     total_api = (stats.get("total_meta_api_calls", 0) +
@@ -85,7 +97,11 @@ def render_search_logs():
     logs = get_search_logs(db, limit=limit, status=status_param, user_id=user_id)
 
     if not logs:
-        st.info("Aucun historique de recherche disponible.")
+        empty_state(
+            title="Aucun historique disponible",
+            description="Lancez des recherches pour voir l'historique.",
+            icon="📜"
+        )
         return
 
     st.markdown(f"### {len(logs)} recherche(s)")
