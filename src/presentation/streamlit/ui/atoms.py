@@ -491,10 +491,18 @@ def loading_spinner(message: str = "Chargement..."):
     """
     Affiche un spinner de chargement.
 
+    Usage:
+        with loading_spinner("Chargement des donnees..."):
+            # code long
+            data = load_data()
+
     Args:
-        message: Message à afficher
+        message: Message a afficher
+
+    Returns:
+        Context manager st.spinner
     """
-    st.spinner(message)
+    return st.spinner(message)
 
 
 def loading_indicator(message: str = "Chargement en cours..."):

@@ -41,7 +41,7 @@ from src.presentation.streamlit.shared import get_database
 from src.presentation.streamlit.ui import (
     apply_theme, ICONS,
     page_header, section_header,
-    alert, empty_state, format_number,
+    alert, empty_state, format_number, loading_spinner,
 )
 from src.infrastructure.persistence.database import (
     get_favorites, remove_favorite, search_pages,
@@ -73,17 +73,19 @@ def render_favorites():
     user_id = tenant_ctx.user_uuid
 
     try:
-        favorite_ids = get_favorites(db, user_id=user_id)
+        with loading_spinner("Chargement des favoris..."):
+            favorite_ids = get_favorites(db, user_id=user_id)
 
         if favorite_ids:
             st.info(f"⭐ {len(favorite_ids)} page(s) en favoris")
 
             # Recuperer les details des pages favorites
-            pages = []
-            for fav_id in favorite_ids:
-                page_results = search_pages(db, search_term=fav_id, limit=1, user_id=user_id)
-                if page_results:
-                    pages.append(page_results[0])
+            with loading_spinner("Chargement des details..."):
+                pages = []
+                for fav_id in favorite_ids:
+                    page_results = search_pages(db, search_term=fav_id, limit=1, user_id=user_id)
+                    if page_results:
+                        pages.append(page_results[0])
 
             if pages:
                 for page in pages:

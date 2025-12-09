@@ -66,7 +66,7 @@ from src.presentation.streamlit.ui import (
     # Theme
     apply_theme, COLORS, ICONS,
     # Atoms
-    format_number, state_indicator,
+    format_number, state_indicator, loading_spinner,
     # Molecules
     info_card, section_header, filter_bar, active_filters_display,
     empty_state, alert, export_button,
@@ -282,16 +282,17 @@ def render_winning_ads():
 
     try:
         # Statistiques globales (avec filtres si actifs)
-        if any(class_filters.values()):
-            stats = get_winning_ads_stats_filtered(
-                db, days=period,
-                thematique=class_filters.get("thematique"),
-                subcategory=class_filters.get("subcategory"),
-                pays=class_filters.get("pays"),
-                user_id=user_id
-            )
-        else:
-            stats = get_winning_ads_stats(db, days=period, user_id=user_id)
+        with loading_spinner("Chargement des statistiques..."):
+            if any(class_filters.values()):
+                stats = get_winning_ads_stats_filtered(
+                    db, days=period,
+                    thematique=class_filters.get("thematique"),
+                    subcategory=class_filters.get("subcategory"),
+                    pays=class_filters.get("pays"),
+                    user_id=user_id
+                )
+            else:
+                stats = get_winning_ads_stats(db, days=period, user_id=user_id)
 
         st.markdown("---")
         section_header("Statistiques", icon="📊")
@@ -372,18 +373,19 @@ def render_winning_ads():
         ad_id_param = ad_id_filter.strip() if ad_id_filter else None
 
         # Utiliser la fonction filtree si des filtres sont actifs
-        if any(class_filters.values()) or page_id_param or ad_id_param:
-            winning_ads = get_winning_ads_filtered(
-                db, limit=actual_limit, days=period,
-                page_id=page_id_param,
-                ad_id=ad_id_param,
-                thematique=class_filters.get("thematique"),
-                subcategory=class_filters.get("subcategory"),
-                pays=class_filters.get("pays"),
-                user_id=user_id
-            )
-        else:
-            winning_ads = get_winning_ads(db, limit=actual_limit, days=period, user_id=user_id)
+        with loading_spinner("Chargement des winning ads..."):
+            if any(class_filters.values()) or page_id_param or ad_id_param:
+                winning_ads = get_winning_ads_filtered(
+                    db, limit=actual_limit, days=period,
+                    page_id=page_id_param,
+                    ad_id=ad_id_param,
+                    thematique=class_filters.get("thematique"),
+                    subcategory=class_filters.get("subcategory"),
+                    pays=class_filters.get("pays"),
+                    user_id=user_id
+                )
+            else:
+                winning_ads = get_winning_ads(db, limit=actual_limit, days=period, user_id=user_id)
 
         if winning_ads:
             _render_winning_ads_list(winning_ads, group_by, period)

@@ -39,7 +39,7 @@ from src.presentation.streamlit.ui import (
     apply_theme, COLORS, STATE_COLORS, ICONS,
 
     # Atoms
-    state_indicator, format_number,
+    state_indicator, format_number, loading_spinner,
 
     # Molecules
     info_card, section_header, filter_bar, active_filters_display,
@@ -190,21 +190,22 @@ def render_dashboard():
     st.markdown("---")
 
     try:
-        # Récupérer les statistiques
-        if any(filters.values()):
-            stats = get_suivi_stats_filtered(
-                db,
-                thematique=filters.get("thematique"),
-                subcategory=filters.get("subcategory"),
-                pays=filters.get("pays"),
-                user_id=user_id
-            )
-        else:
-            stats = get_suivi_stats(db, user_id=user_id)
+        # Récupérer les statistiques avec loading spinner
+        with loading_spinner("Chargement des donnees du dashboard..."):
+            if any(filters.values()):
+                stats = get_suivi_stats_filtered(
+                    db,
+                    thematique=filters.get("thematique"),
+                    subcategory=filters.get("subcategory"),
+                    pays=filters.get("pays"),
+                    user_id=user_id
+                )
+            else:
+                stats = get_suivi_stats(db, user_id=user_id)
 
-        winning_stats = get_winning_ads_stats(db, days=7, user_id=user_id)
-        winning_by_page = get_winning_ads_count_by_page(db, days=30, user_id=user_id)
-        trends = get_dashboard_trends(db, days=7, user_id=user_id)
+            winning_stats = get_winning_ads_stats(db, days=7, user_id=user_id)
+            winning_by_page = get_winning_ads_count_by_page(db, days=30, user_id=user_id)
+            trends = get_dashboard_trends(db, days=7, user_id=user_id)
 
         # Extraire les données
         total_pages = stats.get("total_pages", 0)

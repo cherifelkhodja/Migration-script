@@ -52,7 +52,7 @@ from src.presentation.streamlit.ui import (
     apply_theme, ICONS,
     page_header, section_header,
     alert, empty_state, format_number,
-    kpi_row,
+    kpi_row, loading_spinner,
 )
 from src.presentation.streamlit.components import (
     CHART_COLORS, chart_header, create_trend_chart
@@ -503,7 +503,8 @@ def render_monitoring():
     st.subheader("📊 Évolution depuis le dernier scan")
 
     try:
-        evolution = get_evolution_stats(db, period_days=period, user_id=user_id)
+        with loading_spinner("Chargement des statistiques d'evolution..."):
+            evolution = get_evolution_stats(db, period_days=period, user_id=user_id)
 
         if evolution:
             st.info(f"📈 {len(evolution)} pages avec évolution sur les {period} derniers jours")

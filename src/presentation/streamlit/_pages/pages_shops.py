@@ -73,7 +73,7 @@ from src.presentation.streamlit.ui import (
     # Theme
     apply_theme, COLORS, STATE_COLORS, ICONS,
     # Atoms
-    format_number, state_badge, score_badge, get_score_grade,
+    format_number, state_badge, score_badge, get_score_grade, loading_spinner,
     # Molecules
     info_card, section_header, filter_bar, active_filters_display,
     empty_state, alert, export_button,
@@ -325,28 +325,30 @@ def render_pages_shops():
         if subcategory_filter != "Toutes":
             subcategory_param = subcategory_filter
 
-        results = search_pages(
-            db,
-            cms=cms_filter if cms_filter != "Tous" else None,
-            etat=etat_filter if etat_filter != "Tous" else None,
-            search_term=search_term if search_term else None,
-            thematique=thematique_param,
-            subcategory=subcategory_param,
-            pays=pays_filter,
-            page_id=page_id_filter.strip() if page_id_filter else None,
-            limit=limit,
-            user_id=user_id
-        )
+        with loading_spinner("Chargement des pages..."):
+            results = search_pages(
+                db,
+                cms=cms_filter if cms_filter != "Tous" else None,
+                etat=etat_filter if etat_filter != "Tous" else None,
+                search_term=search_term if search_term else None,
+                thematique=thematique_param,
+                subcategory=subcategory_param,
+                pays=pays_filter,
+                page_id=page_id_filter.strip() if page_id_filter else None,
+                limit=limit,
+                user_id=user_id
+            )
 
-        # Filtrer les pages blacklistées
-        if results:
-            blacklist_ids = get_blacklist_ids(db, user_id=user_id)
-            results = [p for p in results if str(p.get("page_id", "")) not in blacklist_ids]
+            # Filtrer les pages blacklistees
+            if results:
+                blacklist_ids = get_blacklist_ids(db, user_id=user_id)
+                results = [p for p in results if str(p.get("page_id", "")) not in blacklist_ids]
 
         if results:
             # Enrichir avec scores et winning ads
-            winning_by_page = get_winning_ads_count_by_page(db, days=30, user_id=user_id)
-            winning_counts = {str(k): v for k, v in winning_by_page.items()}
+            with loading_spinner("Calcul des scores..."):
+                winning_by_page = get_winning_ads_count_by_page(db, days=30, user_id=user_id)
+                winning_counts = {str(k): v for k, v in winning_by_page.items()}
 
             for page in results:
                 pid = str(page.get("page_id", ""))
