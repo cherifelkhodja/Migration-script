@@ -180,30 +180,38 @@ def save_winning_ads(
     new_count = 0
     updated_count = 0
 
-    with db.get_session() as session:
-        for data in winning_ads_data:
-            ad = data.get("ad", {})
-            ad_id = str(ad.get("id", ""))
-            if not ad_id:
-                continue
+    # Dedupliquer par ad_id (garder celui avec le plus grand reach)
+    unique_ads = {}
+    for data in winning_ads_data:
+        ad = data.get("ad", {})
+        ad_id = str(ad.get("id", ""))
+        if not ad_id:
+            continue
 
+        reach = ad.get("eu_total_reach", 0) or 0
+        if isinstance(reach, str):
+            try:
+                reach = int(reach)
+            except ValueError:
+                reach = 0
+
+        if ad_id not in unique_ads or reach > unique_ads[ad_id].get("reach", 0):
+            unique_ads[ad_id] = {"data": data, "reach": reach}
+
+    with db.get_session() as session:
+        for ad_id, entry in unique_ads.items():
+            data = entry["data"]
+            reach = entry["reach"]
+            ad = data.get("ad", {})
             page_id = str(data.get("page_id", ""))
 
-            # Verification d'existence pour upsert (filtrer par user_id)
-            query = session.query(WinningAds).filter(WinningAds.ad_id == ad_id)
-            if user_id is not None:
-                query = query.filter(WinningAds.user_id == user_id)
-            else:
-                query = query.filter(WinningAds.user_id.is_(None))
-            existing = query.first()
-
-            # Normalisation du reach
-            reach = ad.get("eu_total_reach", 0) or 0
-            if isinstance(reach, str):
-                try:
-                    reach = int(reach)
-                except ValueError:
-                    reach = 0
+            # Verification d'existence pour upsert
+            # Note: La contrainte unique est sur ad_id seul, pas sur (ad_id, user_id)
+            # Donc on verifie sans filtre user_id pour eviter les doublons
+            with session.no_autoflush:
+                existing = session.query(WinningAds).filter(
+                    WinningAds.ad_id == ad_id
+                ).first()
 
             if existing:
                 # Update uniquement si le reach a augmente (ad toujours performante)
