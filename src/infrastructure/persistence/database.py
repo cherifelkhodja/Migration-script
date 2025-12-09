@@ -111,7 +111,7 @@ from src.infrastructure.persistence.repositories import (
     create_search_log, update_search_log, complete_search_log, get_search_logs,
     delete_search_log, save_api_calls, create_search_queue, get_search_queue,
     update_search_queue_status, update_search_queue_progress, cancel_search_queue,
-    get_pending_searches, get_queue_stats, get_interrupted_searches, recover_interrupted_searches,
+    get_pending_searches, get_queue_stats, get_interrupted_searches, restart_search_queue, recover_interrupted_searches,
     record_page_search_history, record_pages_search_history_batch,
     record_winning_ad_search_history, record_winning_ads_search_history_batch,
     get_search_history_stats, update_search_log_phases, get_search_logs_stats,
@@ -389,9 +389,13 @@ def _run_migrations(db: DatabaseManager):
 # FONCTIONS SPECIFIQUES NON MIGREES
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def get_suivi_stats(db: DatabaseManager) -> Dict:
+def get_suivi_stats(db: DatabaseManager, user_id: Optional[UUID] = None) -> Dict:
     """
     Statistiques globales des pages en base.
+
+    Args:
+        db: DatabaseManager
+        user_id: UUID de l'utilisateur (multi-tenancy). Si None, resultat vide.
 
     Returns:
         Dict avec:
@@ -399,20 +403,34 @@ def get_suivi_stats(db: DatabaseManager) -> Dict:
             - etats: Distribution par etat (XS, S, M, L, XL, XXL, inactif)
             - cms: Distribution par CMS (Shopify, WooCommerce, etc.)
     """
+    # Isolation stricte: si pas d'utilisateur, retourner un resultat vide
+    if user_id is None:
+        return {
+            "total_pages": 0,
+            "etats": {},
+            "cms": {},
+        }
+
     with db.get_session() as session:
         # Nombre total de pages
-        total_pages = session.query(func.count(PageRecherche.id)).scalar() or 0
+        total_pages = session.query(func.count(PageRecherche.id)).filter(
+            PageRecherche.user_id == user_id
+        ).scalar() or 0
 
         # Repartition par etat
         etats_query = session.query(
             PageRecherche.etat,
             func.count(PageRecherche.id)
+        ).filter(
+            PageRecherche.user_id == user_id
         ).group_by(PageRecherche.etat).all()
 
         # Repartition par CMS
         cms_query = session.query(
             PageRecherche.cms,
             func.count(PageRecherche.id)
+        ).filter(
+            PageRecherche.user_id == user_id
         ).group_by(PageRecherche.cms).all()
 
         return {

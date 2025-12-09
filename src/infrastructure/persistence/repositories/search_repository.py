@@ -394,6 +394,26 @@ def get_interrupted_searches(db) -> List:
         return interrupted
 
 
+def restart_search_queue(db, search_id: int) -> bool:
+    """
+    Relance une recherche interrompue specifique.
+
+    Args:
+        db: DatabaseManager
+        search_id: ID de la recherche a relancer
+
+    Returns:
+        True si la recherche a ete relancee, False sinon.
+    """
+    with db.get_session() as session:
+        search = session.query(SearchQueue).filter(SearchQueue.id == search_id).first()
+        if search and search.status in ("running", "failed"):
+            search.status = "pending"
+            search.updated_at = datetime.utcnow()
+            return True
+        return False
+
+
 def recover_interrupted_searches(db) -> int:
     """
     Recupere les recherches interrompues (status='running' mais worker arrete).
