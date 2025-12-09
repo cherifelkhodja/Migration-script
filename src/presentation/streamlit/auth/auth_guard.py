@@ -4,6 +4,12 @@ Guard d'authentification pour Streamlit.
 Fournit les fonctions pour verifier l'authentification
 et les permissions avant d'afficher une page.
 
+Persistance:
+------------
+La session est persistee via un cookie contenant un token JWT.
+Cela permet de garder l'utilisateur connecte apres un refresh
+ou lors de l'ouverture d'un nouvel onglet.
+
 Usage:
 ------
     # Verifier que l'utilisateur est connecte
@@ -22,8 +28,129 @@ Usage:
 import streamlit as st
 from typing import Optional, List
 from uuid import UUID
+import jwt
+import os
+from datetime import datetime, timedelta
 
 from src.domain.value_objects.role import Role, PAGE_PERMISSIONS
+
+# Configuration JWT
+JWT_SECRET = os.environ.get("JWT_SECRET", "change-me-in-production-streamlit-session")
+JWT_ALGORITHM = "HS256"
+COOKIE_NAME = "meta_ads_session"
+COOKIE_EXPIRY_DAYS = 7
+
+
+def _get_cookie_manager():
+    """Obtient le CookieManager (cache pour eviter les re-renders)."""
+    try:
+        import extra_streamlit_components as stx
+        return stx.CookieManager(key="auth_cookies")
+    except ImportError:
+        return None
+
+
+def _create_session_token(user: dict) -> str:
+    """Cree un token JWT pour la session."""
+    payload = {
+        "user_id": user["id"],
+        "username": user["username"],
+        "role": user["role"],
+        "is_admin": user.get("is_admin", False),
+        "exp": datetime.utcnow() + timedelta(days=COOKIE_EXPIRY_DAYS)
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def _verify_session_token(token: str) -> Optional[dict]:
+    """Verifie et decode un token JWT."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+
+
+def restore_session_from_cookie() -> bool:
+    """
+    Restaure la session depuis le cookie si disponible.
+
+    A appeler au debut de l'application.
+
+    Returns:
+        True si la session a ete restauree.
+    """
+    # Deja authentifie en session
+    if st.session_state.get("authenticated") and st.session_state.get("user"):
+        return True
+
+    cookie_manager = _get_cookie_manager()
+    if not cookie_manager:
+        return False
+
+    # Lire le cookie de session
+    token = cookie_manager.get(COOKIE_NAME)
+    if not token:
+        return False
+
+    # Verifier le token
+    payload = _verify_session_token(token)
+    if not payload:
+        # Token invalide ou expire, supprimer le cookie
+        cookie_manager.delete(COOKIE_NAME)
+        return False
+
+    # Restaurer la session depuis la base de donnees
+    try:
+        from src.presentation.streamlit.shared import get_database
+        from src.infrastructure.persistence.user_repository import get_user_by_id
+
+        db = get_database()
+        if db:
+            user = get_user_by_id(db, UUID(payload["user_id"]))
+            if user and user.is_active:
+                st.session_state.user = {
+                    "id": str(user.id),
+                    "username": user.username,
+                    "email": user.email,
+                    "role": str(user.role),
+                    "is_admin": user.is_admin,
+                    "display_name": user.display_name,
+                    "permissions": list(user.role.permissions),
+                }
+                st.session_state.authenticated = True
+                return True
+    except Exception:
+        pass
+
+    return False
+
+
+def save_session_to_cookie(user: dict) -> None:
+    """
+    Sauvegarde la session dans un cookie.
+
+    A appeler apres une authentification reussie.
+    """
+    cookie_manager = _get_cookie_manager()
+    if not cookie_manager:
+        return
+
+    token = _create_session_token(user)
+    cookie_manager.set(
+        COOKIE_NAME,
+        token,
+        expires_at=datetime.now() + timedelta(days=COOKIE_EXPIRY_DAYS)
+    )
+
+
+def clear_session_cookie() -> None:
+    """Supprime le cookie de session."""
+    cookie_manager = _get_cookie_manager()
+    if cookie_manager:
+        cookie_manager.delete(COOKIE_NAME)
 
 
 def is_authenticated() -> bool:
@@ -216,7 +343,7 @@ def logout() -> None:
     """
     Deconnecte l'utilisateur courant.
 
-    Nettoie la session et force un rerun.
+    Nettoie la session, supprime le cookie et force un rerun.
     """
     # Log la deconnexion si possible
     user = get_current_user()
@@ -236,6 +363,9 @@ def logout() -> None:
                 )
         except Exception:
             pass  # Ne pas bloquer la deconnexion
+
+    # Supprimer le cookie de session
+    clear_session_cookie()
 
     # Nettoyer la session
     st.session_state.user = None

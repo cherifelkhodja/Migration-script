@@ -24,6 +24,7 @@ from src.presentation.streamlit.shared import get_database
 from src.infrastructure.persistence.user_repository import (
     authenticate, ensure_admin_exists
 )
+from src.presentation.streamlit.auth.auth_guard import save_session_to_cookie
 
 
 def render_login_page() -> bool:
@@ -124,7 +125,7 @@ def render_login_page() -> bool:
 
                 if status == "success" and user:
                     # Stocker l'utilisateur en session
-                    st.session_state.user = {
+                    user_data = {
                         "id": str(user.id),
                         "username": user.username,
                         "email": user.email,
@@ -133,7 +134,12 @@ def render_login_page() -> bool:
                         "display_name": user.display_name,
                         "permissions": list(user.role.permissions),
                     }
+                    st.session_state.user = user_data
                     st.session_state.authenticated = True
+
+                    # Sauvegarder la session dans un cookie pour persistance
+                    if remember:
+                        save_session_to_cookie(user_data)
 
                     st.success(f"Bienvenue {user.display_name}!")
                     return True

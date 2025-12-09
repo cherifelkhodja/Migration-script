@@ -79,6 +79,7 @@ from src.presentation.streamlit.auth import (
     render_user_management,
 )
 from src.presentation.streamlit.auth.login_page import render_logout_button
+from src.presentation.streamlit.auth.auth_guard import restore_session_from_cookie
 
 # Infrastructure imports
 from src.infrastructure.config import (
@@ -951,6 +952,9 @@ def main():
     )
 
     init_session_state()
+
+    # Essayer de restaurer la session depuis le cookie (persistance)
+    restore_session_from_cookie()
 
     # Verifier l'authentification
     if not require_auth():

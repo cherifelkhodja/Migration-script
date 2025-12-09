@@ -46,6 +46,7 @@ google-generativeai>=0.8.0
 
 # Authentication
 bcrypt>=4.0.0
+extra-streamlit-components>=0.1.60  # Cookie manager for session persistence
 
 # REST API
 fastapi>=0.109.0
