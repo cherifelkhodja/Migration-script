@@ -219,12 +219,16 @@ def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
                     for p in fallback_pages
                 ]
 
-    # Afficher le tableau des pages
-    if pages_from_search:
-        new_pages = history_stats.get("new_pages", 0)
-        existing_pages = history_stats.get("existing_pages", 0)
-        with st.expander(f"📄 **Pages trouvees ({len(pages_from_search)})** — 🆕 {new_pages} nouvelles | 📝 {existing_pages} existantes", expanded=False):
+    # Afficher le tableau des pages (toujours visible)
+    new_pages = history_stats.get("new_pages", 0)
+    existing_pages = history_stats.get("existing_pages", 0)
+    pages_count = len(pages_from_search)
+
+    with st.expander(f"📄 **Pages ({pages_count})** — 🆕 {new_pages} nouvelles | 📝 {existing_pages} existantes", expanded=False):
+        if pages_from_search:
             _render_pages_table(pages_from_search, log_id)
+        else:
+            st.info("Aucune page trouvee dans l'historique pour cette recherche.")
 
     # ═══════════════════════════════════════════════════════════════════
     # TABLEAU DES ADS ET WINNING ADS
@@ -288,16 +292,17 @@ def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
                     for w in fallback_winning
                 ]
 
-    # Afficher le tableau combine des ads et winning ads
+    # Afficher le tableau combine des ads et winning ads (toujours visible)
     total_ads = len(ads_from_search)
     total_winning = len(winning_from_search)
+    new_winning = history_stats.get("new_winning_ads", 0)
+    existing_winning = history_stats.get("existing_winning_ads", 0)
 
-    if ads_from_search or winning_from_search:
-        new_winning = history_stats.get("new_winning_ads", 0)
-        existing_winning = history_stats.get("existing_winning_ads", 0)
-
-        with st.expander(f"📢 **Ads & Winning Ads ({total_ads} ads, {total_winning} winning)** — 🏆 {new_winning} nouvelles winning | 📝 {existing_winning} existantes", expanded=False):
+    with st.expander(f"📢 **Ads & Winning Ads ({total_ads} ads, {total_winning} winning)** — 🏆 {new_winning} nouvelles | 📝 {existing_winning} existantes", expanded=False):
+        if ads_from_search or winning_from_search:
             _render_combined_ads_table(ads_from_search, winning_from_search, log_id)
+        else:
+            st.info("Aucune ad trouvee dans l'historique pour cette recherche.")
 
 
 def _render_pages_table(pages_from_search: list, log_id: int):
