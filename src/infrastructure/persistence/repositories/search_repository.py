@@ -23,6 +23,7 @@ from src.infrastructure.persistence.models import (
     WinningAdSearchHistory,
     PageRecherche,
     WinningAds,
+    AdsRecherche,
 )
 
 
@@ -184,6 +185,9 @@ def get_search_logs(
                 "api_details": l.api_details,
                 "errors_list": l.errors_list,
                 "scraper_errors_by_type": l.scraper_errors_by_type,
+                # IDs for history display
+                "page_ids": json.loads(l.page_ids) if l.page_ids else [],
+                "winning_ad_ids": json.loads(l.winning_ad_ids) if l.winning_ad_ids else [],
             }
             for l in logs
         ]
@@ -452,9 +456,12 @@ def record_page_search_history(
     db,
     page_id: str,
     search_log_id: int,
-    user_id: Optional[UUID] = None
+    user_id: Optional[UUID] = None,
+    was_new: bool = True,
+    ads_count_at_discovery: int = 0,
+    keyword_matched: str = None
 ) -> bool:
-    """Enregistre l'historique de recherche d'une page."""
+    """Enregistre l'historique de recherche d'une page avec ses metadonnees."""
     with db.get_session() as session:
         query = session.query(PageSearchHistory).filter(
             PageSearchHistory.page_id == str(page_id),
@@ -469,6 +476,9 @@ def record_page_search_history(
                 page_id=str(page_id),
                 search_log_id=search_log_id,
                 found_at=datetime.utcnow(),
+                was_new=was_new,
+                ads_count_at_discovery=ads_count_at_discovery,
+                keyword_matched=keyword_matched,
             )
             session.add(history)
 
@@ -477,14 +487,40 @@ def record_page_search_history(
 
 def record_pages_search_history_batch(
     db,
-    page_ids: List[str],
+    pages_data: List[Dict],
     search_log_id: int,
     user_id: Optional[UUID] = None
 ) -> int:
-    """Enregistre l'historique pour plusieurs pages."""
+    """
+    Enregistre l'historique pour plusieurs pages avec leurs metadonnees.
+
+    Args:
+        db: Instance DatabaseManager
+        pages_data: Liste de dicts avec les cles:
+            - page_id (str): ID de la page
+            - was_new (bool): True si nouvelle page, False si existante
+            - ads_count (int): Nombre d'ads au moment de la decouverte
+            - keyword (str): Mot-cle qui a matche
+        search_log_id: ID du log de recherche
+        user_id: UUID de l'utilisateur (multi-tenancy)
+
+    Returns:
+        Nombre de pages enregistrees
+    """
     count = 0
-    for page_id in page_ids:
-        if record_page_search_history(db, page_id, search_log_id, user_id=user_id):
+    for data in pages_data:
+        page_id = data.get("page_id")
+        if not page_id:
+            continue
+        if record_page_search_history(
+            db,
+            page_id,
+            search_log_id,
+            user_id=user_id,
+            was_new=data.get("was_new", True),
+            ads_count_at_discovery=data.get("ads_count", 0),
+            keyword_matched=data.get("keyword")
+        ):
             count += 1
     return count
 
@@ -493,9 +529,13 @@ def record_winning_ad_search_history(
     db,
     ad_id: str,
     search_log_id: int,
-    user_id: Optional[UUID] = None
+    user_id: Optional[UUID] = None,
+    was_new: bool = True,
+    reach_at_discovery: int = 0,
+    age_days_at_discovery: int = 0,
+    matched_criteria: str = None
 ) -> bool:
-    """Enregistre l'historique de recherche d'une winning ad."""
+    """Enregistre l'historique de recherche d'une winning ad avec ses metadonnees."""
     with db.get_session() as session:
         query = session.query(WinningAdSearchHistory).filter(
             WinningAdSearchHistory.ad_id == str(ad_id),
@@ -510,6 +550,10 @@ def record_winning_ad_search_history(
                 ad_id=str(ad_id),
                 search_log_id=search_log_id,
                 found_at=datetime.utcnow(),
+                was_new=was_new,
+                reach_at_discovery=reach_at_discovery,
+                age_days_at_discovery=age_days_at_discovery,
+                matched_criteria=matched_criteria,
             )
             session.add(history)
 
@@ -518,14 +562,42 @@ def record_winning_ad_search_history(
 
 def record_winning_ads_search_history_batch(
     db,
-    ad_ids: List[str],
+    winning_ads_data: List[Dict],
     search_log_id: int,
     user_id: Optional[UUID] = None
 ) -> int:
-    """Enregistre l'historique pour plusieurs winning ads."""
+    """
+    Enregistre l'historique pour plusieurs winning ads avec leurs metadonnees.
+
+    Args:
+        db: Instance DatabaseManager
+        winning_ads_data: Liste de dicts avec les cles:
+            - ad_id (str): ID de l'annonce
+            - was_new (bool): True si nouvelle ad, False si existante
+            - reach (int): Reach au moment de la decouverte
+            - age_days (int): Age en jours au moment de la decouverte
+            - matched_criteria (str): Criteres qui ont matche
+        search_log_id: ID du log de recherche
+        user_id: UUID de l'utilisateur (multi-tenancy)
+
+    Returns:
+        Nombre de winning ads enregistrees
+    """
     count = 0
-    for ad_id in ad_ids:
-        if record_winning_ad_search_history(db, ad_id, search_log_id, user_id=user_id):
+    for data in winning_ads_data:
+        ad_id = data.get("ad_id")
+        if not ad_id:
+            continue
+        if record_winning_ad_search_history(
+            db,
+            ad_id,
+            search_log_id,
+            user_id=user_id,
+            was_new=data.get("was_new", True),
+            reach_at_discovery=data.get("reach", 0),
+            age_days_at_discovery=data.get("age_days", 0),
+            matched_criteria=data.get("matched_criteria")
+        ):
             count += 1
     return count
 
@@ -569,6 +641,54 @@ def get_search_history_stats(db, days: int = 30, user_id: Optional[UUID] = None)
             "completed_searches": completed,
             "unique_pages_found": total_pages,
             "unique_winning_ads": total_winning,
+        }
+
+
+def get_search_log_stats(db, search_log_id: int, user_id: Optional[UUID] = None) -> Dict:
+    """
+    Statistiques pour une recherche specifique.
+
+    Retourne le nombre de pages/ads nouvelles vs existantes
+    trouvees lors de cette recherche.
+
+    Args:
+        db: Instance DatabaseManager
+        search_log_id: ID du log de recherche
+        user_id: UUID de l'utilisateur (multi-tenancy)
+
+    Returns:
+        Dict avec new_pages, existing_pages, new_winning_ads, existing_winning_ads
+    """
+    with db.get_session() as session:
+        # Stats des pages
+        pages_query = session.query(PageSearchHistory).filter(
+            PageSearchHistory.search_log_id == search_log_id
+        )
+        if user_id is not None:
+            pages_query = pages_query.filter(PageSearchHistory.user_id == user_id)
+
+        pages = pages_query.all()
+        new_pages = sum(1 for p in pages if p.was_new)
+        existing_pages = sum(1 for p in pages if not p.was_new)
+
+        # Stats des winning ads
+        winning_query = session.query(WinningAdSearchHistory).filter(
+            WinningAdSearchHistory.search_log_id == search_log_id
+        )
+        if user_id is not None:
+            winning_query = winning_query.filter(WinningAdSearchHistory.user_id == user_id)
+
+        winning_ads = winning_query.all()
+        new_winning_ads = sum(1 for w in winning_ads if w.was_new)
+        existing_winning_ads = sum(1 for w in winning_ads if not w.was_new)
+
+        return {
+            "new_pages": new_pages,
+            "existing_pages": existing_pages,
+            "total_pages": new_pages + existing_pages,
+            "new_winning_ads": new_winning_ads,
+            "existing_winning_ads": existing_winning_ads,
+            "total_winning_ads": new_winning_ads + existing_winning_ads,
         }
 
 
@@ -813,6 +933,59 @@ def get_winning_ads_for_search(db, search_log_id: int, limit: int = 100, user_id
                 "was_new": a.was_new,
                 "reach_at_discovery": a.reach_at_discovery,
                 "age_days_at_discovery": a.age_days_at_discovery,
+            }
+            for a in results
+        ]
+
+
+def get_ads_for_search(db, search_log_id: int, limit: int = 100, user_id: Optional[UUID] = None) -> List[Dict]:
+    """
+    Recupere les ads trouvees lors d'une recherche specifique.
+
+    Les ads sont recuperees via les pages associees a la recherche
+    (pages enregistrees dans PageSearchHistory).
+
+    Args:
+        db: Instance DatabaseManager
+        search_log_id: ID du log de recherche
+        limit: Nombre maximum de resultats
+        user_id: UUID de l'utilisateur (multi-tenancy)
+
+    Returns:
+        Liste des ads avec leurs informations
+    """
+    # Isolation stricte
+    if user_id is None:
+        return []
+
+    with db.get_session() as session:
+        # D'abord, recuperer les page_ids de cette recherche
+        page_ids_query = session.query(PageSearchHistory.page_id).filter(
+            PageSearchHistory.search_log_id == search_log_id,
+            PageSearchHistory.user_id == user_id
+        ).subquery()
+
+        # Ensuite, recuperer les ads de ces pages
+        results = session.query(AdsRecherche).filter(
+            AdsRecherche.page_id.in_(page_ids_query),
+            AdsRecherche.user_id == user_id
+        ).limit(limit).all()
+
+        return [
+            {
+                "id": a.id,
+                "ad_id": a.ad_id,
+                "page_id": a.page_id,
+                "page_name": a.page_name,
+                "ad_creation_time": a.ad_creation_time,
+                "ad_creative_bodies": a.ad_creative_bodies,
+                "ad_creative_link_titles": a.ad_creative_link_titles,
+                "ad_snapshot_url": a.ad_snapshot_url,
+                "eu_total_reach": a.eu_total_reach,
+                "languages": a.languages,
+                "country": a.country,
+                "publisher_platforms": a.publisher_platforms,
+                "date_scan": a.date_scan,
             }
             for a in results
         ]

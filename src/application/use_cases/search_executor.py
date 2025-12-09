@@ -914,11 +914,9 @@ def execute_background_search(
                     "matched_criteria": data.get("matched_criteria", "")
                 })
 
-        # Enregistrer l'historique
-        page_ids_for_history = [d["page_id"] for d in pages_history_data]
-        pages_history_count = record_pages_search_history_batch(db, page_ids_for_history, log_id, user_id=user_id)
-        ad_ids_for_history = [d["ad_id"] for d in winning_history_data]
-        winning_history_count = record_winning_ads_search_history_batch(db, ad_ids_for_history, log_id, user_id=user_id)
+        # Enregistrer l'historique avec les metadonnees completes
+        pages_history_count = record_pages_search_history_batch(db, pages_history_data, log_id, user_id=user_id)
+        winning_history_count = record_winning_ads_search_history_batch(db, winning_history_data, log_id, user_id=user_id)
 
         new_pages_count = sum(1 for d in pages_history_data if d.get("was_new"))
         new_winning_count = sum(1 for d in winning_history_data if d.get("was_new"))
@@ -951,6 +949,11 @@ def execute_background_search(
 
     # Finaliser le log
     api_metrics = api_tracker.get_api_metrics_for_log()
+
+    # Collecter les IDs pour l'historique de recherche (JSON)
+    page_ids_list = [str(pid) for pid in pages_final.keys()]
+    winning_ad_ids_list = [str(data.get("ad", {}).get("id", "")) for data in winning_ads_data if data.get("ad", {}).get("id")]
+
     update_search_log(
         db, log_id,
         status="completed",
@@ -961,6 +964,8 @@ def execute_background_search(
         pages_saved=pages_saved,
         ads_saved=ads_saved,
         phases_data=tracker.get_phases_data(),
+        page_ids=json.dumps(page_ids_list),
+        winning_ad_ids=json.dumps(winning_ad_ids_list),
         **api_metrics
     )
 

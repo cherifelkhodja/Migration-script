@@ -66,6 +66,10 @@ class SearchLog(Base):
     errors_list = Column(Text)
     scraper_errors_by_type = Column(Text)
 
+    # JSON arrays of IDs found in this search (for history display)
+    page_ids = Column(Text)  # JSON array of page_ids
+    winning_ad_ids = Column(Text)  # JSON array of ad_ids
+
     __table_args__ = (
         Index('idx_search_log_user', 'user_id'),
         Index('idx_search_log_date', 'started_at'),
