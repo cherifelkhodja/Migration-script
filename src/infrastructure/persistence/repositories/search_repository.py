@@ -185,6 +185,9 @@ def get_search_logs(
                 "api_details": l.api_details,
                 "errors_list": l.errors_list,
                 "scraper_errors_by_type": l.scraper_errors_by_type,
+                # IDs for history display
+                "page_ids": json.loads(l.page_ids) if l.page_ids else [],
+                "winning_ad_ids": json.loads(l.winning_ad_ids) if l.winning_ad_ids else [],
             }
             for l in logs
         ]

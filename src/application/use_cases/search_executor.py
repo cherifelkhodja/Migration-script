@@ -949,6 +949,11 @@ def execute_background_search(
 
     # Finaliser le log
     api_metrics = api_tracker.get_api_metrics_for_log()
+
+    # Collecter les IDs pour l'historique de recherche (JSON)
+    page_ids_list = [str(pid) for pid in pages_final.keys()]
+    winning_ad_ids_list = [str(data.get("ad", {}).get("id", "")) for data in winning_ads_data if data.get("ad", {}).get("id")]
+
     update_search_log(
         db, log_id,
         status="completed",
@@ -959,6 +964,8 @@ def execute_background_search(
         pages_saved=pages_saved,
         ads_saved=ads_saved,
         phases_data=tracker.get_phases_data(),
+        page_ids=json.dumps(page_ids_list),
+        winning_ad_ids=json.dumps(winning_ad_ids_list),
         **api_metrics
     )
 

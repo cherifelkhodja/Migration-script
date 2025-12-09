@@ -140,8 +140,8 @@ def _render_single_log(db, log: dict, user_id=None):
         with m4:
             st.metric("Winning Ads", log.get("winning_ads_count", 0))
 
-        # Tableaux pages et winning ads
-        _render_pages_and_winning_ads(db, log_id, user_id=user_id)
+        # Tableaux pages et winning ads (utilise les IDs stockes en JSON dans le log)
+        _render_pages_and_winning_ads(db, log, user_id=user_id)
 
         # Parametres de recherche
         st.markdown("**Parametres:**")
@@ -176,170 +176,121 @@ def _render_single_log(db, log: dict, user_id=None):
                 st.rerun()
 
 
-def _render_pages_and_winning_ads(db, log_id: int, user_id=None):
-    """Affiche les tableaux des pages, ads et winning ads pour un log."""
-    from src.infrastructure.persistence.database import (
-        get_pages_for_search, get_winning_ads_for_search, get_ads_for_search,
-        get_search_log_stats, PageRecherche, WinningAds, AdsRecherche
-    )
-    from src.infrastructure.persistence.models import PageSearchHistory, WinningAdSearchHistory
+def _render_pages_and_winning_ads(db, log: dict, user_id=None):
+    """Affiche les tableaux des pages et winning ads pour un log.
 
-    # Recuperer les stats d'historique pour cette recherche specifique
-    history_stats = get_search_log_stats(db, log_id, user_id=user_id)
+    Utilise les page_ids et winning_ad_ids stockes en JSON dans le SearchLog.
+    """
+    from src.infrastructure.persistence.models import PageRecherche, WinningAds
+
+    log_id = log.get("id")
+
+    # Recuperer les IDs depuis le JSON stocke dans le log
+    page_ids = log.get("page_ids", [])
+    winning_ad_ids = log.get("winning_ad_ids", [])
 
     # ═══════════════════════════════════════════════════════════════════
     # TABLEAU DES PAGES
     # ═══════════════════════════════════════════════════════════════════
+    pages_from_search = []
 
-    # Methode principale: tables d'historique many-to-many
-    pages_from_search = get_pages_for_search(db, log_id, limit=100, user_id=user_id)
-
-    # FALLBACK 1: Si pas d'historique, utiliser last_search_log_id sur PageRecherche
-    if not pages_from_search:
+    if page_ids:
         with db.get_session() as session:
-            # Essayer d'abord avec user_id
             query = session.query(PageRecherche).filter(
-                PageRecherche.last_search_log_id == log_id
+                PageRecherche.page_id.in_(page_ids)
             )
             if user_id:
                 query = query.filter(PageRecherche.user_id == user_id)
-            fallback_pages = query.limit(100).all()
+            pages_results = query.all()
 
             # Si pas de resultats avec user_id, essayer sans
-            if not fallback_pages and user_id:
-                fallback_pages = session.query(PageRecherche).filter(
-                    PageRecherche.last_search_log_id == log_id
-                ).limit(100).all()
+            if not pages_results and user_id:
+                pages_results = session.query(PageRecherche).filter(
+                    PageRecherche.page_id.in_(page_ids)
+                ).all()
 
-            if fallback_pages:
-                pages_from_search = [
-                    {
-                        "page_id": p.page_id,
-                        "page_name": p.page_name,
-                        "lien_site": p.lien_site,
-                        "cms": p.cms,
-                        "etat": p.etat,
-                        "nombre_ads_active": p.nombre_ads_active,
-                        "thematique": p.thematique,
-                        "pays": p.pays,
-                        "was_new": getattr(p, 'was_created_in_last_search', None),
-                        "ads_count_at_discovery": p.nombre_ads_active,
-                        "keyword_matched": None
-                    }
-                    for p in fallback_pages
-                ]
+            pages_from_search = [
+                {
+                    "page_id": p.page_id,
+                    "page_name": p.page_name,
+                    "lien_site": p.lien_site,
+                    "cms": p.cms,
+                    "etat": p.etat,
+                    "nombre_ads_active": p.nombre_ads_active,
+                    "thematique": p.thematique,
+                    "pays": p.pays,
+                }
+                for p in pages_results
+            ]
 
-    # Afficher le tableau des pages (toujours visible)
-    new_pages = history_stats.get("new_pages", 0)
-    existing_pages = history_stats.get("existing_pages", 0)
+    # Afficher le tableau des pages
     pages_count = len(pages_from_search)
+    new_pages = log.get("new_pages_count", 0)
+    existing_pages = log.get("existing_pages_updated", 0)
 
     with st.expander(f"📄 **Pages ({pages_count})** — 🆕 {new_pages} nouvelles | 📝 {existing_pages} existantes", expanded=False):
         if pages_from_search:
             _render_pages_table(pages_from_search, log_id)
         else:
-            st.info("Aucune page trouvee dans l'historique pour cette recherche.")
+            if page_ids:
+                st.warning(f"Les {len(page_ids)} pages de cette recherche n'existent plus en base.")
+            else:
+                st.info("Aucune page enregistree pour cette recherche (recherche anterieure a la mise a jour).")
 
     # ═══════════════════════════════════════════════════════════════════
-    # TABLEAU DES ADS ET WINNING ADS
+    # TABLEAU DES WINNING ADS
     # ═══════════════════════════════════════════════════════════════════
+    winning_from_search = []
 
-    # Recuperer les ads via les pages de la recherche
-    ads_from_search = []
-    if pages_from_search:
-        # Utiliser les page_ids des pages trouvees pour recuperer les ads
-        page_ids = [p.get("page_id") for p in pages_from_search if p.get("page_id")]
-        if page_ids:
-            with db.get_session() as session:
-                # Essayer d'abord avec user_id
-                query = session.query(AdsRecherche).filter(
-                    AdsRecherche.page_id.in_(page_ids)
-                )
-                if user_id:
-                    query = query.filter(AdsRecherche.user_id == user_id)
-                ads_results = query.limit(100).all()
-
-                # Si pas de resultats avec user_id, essayer sans
-                if not ads_results and user_id:
-                    ads_results = session.query(AdsRecherche).filter(
-                        AdsRecherche.page_id.in_(page_ids)
-                    ).limit(100).all()
-
-                ads_from_search = [
-                    {
-                        "id": a.id,
-                        "ad_id": a.ad_id,
-                        "page_id": a.page_id,
-                        "page_name": a.page_name,
-                        "ad_creation_time": a.ad_creation_time,
-                        "ad_creative_bodies": a.ad_creative_bodies,
-                        "ad_creative_link_titles": a.ad_creative_link_titles,
-                        "ad_snapshot_url": a.ad_snapshot_url,
-                        "eu_total_reach": a.eu_total_reach,
-                        "languages": a.languages,
-                        "country": a.country,
-                        "publisher_platforms": a.publisher_platforms,
-                        "date_scan": a.date_scan,
-                    }
-                    for a in ads_results
-                ]
-
-    # Recuperer les winning ads - methode principale
-    winning_from_search = get_winning_ads_for_search(db, log_id, limit=100, user_id=user_id)
-
-    # FALLBACK: Si pas d'historique, utiliser search_log_id sur WinningAds
-    if not winning_from_search:
+    if winning_ad_ids:
         with db.get_session() as session:
-            # Essayer d'abord avec user_id
             query = session.query(WinningAds).filter(
-                WinningAds.search_log_id == log_id
+                WinningAds.ad_id.in_(winning_ad_ids)
             )
             if user_id:
                 query = query.filter(WinningAds.user_id == user_id)
-            fallback_winning = query.limit(100).all()
+            winning_results = query.all()
 
             # Si pas de resultats avec user_id, essayer sans
-            if not fallback_winning and user_id:
-                fallback_winning = session.query(WinningAds).filter(
-                    WinningAds.search_log_id == log_id
-                ).limit(100).all()
+            if not winning_results and user_id:
+                winning_results = session.query(WinningAds).filter(
+                    WinningAds.ad_id.in_(winning_ad_ids)
+                ).all()
 
-            if fallback_winning:
-                winning_from_search = [
-                    {
-                        "ad_id": w.ad_id,
-                        "page_id": w.page_id,
-                        "page_name": w.page_name,
-                        "lien_site": w.lien_site,
-                        "ad_age_days": w.ad_age_days,
-                        "eu_total_reach": w.eu_total_reach,
-                        "matched_criteria": w.matched_criteria,
-                        "ad_snapshot_url": w.ad_snapshot_url,
-                        "was_new": getattr(w, 'is_new', None),
-                        "reach_at_discovery": w.eu_total_reach,
-                        "age_days_at_discovery": w.ad_age_days
-                    }
-                    for w in fallback_winning
-                ]
+            winning_from_search = [
+                {
+                    "ad_id": w.ad_id,
+                    "page_id": w.page_id,
+                    "page_name": w.page_name,
+                    "lien_site": w.lien_site,
+                    "ad_age_days": w.ad_age_days,
+                    "eu_total_reach": w.eu_total_reach,
+                    "matched_criteria": w.matched_criteria,
+                    "ad_snapshot_url": w.ad_snapshot_url,
+                }
+                for w in winning_results
+            ]
 
-    # Afficher le tableau combine des ads et winning ads (toujours visible)
-    total_ads = len(ads_from_search)
+    # Afficher le tableau des winning ads
     total_winning = len(winning_from_search)
-    new_winning = history_stats.get("new_winning_ads", 0)
-    existing_winning = history_stats.get("existing_winning_ads", 0)
+    new_winning = log.get("new_winning_ads_count", 0)
+    existing_winning = log.get("existing_winning_ads_updated", 0)
 
-    with st.expander(f"📢 **Ads & Winning Ads ({total_ads} ads, {total_winning} winning)** — 🏆 {new_winning} nouvelles | 📝 {existing_winning} existantes", expanded=False):
-        if ads_from_search or winning_from_search:
-            _render_combined_ads_table(ads_from_search, winning_from_search, log_id)
+    with st.expander(f"🏆 **Winning Ads ({total_winning})** — 🆕 {new_winning} nouvelles | 📝 {existing_winning} existantes", expanded=False):
+        if winning_from_search:
+            _render_winning_table(winning_from_search, log_id)
         else:
-            st.info("Aucune ad trouvee dans l'historique pour cette recherche.")
+            if winning_ad_ids:
+                st.warning(f"Les {len(winning_ad_ids)} winning ads de cette recherche n'existent plus en base.")
+            else:
+                st.info("Aucune winning ad enregistree pour cette recherche.")
 
 
 def _render_pages_table(pages_from_search: list, log_id: int):
     """Affiche le tableau des pages pour un log."""
     # Selecteur de colonnes
-    all_page_columns = ["Status", "Page", "Site", "CMS", "Etat", "Ads", "Thematique", "Pays", "Keyword", "Ads (decouverte)"]
-    default_page_cols = ["Status", "Page", "Site", "CMS", "Etat", "Ads"]
+    all_page_columns = ["Page", "Site", "CMS", "Etat", "Ads", "Thematique", "Pays"]
+    default_page_cols = ["Page", "Site", "CMS", "Etat", "Ads"]
 
     selected_page_cols = st.multiselect(
         "Colonnes a afficher",
@@ -352,8 +303,6 @@ def _render_pages_table(pages_from_search: list, log_id: int):
     pages_df_data = []
     for p in pages_from_search:
         row = {}
-        if "Status" in selected_page_cols:
-            row["Status"] = "🆕 Nouveau" if p.get("was_new") else "📝 Existant"
         if "Page" in selected_page_cols:
             row["Page"] = (p.get("page_name") or "")[:30]
         if "Site" in selected_page_cols:
@@ -368,10 +317,6 @@ def _render_pages_table(pages_from_search: list, log_id: int):
             row["Thematique"] = (p.get("thematique") or "-")[:20]
         if "Pays" in selected_page_cols:
             row["Pays"] = (p.get("pays") or "-")[:15]
-        if "Keyword" in selected_page_cols:
-            row["Keyword"] = (p.get("keyword_matched") or "-")[:20]
-        if "Ads (decouverte)" in selected_page_cols:
-            row["Ads (decouverte)"] = p.get("ads_count_at_discovery", 0)
 
         if row:
             pages_df_data.append(row)
@@ -384,8 +329,8 @@ def _render_pages_table(pages_from_search: list, log_id: int):
 def _render_winning_table(winning_from_search: list, log_id: int):
     """Affiche le tableau des winning ads pour un log."""
     # Selecteur de colonnes
-    all_winning_columns = ["Status", "Page", "Age", "Reach", "Critere", "Site", "Snapshot", "Reach (decouverte)", "Age (decouverte)"]
-    default_winning_cols = ["Status", "Page", "Age", "Reach", "Critere", "Site"]
+    all_winning_columns = ["Page", "Age", "Reach", "Critere", "Site", "Snapshot"]
+    default_winning_cols = ["Page", "Age", "Reach", "Critere", "Site"]
 
     selected_winning_cols = st.multiselect(
         "Colonnes a afficher",
@@ -398,8 +343,6 @@ def _render_winning_table(winning_from_search: list, log_id: int):
     winning_df_data = []
     for a in winning_from_search:
         row = {}
-        if "Status" in selected_winning_cols:
-            row["Status"] = "🆕 Nouveau" if a.get("was_new") else "📝 Existant"
         if "Page" in selected_winning_cols:
             row["Page"] = (a.get("page_name") or "")[:25]
         if "Age" in selected_winning_cols:
@@ -414,11 +357,6 @@ def _render_winning_table(winning_from_search: list, log_id: int):
         if "Snapshot" in selected_winning_cols:
             snapshot_url = a.get("ad_snapshot_url", "")
             row["Snapshot"] = "🔗" if snapshot_url else "-"
-        if "Reach (decouverte)" in selected_winning_cols:
-            reach_d = a.get("reach_at_discovery", 0)
-            row["Reach (decouverte)"] = f"{reach_d:,}".replace(",", " ") if reach_d else "-"
-        if "Age (decouverte)" in selected_winning_cols:
-            row["Age (decouverte)"] = f"{a.get('age_days_at_discovery', '-')}j"
 
         if row:
             winning_df_data.append(row)
