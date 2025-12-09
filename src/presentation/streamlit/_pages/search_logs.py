@@ -196,7 +196,7 @@ def _render_pages_and_winning_ads(db, log: dict, user_id=None):
     pages_from_search = []
     fallback_page_ids = []
 
-    if page_ids:
+    if page_ids and len(page_ids) > 0:
         with db.get_session() as session:
             query = session.query(PageRecherche).filter(
                 PageRecherche.page_id.in_(page_ids)
@@ -224,8 +224,9 @@ def _render_pages_and_winning_ads(db, log: dict, user_id=None):
                 }
                 for p in pages_results
             ]
-    else:
-        # FALLBACK pour anciennes recherches: recuperer les page_ids via winning_ads.search_log_id
+
+    # FALLBACK si pas de resultats (anciennes recherches OU JSON vide)
+    if not pages_from_search:
         with db.get_session() as session:
             # D'abord recuperer les page_ids des winning ads de cette recherche
             query = session.query(WinningAds.page_id).filter(
@@ -233,7 +234,15 @@ def _render_pages_and_winning_ads(db, log: dict, user_id=None):
             ).distinct()
             if user_id:
                 query = query.filter(WinningAds.user_id == user_id)
-            fallback_page_ids = [r.page_id for r in query.all()]
+            fallback_results = query.all()
+
+            # Si pas de resultats avec user_id, essayer sans
+            if not fallback_results and user_id:
+                fallback_results = session.query(WinningAds.page_id).filter(
+                    WinningAds.search_log_id == log_id
+                ).distinct().all()
+
+            fallback_page_ids = [r.page_id for r in fallback_results]
 
             if fallback_page_ids:
                 # Recuperer les details des pages
@@ -283,7 +292,7 @@ def _render_pages_and_winning_ads(db, log: dict, user_id=None):
     # ═══════════════════════════════════════════════════════════════════
     winning_from_search = []
 
-    if winning_ad_ids:
+    if winning_ad_ids and len(winning_ad_ids) > 0:
         # Methode principale: utiliser les IDs JSON
         with db.get_session() as session:
             query = session.query(WinningAds).filter(
@@ -312,8 +321,9 @@ def _render_pages_and_winning_ads(db, log: dict, user_id=None):
                 }
                 for w in winning_results
             ]
-    else:
-        # FALLBACK pour anciennes recherches: utiliser search_log_id
+
+    # FALLBACK si pas de resultats (anciennes recherches OU JSON vide)
+    if not winning_from_search:
         with db.get_session() as session:
             query = session.query(WinningAds).filter(
                 WinningAds.search_log_id == log_id
