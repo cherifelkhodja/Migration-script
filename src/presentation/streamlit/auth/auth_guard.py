@@ -42,10 +42,14 @@ COOKIE_EXPIRY_DAYS = 7
 
 
 def _get_cookie_manager():
-    """Obtient le CookieManager (cache pour eviter les re-renders)."""
+    """Obtient le CookieManager (singleton via session_state)."""
     try:
         import extra_streamlit_components as stx
-        return stx.CookieManager(key="auth_cookies")
+
+        # Utiliser session_state pour eviter les clés dupliquées
+        if "cookie_manager" not in st.session_state:
+            st.session_state.cookie_manager = stx.CookieManager(key="auth_cookies")
+        return st.session_state.cookie_manager
     except ImportError:
         return None
 
